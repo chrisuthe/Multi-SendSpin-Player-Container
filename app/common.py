@@ -364,6 +364,14 @@ def register_routes(app, manager):
         else:
             return jsonify({"success": False, "error": message}), 404
 
+    @app.route("/api/players/<name>", methods=["GET"])
+    def get_player(name):
+        """API endpoint to get a single player's configuration"""
+        player_config = manager.config.get_player(name)
+        if player_config is None:
+            return jsonify({"success": False, "error": "Player not found"}), 404
+        return jsonify(player_config)
+
     @app.route("/api/players/<name>/start", methods=["POST"])
     def start_player(name):
         """API endpoint to start a player"""
