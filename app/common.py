@@ -416,6 +416,54 @@ def register_routes(app, manager):
             logger.error(f"Request data: {request.get_data().decode('utf-8', errors='replace')}")
             return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
 
+    @app.route("/api/players/<n>/offset", methods=["PUT"])
+    def update_player_offset(n):
+        """
+        API endpoint to update player sync offset (delay_ms).
+
+        The offset is saved to config but requires a player restart to apply.
+        Typical values are negative (-100 to -200ms) to compensate for audio latency.
+
+        Request body:
+            {"delay_ms": -150}
+
+        Returns:
+            {"success": true, "delay_ms": -150, "restart_required": true, "message": "..."}
+        """
+        try:
+            data = request.json
+            delay_ms = data.get("delay_ms", 0)
+
+            # Validate delay_ms is an integer
+            try:
+                delay_ms = int(delay_ms)
+            except (ValueError, TypeError):
+                return jsonify({"success": False, "message": "delay_ms must be an integer"}), 400
+
+            # Validate range
+            if delay_ms < -1000 or delay_ms > 1000:
+                return (
+                    jsonify({"success": False, "message": "delay_ms must be between -1000 and 1000"}),
+                    400,
+                )
+
+            # Update the config
+            success = manager.config.update_player_field(n, "delay_ms", delay_ms)
+            if not success:
+                return jsonify({"success": False, "message": "Player not found"}), 404
+
+            return jsonify(
+                {
+                    "success": True,
+                    "delay_ms": delay_ms,
+                    "restart_required": True,
+                    "message": f"Offset updated to {delay_ms}ms. Restart player to apply.",
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error in update_player_offset for {n}: {e}")
+            return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
+
     @app.route("/api/debug/audio", methods=["GET"])
     def debug_audio():
         """Debug endpoint to check audio device detection"""

@@ -249,6 +249,43 @@ class ConfigManager:
 
         self.players[name] = config
 
+    def update_player_field(
+        self,
+        name: str,
+        field: str,
+        value: Any,
+        save: bool = True,
+    ) -> bool:
+        """
+        Update a single field in a player's configuration.
+
+        Useful for updating individual settings (like delay_ms) without
+        replacing the entire configuration.
+
+        Args:
+            name: Name of the player to update.
+            field: Configuration field name to update.
+            value: New value for the field.
+            save: Whether to save to disk after updating (default True).
+
+        Returns:
+            True if update was successful, False if player not found.
+
+        Side Effects:
+            - Modifies self.players dictionary
+            - Saves to disk if save=True
+        """
+        if name not in self.players:
+            return False
+
+        self.players[name][field] = value
+        logger.debug(f"Updated {name}.{field} = {value}")
+
+        if save:
+            self.save()
+
+        return True
+
     def delete_player(self, name: str) -> bool:
         """
         Delete a player configuration.
