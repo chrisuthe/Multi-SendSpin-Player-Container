@@ -10,14 +10,8 @@ import logging
 import re
 import subprocess
 
-# Optional imports for PortAudio test tone support
-try:
-    import numpy as np
-    import sounddevice as sd
-
-    SOUNDDEVICE_AVAILABLE = True
-except ImportError:
-    SOUNDDEVICE_AVAILABLE = False
+# sounddevice/numpy are imported lazily in _play_test_tone_portaudio()
+# to avoid PortAudio C extension segfaults on Alpine Linux during module load
 
 logger = logging.getLogger(__name__)
 
@@ -414,8 +408,14 @@ class AudioManager:
         Returns:
             Tuple of (success: bool, message: str).
         """
-        if not SOUNDDEVICE_AVAILABLE:
+        # Lazy import to avoid PortAudio C extension segfaults on Alpine/HAOS during module load
+        try:
+            import numpy as np
+            import sounddevice as sd
+        except ImportError:
             return False, "PortAudio test requires sounddevice package (not installed)"
+        except Exception as e:
+            return False, f"Failed to initialize PortAudio: {e}"
 
         try:
             # Get device info to verify it exists and get sample rate

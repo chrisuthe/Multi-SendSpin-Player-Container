@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.6] - Fix PortAudio Segfault on HAOS
+
+### Fixed
+- **Segmentation fault on HAOS startup**: Made `sounddevice`/`numpy` imports lazy to avoid PortAudio C extension crash during module load
+- PortAudio initialization on Alpine Linux (HAOS) can segfault before Python exception handling catches it
+- Libraries are now only imported when `play_test_tone()` is actually called, not at app startup
+
+---
+
 ## [1.2.5] - Fix HAOS Startup Crash
 
 ### Fixed
