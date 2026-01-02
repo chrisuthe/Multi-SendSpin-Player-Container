@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.3] - Simplify Network Config
+
+### Changed
+- Removed direct port exposure from HAOS add-on; now uses ingress only
+- Access the add-on exclusively via the Home Assistant sidebar
+- Eliminates confusing "Network" port settings in add-on configuration
+
+---
+
 ## [1.2.2] - Startup Fix
 
 ### Fixed

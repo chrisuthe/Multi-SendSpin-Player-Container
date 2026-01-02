@@ -1,5 +1,5 @@
 name: Multi-Room Audio Controller
-version: "1.2.2"
+version: "1.2.3"
 slug: multiroom-audio
 description: >-
   Manage multiple audio players (Squeezelite, Sendspin, Snapcast) from one
@@ -27,13 +27,7 @@ map:
   - config:rw
   - share:rw
 
-# Web interface
-ports:
-  8080/tcp: 8080
-ports_description:
-  8080/tcp: Web interface
-
-# Ingress support (embed in HA sidebar)
+# Web interface via ingress only (no direct port exposure)
 ingress: true
 ingress_port: 8080
 panel_icon: mdi:speaker-multiple
