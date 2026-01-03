@@ -29,7 +29,7 @@ export FLASK_ENV="production"
 # Note: When audio: true is set in config.yaml, HAOS supervisor provides
 # PULSE_SERVER and other PulseAudio env vars automatically.
 # Only set defaults if not already provided by the supervisor.
-if [ -z "$PULSE_SERVER" ]; then
+if [ -z "${PULSE_SERVER:-}" ]; then
     # Fallback for non-HAOS environments or older HAOS versions
     export PULSE_SERVER="unix:/run/pulse/native"
 fi
