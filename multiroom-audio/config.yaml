@@ -1,5 +1,5 @@
 name: Multi-Room Audio Controller
-version: "1.2.25"
+version: "1.2.26"
 slug: multiroom-audio
 description: >-
   Manage multiple audio players (Squeezelite, Sendspin, Snapcast) from one
