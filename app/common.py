@@ -353,6 +353,7 @@ def register_routes(app, manager):
         """API endpoint to create a new player"""
         logger.info("POST /api/players - create_player endpoint called")
         import sys
+
         sys.stdout.flush()
         # Validate request.json is present and valid
         if request.json is None:
@@ -394,6 +395,7 @@ def register_routes(app, manager):
                 logger.info(f"POST /api/players - calling manager.create_player for {provider_type}")
                 logger.info(f"POST /api/players - extra_config: {extra_config}")
                 import sys
+
                 sys.stdout.flush()
                 sys.stderr.flush()
                 success, message = manager.create_player(
