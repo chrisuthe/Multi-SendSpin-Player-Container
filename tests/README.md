@@ -13,6 +13,7 @@ tests/
 ├── test_env_validation.py               # Environment validation tests
 ├── test_player_config_schema.py         # Pydantic schema validation tests
 ├── test_process_manager.py              # ProcessManager unit tests
+├── test_provider_registry.py            # ProviderRegistry unit tests
 ├── test_sendspin_provider.py            # Sendspin provider tests
 ├── test_snapcast_provider.py            # Snapcast provider tests
 ├── test_squeezelite_provider.py         # Squeezelite provider tests
