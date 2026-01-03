@@ -27,6 +27,7 @@ from environment import is_hassio
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit
 from flask_swagger_ui import get_swaggerui_blueprint
+from werkzeug.exceptions import HTTPException
 from schemas.player_config import INVALID_NAME_CHARS, MAX_NAME_LENGTH
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,12 @@ def create_flask_app():
                 response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
                 return response
 
+        # Handle favicon requests silently (browsers request this automatically)
+        @app.route("/favicon.ico")
+        def favicon():
+            """Return 204 No Content for favicon requests"""
+            return "", 204
+
         # Global error handler to return JSON for all 500 errors
         @app.errorhandler(500)
         def handle_internal_error(error):
@@ -121,9 +128,17 @@ def create_flask_app():
             logger.error(f"Internal server error: {error}")
             return jsonify({"success": False, "error": "Internal server error", "details": str(error)}), 500
 
+        @app.errorhandler(HTTPException)
+        def handle_http_exception(error):
+            """Handle HTTP exceptions (404, 405, etc.) and return JSON with correct status"""
+            # Don't log 404s for common missing resources
+            if error.code != 404:
+                logger.warning(f"HTTP {error.code}: {error.description}")
+            return jsonify({"success": False, "error": error.description}), error.code
+
         @app.errorhandler(Exception)
         def handle_exception(error):
-            """Catch-all exception handler to return JSON"""
+            """Catch-all exception handler for non-HTTP exceptions"""
             logger.error(f"Unhandled exception: {type(error).__name__}: {error}")
             return jsonify({"success": False, "error": str(error)}), 500
 
