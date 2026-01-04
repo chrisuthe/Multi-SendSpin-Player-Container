@@ -85,7 +85,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build and push to all registries
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
