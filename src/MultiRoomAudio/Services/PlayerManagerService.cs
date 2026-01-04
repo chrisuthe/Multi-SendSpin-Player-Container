@@ -744,6 +744,17 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             _ = BroadcastStatusAsync();
 
             _logger.LogInformation("Player '{Name}' connected to server", name);
+
+            // Push our configured volume to the server (overrides server's stored value)
+            try
+            {
+                await context.Client.SetVolumeAsync(context.Config.Volume);
+                _logger.LogDebug("Player '{Name}' pushed volume {Volume} to server", name, context.Config.Volume);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to push initial volume for player '{Name}'", name);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -813,17 +824,31 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // Handle volume changes from server (Music Assistant UI, etc.)
         context.Client.GroupStateChanged += (_, group) =>
         {
+            // Clamp volume to valid range
+            var serverVolume = Math.Clamp(group.Volume, 0, 100);
+
             // Update volume if changed
-            if (group.Volume != context.Config.Volume)
+            if (serverVolume != context.Config.Volume)
             {
                 _logger.LogDebug("Player '{Name}' volume changed by server: {OldVol} -> {NewVol}",
-                    name, context.Config.Volume, group.Volume);
+                    name, context.Config.Volume, serverVolume);
 
-                context.Config.Volume = group.Volume;
+                context.Config.Volume = serverVolume;
 
-                // Apply software volume (squared for perceived loudness)
-                var normalizedVolume = group.Volume / 100f;
-                context.Player.Volume = normalizedVolume * normalizedVolume;
+                // Only apply software volume if player is in a valid state
+                if (context.State == PlayerState.Connected || context.State == PlayerState.Playing || context.State == PlayerState.Buffering)
+                {
+                    try
+                    {
+                        // Apply software volume (squared for perceived loudness)
+                        var normalizedVolume = serverVolume / 100f;
+                        context.Player.Volume = normalizedVolume * normalizedVolume;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to apply volume change from server for player '{Name}'", name);
+                    }
+                }
 
                 // Broadcast to UI so slider updates
                 _ = BroadcastStatusAsync();
