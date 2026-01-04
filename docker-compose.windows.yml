@@ -4,33 +4,26 @@ version: '3.8'
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.windows.yml up
 
 services:
-  squeezelite-multiroom:
+  multiroom-audio:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
       args:
         - BUILDKIT_INLINE_CACHE=1
-    
+
     # Remove privileged mode and device mapping for Windows compatibility
     privileged: false
     devices: []
-    
+
     # Use bridge networking for better Windows compatibility
     network_mode: "bridge"
     ports:
       - "8096:8096"
-    
+
     # Windows-specific environment variables
     environment:
-      - SQUEEZELITE_WINDOWS_MODE=1
-      - SQUEEZELITE_NO_AUDIO_OK=1
-      - SQUEEZELITE_CONTAINER=1
-      - PYTHONUNBUFFERED=1
-      # Security: Uncomment and change these for production
-      # - SECRET_KEY=your-secure-random-key-here
-      # - SUPERVISOR_USER=admin
-      # - SUPERVISOR_PASSWORD=change-this-password
-    
+      - ASPNETCORE_ENVIRONMENT=Development
+
     # Override volumes for Windows paths
     volumes:
       # Use Windows-style volume mounts
@@ -40,16 +33,16 @@ services:
       - type: bind
         source: ./logs
         target: /app/logs
-    
+
     # Remove audio group since it doesn't exist on Windows
     user: "0"
     group_add: []
-    
+
     # Windows-specific labels
     labels:
       - "com.docker.compose.platform=windows"
-      - "com.squeezelite.mode=network-audio"
-    
+      - "com.multiroom-audio.mode=network-audio"
+
     # Health check that works on Windows
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8096/api/players"]
@@ -60,7 +53,7 @@ services:
 
 # Optional: Create named volumes for persistence
 volumes:
-  squeezelite_config:
+  multiroom_config:
     driver: local
-  squeezelite_logs:
+  multiroom_logs:
     driver: local

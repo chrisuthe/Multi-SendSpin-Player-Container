@@ -4,9 +4,11 @@ version: '3.8'
 # Usage: docker-compose -f docker-compose.no-audio.yml up
 
 services:
-  squeezelite-multiroom:
-    build: .
-    container_name: squeezelite-multiroom-no-audio
+  multiroom-audio:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: multiroom-audio-no-audio
     restart: unless-stopped
     ports:
       - "8096:8096"
@@ -16,17 +18,11 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
     environment:
-      - SQUEEZELITE_NO_AUDIO_OK=1
-      - SQUEEZELITE_WINDOWS_MODE=0
-      - SQUEEZELITE_CONTAINER=1
-      # Security: Uncomment and change these for production
-      # - SECRET_KEY=your-secure-random-key-here
-      # - SUPERVISOR_USER=admin
-      # - SUPERVISOR_PASSWORD=change-this-password
+      - ASPNETCORE_ENVIRONMENT=Development
     # Use bridge networking for better compatibility in no-audio environments
     # network_mode: bridge  # Uncomment if host networking causes issues
     privileged: false
-    
+
     # Health check
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8096/api/players"]
@@ -37,7 +33,7 @@ services:
 
 # Optional: Create named volumes for persistence
 volumes:
-  squeezelite_config:
+  multiroom_config:
     driver: local
-  squeezelite_logs:
+  multiroom_logs:
     driver: local

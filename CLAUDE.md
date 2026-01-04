@@ -2,371 +2,239 @@
 
 > This file provides context for Claude Code and other AI agents working on this project.
 
+## Project Overview
+
+**Multi-Room Audio Controller** - A C# ASP.NET Core 8.0 application for managing Sendspin audio players. Enables whole-home audio with USB DACs connected to a central server.
+
+### Purpose
+
+Transform a single Docker host with multiple USB audio devices into a multi-room audio system. Each audio zone gets its own player that streams from Music Assistant via the Sendspin protocol.
+
+### Key Users
+
+- Home automation enthusiasts with multi-room audio setups
+- Music Assistant users wanting additional audio endpoints
+- Docker/NAS users looking for centralized audio management
+
 ---
 
-## NextGen Refactoring (Active Development)
+## Reference Documentation
 
-**We are actively refactoring this project to a pure C# implementation.**
-
-See **[nextgen.md](nextgen.md)** for the complete implementation plan.
-
-### Key Changes
-- **Language:** Python/Flask → C# ASP.NET Core 8.0
-- **Scope:** Sendspin-only (dropping Squeezelite and Snapcast)
-- **Audio:** Native SendSpin.SDK + PortAudioSharp2 (no CLI subprocess)
-- **Deployment:** Unified Alpine Docker image for both HAOS and standalone
-
-### Reference Documentation
 - **Home Assistant Add-on Development:**
   - [Add-on Configuration](https://developers.home-assistant.io/docs/add-ons/configuration/) - config.yaml schema
   - [Add-on Communication](https://developers.home-assistant.io/docs/add-ons/communication/) - Ingress, supervisor
   - [Add-on Publishing](https://developers.home-assistant.io/docs/add-ons/publishing/) - Repository setup
 - **Reference Add-ons:**
   - [home-assistant/addons/vlc](https://github.com/home-assistant/addons/tree/master/vlc) - Official VLC add-on (audio player pattern)
-
-### Branch Strategy
-- **`main`** - Current Python implementation (stable)
-- **`nextgen`** - C# rewrite (active development)
-- **`C#-SDK-Based`** - SDK prototype (to be merged into nextgen)
+- **SDK Documentation:**
+  - SendSpin.SDK v2.0.0 - Sendspin protocol handling
+  - PortAudioSharp2 - Native audio output
 
 ---
 
-## Project Overview (Current - Python)
-
-**Multi-Room Audio Docker Controller** - A Flask-based web application for managing multiple audio players with support for different backends (Squeezelite, Sendspin, Snapcast). Enables whole-home audio with USB DACs connected to a central server.
-
-### Purpose
-
-Transform a single Docker host with multiple USB audio devices into a multi-room audio system. Each audio zone gets its own player process that streams from Music Assistant, Logitech Media Server, or Snapcast Server.
-
-### Key Users
-
-- Home automation enthusiasts with multi-room audio setups
-- Music Assistant and LMS users wanting additional audio endpoints
-- Docker/NAS users looking for centralized audio management
-
-## Architecture Quick Reference
+## Architecture
 
 ```
-Flask App (app.py)
-    |
-    +-- PlayerManager (orchestration)
-    |       |
-    |       +-- ConfigManager      -> /app/config/players.yaml
-    |       +-- AudioManager       -> ALSA/PulseAudio devices
-    |       +-- ProcessManager     -> Subprocess lifecycle
-    |       +-- ProviderRegistry   -> Provider lookup
-    |               |
-    |               +-- SqueezeliteProvider
-    |               +-- SendspinProvider
-    |               +-- SnapcastProvider
-    |
-    +-- WebSocket (status updates every 2s)
-    +-- REST API (/api/*)
-    +-- Web UI (templates/index.html)
+ASP.NET Core 8.0 Application
+├── Controllers/                  # REST API endpoints
+│   ├── PlayersEndpoint.cs       # /api/players CRUD
+│   ├── DevicesEndpoint.cs       # /api/devices
+│   ├── ProvidersEndpoint.cs     # /api/providers
+│   └── HealthEndpoint.cs        # /api/health
+├── Services/
+│   ├── PlayerManagerService.cs   # SDK player lifecycle
+│   ├── ConfigurationService.cs   # YAML persistence
+│   └── EnvironmentService.cs     # Docker vs HAOS detection
+├── Audio/                        # PortAudio SDK integration
+│   ├── PortAudioPlayer.cs       # IAudioPlayer implementation
+│   └── PortAudioDeviceEnumerator.cs
+├── Utilities/
+│   ├── ClientIdGenerator.cs     # MD5-based IDs
+│   └── AlsaCommandRunner.cs     # Volume control
+├── Models/                       # Request/Response types
+├── wwwroot/                      # Static web UI
+└── Program.cs                    # Entry point
 ```
 
 ### Key Files to Understand First
 
-1. `app/app.py` - Application entry point, PlayerManager class
-2. `app/common.py` - All Flask routes, WebSocket handlers
-3. `app/providers/base.py` - Provider abstraction interface
-4. `app/managers/config_manager.py` - Configuration persistence
-5. `app/environment.py` - Docker vs HAOS detection
+1. `src/MultiRoomAudio/Program.cs` - Entry point, DI setup
+2. `src/MultiRoomAudio/Services/PlayerManagerService.cs` - Core player management
+3. `src/MultiRoomAudio/Services/ConfigurationService.cs` - YAML config persistence
+4. `src/MultiRoomAudio/Services/EnvironmentService.cs` - HAOS vs Docker detection
+
+---
 
 ## Development Commands
 
 ```bash
-# Run tests
-pytest tests/ -v
+# Restore dependencies
+dotnet restore src/MultiRoomAudio/MultiRoomAudio.csproj
 
-# Run tests with coverage
-pytest tests/ --cov=app --cov-report=html
+# Build project
+dotnet build src/MultiRoomAudio/MultiRoomAudio.csproj
 
-# Lint code
-ruff check .
-
-# Auto-fix lint issues
-ruff check --fix .
-
-# Format code
-ruff format .
+# Run locally (Windows/macOS - audio won't work)
+dotnet run --project src/MultiRoomAudio/MultiRoomAudio.csproj
 
 # Build Docker image
-docker build -t squeezelite-multiroom .
+docker build -f docker/Dockerfile -t multiroom-audio .
 
-# Run with no audio (development)
-docker-compose -f docker-compose.no-audio.yml up --build
+# Run with Docker (Linux with audio)
+docker run -d --name multiroom \
+  -p 8096:8096 \
+  --device /dev/snd \
+  -v $(pwd)/config:/app/config \
+  multiroom-audio
 
-# Run with audio (Linux)
-docker-compose up --build
-
-# Build HAOS add-on locally
-cd multiroom-audio
-docker build --build-arg BUILD_FROM=ghcr.io/hassio-addons/base-python:18.0.0 -t multiroom-addon .
+# Build for HAOS
+docker build -f docker/Dockerfile \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/chrisuthe/multiroom-audio-hassio .
 ```
 
-## Release Process (HAOS Add-on)
-
-**Important:** Do NOT manually edit `multiroom-audio/config.yaml` version. The CI workflow handles this automatically.
-
-### Steps to Release a New Version
-
-1. **Make code changes** - commit to `main` as usual
-2. **Update CHANGELOG** - add entry in `multiroom-audio/CHANGELOG.md` for the new version
-3. **Create and push a tag:**
-   ```bash
-   git tag -a v1.2.7 -m "v1.2.7 - Brief description"
-   git push --tags
-   ```
-4. **Wait for CI** - GitHub Actions will:
-   - Build the Docker image for HAOS
-   - Push to `ghcr.io/chrisuthe/multiroom-audio-hassio`
-   - Auto-update `config.yaml` version after successful build
-5. **Verify** - HAOS users will see the update only after the image is ready
-
-### Why This Workflow?
-
-HAOS checks `config.yaml` for version updates. If we bump the version before the Docker image is built, users see "Update available" but the download fails. The automated workflow ensures users only see updates after the image exists.
-
-### Manual Override (Emergency Only)
-
-If you need to manually set the version:
-```bash
-# Only do this if CI is broken and you've manually pushed the image
-sed -i 's/^version: ".*"/version: "1.2.7"/' multiroom-audio/config.yaml
-```
+---
 
 ## Code Style Guidelines
 
-### Python
+### C#
 
-- **Linter/Formatter**: Ruff (configured in pyproject.toml)
-- **Type hints**: Use for all function signatures
-- **Docstrings**: Google style, required for public methods
-- **Line length**: 120 characters max
-- **Imports**: Grouped (stdlib, third-party, local), sorted alphabetically
+- **Target Framework**: .NET 8.0
+- **Style**: Follow Microsoft C# conventions
+- **Nullable**: Enabled project-wide
+- **Documentation**: XML doc comments for public APIs
 
-```python
-# Example function style
-def create_player(
-    self,
-    name: str,
-    device: str,
-    provider_type: str = "squeezelite",
-    **extra_config: Any,
-) -> tuple[bool, str]:
-    """
-    Create a new audio player.
-
-    Args:
-        name: Unique name for the player (used as identifier).
-        device: Audio device ID (e.g., 'hw:0,0', 'null', 'default').
-        provider_type: Provider type ('squeezelite', 'sendspin', 'snapcast').
-        **extra_config: Additional provider-specific configuration.
-
-    Returns:
-        Tuple of (success: bool, message: str).
-    """
+```csharp
+/// <summary>
+/// Creates and starts a new audio player.
+/// </summary>
+/// <param name="request">Player configuration request.</param>
+/// <param name="ct">Cancellation token.</param>
+/// <returns>The created player response.</returns>
+public async Task<PlayerResponse> CreatePlayerAsync(
+    PlayerCreateRequest request,
+    CancellationToken ct = default)
+{
+    // Implementation
+}
 ```
 
 ### JavaScript
 
 - Vanilla JS only (no frameworks)
 - ES6+ features (const/let, arrow functions, template literals)
-- Use `textContent` instead of `innerHTML` for security
+- Use `textContent` instead of `innerHTML` for XSS prevention
 
 ### API Responses
 
-```python
-# Success response format
-{"success": True, "message": "...", "data": {...}}
+```csharp
+// Success response
+new { success = true, message = "...", data = ... }
 
-# Error response format
-{"success": False, "error": "..."}
+// Error response
+new ErrorResponse(false, "Error message")
 ```
 
-## Important Patterns
-
-### Provider Pattern
-
-All player backends implement `PlayerProvider` base class:
-
-```python
-class NewProvider(PlayerProvider):
-    provider_type = "newprovider"
-    display_name = "New Provider"
-    binary_name = "provider-binary"
-
-    def build_command(self, player, log_path) -> list[str]:
-        # Return command to start player process
-        pass
-
-    def validate_config(self, config) -> tuple[bool, str]:
-        # Validate provider-specific configuration
-        pass
-```
-
-### Environment Detection
-
-```python
-from environment import is_hassio, get_audio_backend
-
-if is_hassio():
-    # HAOS-specific behavior (PulseAudio)
-else:
-    # Standalone Docker behavior (ALSA)
-```
-
-### Configuration Validation
-
-Use Pydantic schemas in `app/schemas/player_config.py` for type-safe validation.
+---
 
 ## Things to Avoid
 
 1. **DO NOT** add external JavaScript frameworks - project uses vanilla JS only
-2. **DO NOT** modify volume control to use provider-specific protocols - ALSA/amixer is intentionally used for consistency
-3. **DO NOT** remove fallback support from Squeezelite provider - users rely on null device fallback
-4. **DO NOT** change the default port from 8096 without updating all Docker configs
-5. **DO NOT** use `yaml.load()` - always use `yaml.safe_load()` for security
-6. **DO NOT** use shell=True in subprocess calls - use list-based commands
-7. **DO NOT** commit hardcoded secrets - use environment variables
-8. **DO NOT** manually edit `multiroom-audio/config.yaml` version - CI auto-updates it after successful builds (see Release Process)
+2. **DO NOT** change the default port from 8096 without updating all configs
+3. **DO NOT** commit hardcoded secrets - use environment variables
+4. **DO NOT** manually edit `multiroom-audio/config.yaml` version - CI auto-updates it
+5. **DO NOT** enable trimming in publish - SendSpin.SDK uses reflection
 
-## Testing Guidelines
-
-### Test File Naming
-
-- `tests/test_<module_name>.py`
-- Test functions: `test_<method_name>_<scenario>`
-
-### Running Specific Tests
-
-```bash
-# Single test file
-pytest tests/test_squeezelite_provider.py -v
-
-# Single test function
-pytest tests/test_api_endpoints.py::test_create_player_success -v
-
-# Tests matching pattern
-pytest tests/ -k "volume" -v
-```
-
-### Mock Patterns
-
-```python
-# Mock subprocess for ALSA commands
-@patch("subprocess.run")
-def test_volume_control(mock_run):
-    mock_run.return_value = MagicMock(stdout="[75%]", returncode=0)
-    ...
-```
-
-## Common Development Tasks
-
-### Adding a New Provider
-
-1. Create `app/providers/newplayer.py` implementing `PlayerProvider`
-2. Register in `app/providers/__init__.py` exports
-3. Register in `app/app.py` provider registry
-4. Add Pydantic schema in `app/schemas/player_config.py`
-5. Update `app/health_check.py` to check for the binary
-6. Update Dockerfiles to install the binary
-7. Add tests in `tests/test_newplayer_provider.py`
-
-### Adding a New API Endpoint
-
-1. Add route in `app/common.py` in `register_routes()`
-2. Update `app/swagger.yaml` with OpenAPI spec
-3. Add tests in `tests/test_api_endpoints.py`
-
-### Modifying Player Configuration Schema
-
-1. Update Pydantic model in `app/schemas/player_config.py`
-2. Update provider's `validate_config()` and `prepare_config()`
-3. Update `docs/ARCHITECTURE.md` if schema changes are significant
+---
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SQUEEZELITE_BUFFER_TIME` | `80` | ALSA buffer time (ms) |
-| `SQUEEZELITE_BUFFER_PARAMS` | `500:2000` | Stream:output buffers (KB) |
-| `SQUEEZELITE_WINDOWS_MODE` | `0` | Windows compatibility mode |
-| `SECRET_KEY` | Auto-generated | Flask session security |
-| `WEB_PORT` | `8096` | Web server port (0 for auto-assign) |
+| `WEB_PORT` | `8096` | Web server port |
+| `LOG_LEVEL` | `info` | Logging level (debug, info, warning, error) |
 | `AUDIO_BACKEND` | Auto-detected | `alsa` or `pulse` |
-| `CONFIG_PATH` | `/app/config` | Configuration directory |
-| `LOG_PATH` | `/app/logs` | Log directory |
+| `CONFIG_PATH` | `/app/config` | Configuration directory (Docker mode) |
+| `LOG_PATH` | `/app/logs` | Log directory (Docker mode) |
+| `SUPERVISOR_TOKEN` | (HAOS only) | Auto-set by Home Assistant supervisor |
 
-See `ENVIRONMENT_VARIABLES.md` for complete documentation.
+---
 
-## Project Structure Overview
+## Project Structure
 
 ```
 squeezelite-docker/
-├── app/                      # Main application
-│   ├── app.py               # Entry point, PlayerManager
-│   ├── common.py            # Routes, WebSocket, shared code
-│   ├── environment.py       # Docker/HAOS detection
-│   ├── health_check.py      # Container health verification
-│   ├── managers/            # Business logic components
-│   │   ├── audio_manager.py    # Device/volume control
-│   │   ├── config_manager.py   # YAML persistence
-│   │   └── process_manager.py  # Subprocess lifecycle
-│   ├── providers/           # Player backend implementations
-│   │   ├── base.py             # Abstract interface
-│   │   ├── squeezelite.py      # Squeezelite provider
-│   │   ├── sendspin.py         # Sendspin provider
-│   │   └── snapcast.py         # Snapcast provider
-│   ├── schemas/             # Pydantic validation
-│   ├── templates/           # Jinja2 HTML templates
-│   └── static/              # CSS/JS assets
-├── multiroom-audio/         # Home Assistant OS add-on
-│   ├── config.yaml          # Add-on metadata
-│   ├── Dockerfile           # Alpine-based build
-│   └── run.sh               # Startup script (bashio)
-├── tests/                   # Pytest test suite
-├── Dockerfile               # Production container (Debian)
-├── Dockerfile.slim          # Slim variant (Sendspin only)
-├── docker-compose.yml       # Main compose config
-└── docker-compose.no-audio.yml  # Development without audio
+├── src/
+│   └── MultiRoomAudio/          # Main C# application
+│       ├── Audio/               # PortAudio integration
+│       ├── Controllers/         # REST API endpoints
+│       ├── Models/              # Data models
+│       ├── Services/            # Business logic
+│       ├── Utilities/           # Helpers
+│       ├── wwwroot/             # Static web UI
+│       ├── Program.cs           # Entry point
+│       └── MultiRoomAudio.csproj
+├── docker/
+│   └── Dockerfile               # Unified Alpine image
+├── multiroom-audio/             # HAOS add-on metadata
+│   ├── config.yaml              # Add-on config
+│   ├── CHANGELOG.md
+│   └── DOCS.md
+├── nextgen.md                   # Implementation plan
+├── CLAUDE.md                    # This file
+└── squeezelite-docker.sln       # Solution file
 ```
 
-## Useful Context
+---
 
-### Audio Device Formats
+## NuGet Packages
 
-- **ALSA**: `hw:0,0`, `hw:1,3`, `plughw:0,0`
-- **Virtual**: `null`, `pulse`, `dmix`, `default`
-- **PortAudio**: Numeric index (`0`, `1`, `2`) for Sendspin
+```xml
+<PackageReference Include="SendSpin.SDK" Version="2.0.0" />
+<PackageReference Include="PortAudioSharp2" Version="1.0.2" />
+<PackageReference Include="YamlDotNet" Version="16.2.1" />
+<PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.1.0" />
+<PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+```
 
-### Player Identification
+---
 
-- **Squeezelite**: Uses MAC address (auto-generated from player name hash)
-- **Snapcast**: Uses host ID (auto-generated from player name hash)
-- **Sendspin**: Uses player name directly
+## API Endpoints
 
-### Status Updates
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/players` | List all players |
+| POST | `/api/players` | Create new player |
+| GET | `/api/players/{name}` | Get player details |
+| DELETE | `/api/players/{name}` | Delete player |
+| POST | `/api/players/{name}/stop` | Stop player |
+| POST | `/api/players/{name}/restart` | Restart player |
+| PUT | `/api/players/{name}/volume` | Set volume |
+| PUT | `/api/players/{name}/offset` | Set delay offset |
+| GET | `/api/devices` | List audio devices |
+| GET | `/api/providers` | List available providers |
+| GET | `/api/health` | Health check |
 
-WebSocket emits `status_update` event every 2 seconds with player running states.
+---
 
-## AI-Specific Notes
+## HAOS vs Docker Detection
 
-This project was developed with AI assistance. When making changes:
+The `EnvironmentService` automatically detects the runtime environment:
 
-1. **Maintain consistency** with existing patterns
-2. **Preserve backward compatibility** for existing configurations
-3. **Update documentation** when changing behavior
-4. **Add tests** for new functionality
-5. **Consider both Docker and HAOS environments**
+- **HAOS Mode**: Detected via `/data/options.json` or `SUPERVISOR_TOKEN`
+  - Config path: `/data`
+  - Log path: `/share/multiroom-audio/logs`
+  - Audio backend: PulseAudio
+
+- **Docker Mode**: Default fallback
+  - Config path: `/app/config` (or `CONFIG_PATH` env)
+  - Log path: `/app/logs` (or `LOG_PATH` env)
+  - Audio backend: ALSA
+
+---
 
 ## Quick Links
 
-- **[NextGen Implementation Plan](nextgen.md)** - C# rewrite roadmap
-- [Architecture Documentation](docs/ARCHITECTURE.md)
-- [Contributing Guide](CONTRIBUTING.md)
-- [Environment Variables](ENVIRONMENT_VARIABLES.md)
-- [API Documentation](http://localhost:8096/api/docs) (when running)
+- [Implementation Plan](nextgen.md) - Original development roadmap
 - [Home Assistant Add-on Docs](https://developers.home-assistant.io/docs/add-ons/configuration/)
+- [API Documentation](http://localhost:8096/docs) (when running)

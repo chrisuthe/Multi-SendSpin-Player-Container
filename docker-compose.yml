@@ -1,9 +1,11 @@
 version: '3.8'
 
 services:
-  squeezelite-multiroom:
-    build: .
-    container_name: squeezelite-multiroom
+  multiroom-audio:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: multiroom-audio
     restart: unless-stopped
     ports:
       - "8096:8096"
@@ -17,15 +19,9 @@ services:
       - ./logs:/app/logs
       # Pass through ALSA configuration (optional)
       - /usr/share/alsa:/usr/share/alsa:ro
-      # Note: /etc/asound.conf might not exist, so we make it optional
     environment:
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
       - DISPLAY=${DISPLAY}
-      - SQUEEZELITE_NO_AUDIO_OK=1
-      # Security: Uncomment and change these for production
-      # - SECRET_KEY=your-secure-random-key-here
-      # - SUPERVISOR_USER=admin
-      # - SUPERVISOR_PASSWORD=change-this-password
     network_mode: host
     privileged: false
     cap_add:
@@ -33,7 +29,7 @@ services:
     group_add:
       - audio
     user: "0:29"  # root user, audio group
-    
+
     # Health check
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8096/api/players"]
@@ -44,7 +40,7 @@ services:
 
 # Optional: Create named volumes for persistence
 volumes:
-  squeezelite_config:
+  multiroom_config:
     driver: local
-  squeezelite_logs:
+  multiroom_logs:
     driver: local

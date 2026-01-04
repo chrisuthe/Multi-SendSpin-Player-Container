@@ -4,27 +4,18 @@ version: '3.8'
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 
 services:
-  squeezelite-multiroom:
+  multiroom-audio:
     build:
       context: .
-      target: development  # If we had multi-stage builds
+      dockerfile: docker/Dockerfile
     volumes:
-      # Mount source code for live development
-      - ./app:/app/app:ro
-      - ./app/templates:/app/templates:ro
-      - ./app/static:/app/static:ro
+      # Mount source code for live development (requires rebuild for C# changes)
+      - ./config:/app/config
+      - ./logs:/app/logs
     environment:
-      - FLASK_ENV=development
-      - FLASK_DEBUG=1
-      - PYTHONUNBUFFERED=1
-      # Security: Uncomment and change these for production
-      # - SECRET_KEY=your-secure-random-key-here
-      # - SUPERVISOR_USER=admin
-      # - SUPERVISOR_PASSWORD=change-this-password
+      - ASPNETCORE_ENVIRONMENT=Development
     ports:
       - "8096:8096"
-      - "5678:5678"  # For debugger
-    command: python3 /app/app.py
     # Override healthcheck for development
     healthcheck:
       interval: 10s

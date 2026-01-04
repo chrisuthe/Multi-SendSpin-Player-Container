@@ -1,9 +1,9 @@
 name: Multi-Room Audio Controller
-version: "1.2.26"
+version: "2.0.0"
 slug: multiroom-audio
 description: >-
-  Manage multiple audio players (Squeezelite, Sendspin, Snapcast) from one
-  interface. Create whole-home audio with USB DACs connected to your HA server.
+  Sendspin-powered multi-room audio controller. Stream audio from Music
+  Assistant to USB DACs connected to your Home Assistant server.
 url: https://github.com/chrisuthe/Multi-SendSpin-Player-Container
 image: ghcr.io/chrisuthe/multiroom-audio-hassio
 startup: services

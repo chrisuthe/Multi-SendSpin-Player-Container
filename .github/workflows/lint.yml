@@ -1,4 +1,4 @@
-name: Lint
+name: Lint and Build
 
 on:
   push:
@@ -7,23 +7,23 @@ on:
     branches: [main]
 
 jobs:
-  lint:
+  build-and-lint:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up .NET 8.0
+        uses: actions/setup-dotnet@v4
         with:
-          python-version: "3.10"
+          dotnet-version: '8.0.x'
 
-      - name: Install Ruff
-        run: pip install ruff
+      - name: Restore dependencies
+        run: dotnet restore src/MultiRoomAudio/MultiRoomAudio.csproj
 
-      - name: Run Ruff linter
-        run: ruff check app/
+      - name: Build
+        run: dotnet build src/MultiRoomAudio/MultiRoomAudio.csproj --no-restore -c Release
 
-      - name: Run Ruff formatter check
-        run: ruff format --check app/
+      - name: Check formatting
+        run: dotnet format src/MultiRoomAudio/MultiRoomAudio.csproj --verify-no-changes --verbosity diagnostic

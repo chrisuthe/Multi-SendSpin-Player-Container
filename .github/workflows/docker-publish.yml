@@ -15,46 +15,34 @@ env:
 
 jobs:
   # ==========================================================================
-  # Type Checking with mypy
+  # Build and Test .NET Application
   # ==========================================================================
-  type-check:
+  build-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Set up .NET 8.0
+        uses: actions/setup-dotnet@v4
         with:
-          python-version: '3.12'
+          dotnet-version: '8.0.x'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install mypy
-          pip install -r requirements.txt
+      - name: Restore dependencies
+        run: dotnet restore src/MultiRoomAudio/MultiRoomAudio.csproj
 
-      - name: Run mypy type checking
-        run: mypy
+      - name: Build
+        run: dotnet build src/MultiRoomAudio/MultiRoomAudio.csproj --no-restore -c Release
 
   # ==========================================================================
   # Main Docker Image (Docker Hub + GHCR)
   # ==========================================================================
   build-main:
-    needs: type-check
+    needs: build-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        include:
-          - dockerfile: Dockerfile
-            suffix: ""
-            flavor_latest: "true"
-          - dockerfile: Dockerfile.slim
-            suffix: "-slim"
-            flavor_latest: "false"
 
     steps:
       - name: Checkout repository
@@ -87,8 +75,7 @@ jobs:
             ${{ env.DOCKERHUB_IMAGE }}
             ${{ env.GHCR_IMAGE }}
           flavor: |
-            latest=${{ matrix.flavor_latest }}
-            suffix=${{ matrix.suffix }}
+            latest=true
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
@@ -100,22 +87,22 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.dockerfile }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
+          cache-from: type=gha,scope=main
+          cache-to: type=gha,mode=max,scope=main
           build-args: |
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
 
   # ==========================================================================
-  # Home Assistant Add-on Image (GHCR only) - Multi-arch manifest
+  # Home Assistant Add-on Image (GHCR only) - Same image, different tags
   # ==========================================================================
   build-hassio:
-    needs: type-check
+    needs: build-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -152,7 +139,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: multiroom-audio/Dockerfile
+          file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -160,7 +147,6 @@ jobs:
           cache-from: type=gha,scope=hassio
           cache-to: type=gha,mode=max,scope=hassio
           build-args: |
-            BUILD_FROM=ghcr.io/hassio-addons/base-python:18.0.0
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
 
