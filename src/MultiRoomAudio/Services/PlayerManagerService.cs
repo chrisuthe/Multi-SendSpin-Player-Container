@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.SignalR;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Client;
 using Sendspin.SDK.Connection;
@@ -6,6 +8,7 @@ using Sendspin.SDK.Discovery;
 using Sendspin.SDK.Models;
 using Sendspin.SDK.Synchronization;
 using MultiRoomAudio.Audio;
+using MultiRoomAudio.Hubs;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Utilities;
 
@@ -16,15 +19,53 @@ namespace MultiRoomAudio.Services;
 /// Handles creation, connection, state management, and disposal.
 /// Integrates with ConfigurationService for persistence and autostart.
 /// </summary>
-public class PlayerManagerService : IHostedService, IDisposable
+public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposable
 {
     private readonly ILogger<PlayerManagerService> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ConfigurationService _config;
     private readonly EnvironmentService _environment;
+    private readonly IHubContext<PlayerStatusHub> _hubContext;
     private readonly ConcurrentDictionary<string, PlayerContext> _players = new();
     private readonly MdnsServerDiscovery _serverDiscovery;
     private bool _disposed;
+
+    #region Constants
+
+    /// <summary>
+    /// Audio buffer capacity in bytes (32MB).
+    /// </summary>
+    private const int AudioBufferCapacityBytes = 32_000_000;
+
+    /// <summary>
+    /// Audio buffer capacity in milliseconds for timed audio buffer.
+    /// </summary>
+    private const int AudioBufferCapacityMs = 8000;
+
+    /// <summary>
+    /// Timeout for mDNS server discovery.
+    /// </summary>
+    private static readonly TimeSpan MdnsDiscoveryTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Timeout for graceful disposal of player resources.
+    /// </summary>
+    private static readonly TimeSpan DisposalTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Maximum allowed length for player names.
+    /// </summary>
+    private const int MaxPlayerNameLength = 100;
+
+    /// <summary>
+    /// Pattern for valid player names.
+    /// Allows alphanumeric characters, spaces, hyphens, and underscores.
+    /// </summary>
+    private static readonly Regex ValidPlayerNamePattern = new(
+        @"^[a-zA-Z0-9\s\-_]+$",
+        RegexOptions.Compiled);
+
+    #endregion
 
     /// <summary>
     /// Internal context holding all objects for a player instance.
@@ -51,28 +92,37 @@ public class PlayerManagerService : IHostedService, IDisposable
         ILogger<PlayerManagerService> logger,
         ILoggerFactory loggerFactory,
         ConfigurationService config,
-        EnvironmentService environment)
+        EnvironmentService environment,
+        IHubContext<PlayerStatusHub> hubContext)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
         _config = config;
         _environment = environment;
+        _hubContext = hubContext;
         _serverDiscovery = new MdnsServerDiscovery(
             loggerFactory.CreateLogger<MdnsServerDiscovery>());
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("PlayerManagerService started");
+        _logger.LogInformation("PlayerManagerService starting...");
 
         // Autostart configured players
         var autostartPlayers = _config.GetAutostartPlayers();
         if (autostartPlayers.Count > 0)
         {
-            _logger.LogInformation("Autostarting {Count} configured players...", autostartPlayers.Count);
+            _logger.LogInformation("Found {AutostartCount} players configured for autostart",
+                autostartPlayers.Count);
 
             foreach (var playerConfig in autostartPlayers)
             {
+                _logger.LogDebug(
+                    "Autostarting player {PlayerName} on device {Device} with server {Server}",
+                    playerConfig.Name,
+                    playerConfig.PortAudioDeviceIndex?.ToString() ?? playerConfig.Device ?? "(default)",
+                    playerConfig.Server ?? "(auto-discover)");
+
                 try
                 {
                     var request = new PlayerCreateRequest
@@ -87,24 +137,76 @@ public class PlayerManagerService : IHostedService, IDisposable
                     };
 
                     await CreatePlayerAsync(request, cancellationToken);
-                    _logger.LogInformation("Autostarted player: {Name}", playerConfig.Name);
+                    _logger.LogInformation("Player {PlayerName} autostarted successfully", playerConfig.Name);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to autostart player: {Name}", playerConfig.Name);
+                    _logger.LogError(ex,
+                        "Failed to autostart player {PlayerName}. Device: {Device}, Server: {Server}",
+                        playerConfig.Name,
+                        playerConfig.Device ?? "(default)",
+                        playerConfig.Server ?? "(auto-discover)");
                 }
             }
         }
+        else
+        {
+            _logger.LogInformation("No players configured for autostart");
+        }
+
+        _logger.LogInformation("PlayerManagerService started with {PlayerCount} active players",
+            _players.Count);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("PlayerManagerService stopping, disposing all players...");
+        _logger.LogInformation("PlayerManagerService stopping with {PlayerCount} active players...",
+            _players.Count);
 
-        var tasks = _players.Keys.Select(name => StopPlayerAsync(name)).ToArray();
+        var playerNames = _players.Keys.ToList();
+        foreach (var name in playerNames)
+        {
+            _logger.LogDebug("Stopping player {PlayerName}...", name);
+        }
+
+        var tasks = playerNames.Select(name => StopPlayerAsync(name)).ToArray();
         await Task.WhenAll(tasks);
 
-        _logger.LogInformation("PlayerManagerService stopped");
+        _logger.LogInformation("PlayerManagerService stopped, all players disposed");
+    }
+
+    /// <summary>
+    /// Validates a player name to ensure it meets security and format requirements.
+    /// </summary>
+    /// <param name="name">The player name to validate.</param>
+    /// <param name="errorMessage">Error message if validation fails.</param>
+    /// <returns>True if the player name is valid.</returns>
+    public static bool ValidatePlayerName(string? name, out string? errorMessage)
+    {
+        errorMessage = null;
+
+        // Check for null or empty
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            errorMessage = "Player name cannot be empty or whitespace-only.";
+            return false;
+        }
+
+        // Check maximum length
+        if (name.Length > MaxPlayerNameLength)
+        {
+            errorMessage = $"Player name exceeds maximum length of {MaxPlayerNameLength} characters.";
+            return false;
+        }
+
+        // Validate against allowed character pattern
+        if (!ValidPlayerNamePattern.IsMatch(name))
+        {
+            errorMessage = "Player name contains invalid characters. Only alphanumeric characters, spaces, hyphens, and underscores are allowed.";
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -112,6 +214,12 @@ public class PlayerManagerService : IHostedService, IDisposable
     /// </summary>
     public async Task<PlayerResponse> CreatePlayerAsync(PlayerCreateRequest request, CancellationToken ct = default)
     {
+        // Validate player name
+        if (!ValidatePlayerName(request.Name, out var nameError))
+        {
+            throw new ArgumentException(nameError, nameof(request.Name));
+        }
+
         if (_players.ContainsKey(request.Name))
         {
             throw new InvalidOperationException($"Player '{request.Name}' already exists");
@@ -135,7 +243,7 @@ public class PlayerManagerService : IHostedService, IDisposable
                 ClientName = request.Name,
                 Roles = new List<string> { "player@v1" },
                 AudioFormats = GetDefaultFormats(),
-                BufferCapacity = 32_000_000 // 32MB
+                BufferCapacity = AudioBufferCapacityBytes
             };
 
             // 2. Create clock synchronizer
@@ -153,7 +261,7 @@ public class PlayerManagerService : IHostedService, IDisposable
                 _loggerFactory.CreateLogger<AudioPipeline>(),
                 decoderFactory,
                 clockSync,
-                bufferFactory: (format, sync) => new TimedAudioBuffer(format, sync, bufferCapacityMs: 8000),
+                bufferFactory: (format, sync) => new TimedAudioBuffer(format, sync, bufferCapacityMs: AudioBufferCapacityMs),
                 playerFactory: () => player,
                 sourceFactory: (buffer, timeFunc) => new BufferedAudioSampleSource(buffer, timeFunc));
 
@@ -213,8 +321,11 @@ public class PlayerManagerService : IHostedService, IDisposable
                 _logger.LogDebug("Persisted configuration for player '{Name}'", request.Name);
             }
 
-            // 12. Start connection in background
-            _ = ConnectPlayerAsync(request.Name, context, ct);
+            // 12. Start connection in background with proper error handling
+            _ = ConnectPlayerWithErrorHandlingAsync(request.Name, context, ct);
+
+            // 13. Broadcast status update to all clients
+            _ = BroadcastStatusAsync();
 
             return CreateResponse(request.Name, context);
         }
@@ -293,6 +404,10 @@ public class PlayerManagerService : IHostedService, IDisposable
         {
             await context.Client.SetVolumeAsync(volume);
             context.Config.Volume = volume;
+
+            // Broadcast status update to all clients
+            _ = BroadcastStatusAsync();
+
             return true;
         }
         catch (Exception ex)
@@ -336,11 +451,19 @@ public class PlayerManagerService : IHostedService, IDisposable
             await context.Connection.DisposeAsync();
 
             _logger.LogInformation("Player '{Name}' stopped and disposed", name);
+
+            // Broadcast status update to all clients
+            _ = BroadcastStatusAsync();
+
             return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error stopping player '{Name}'", name);
+
+            // Still broadcast since player was removed from dictionary
+            _ = BroadcastStatusAsync();
+
             return true; // Still consider it stopped
         }
     }
@@ -410,11 +533,33 @@ public class PlayerManagerService : IHostedService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Wrapper method for ConnectPlayerAsync that ensures all exceptions are caught and logged.
+    /// This prevents fire-and-forget tasks from losing exceptions.
+    /// </summary>
+    private async Task ConnectPlayerWithErrorHandlingAsync(string name, PlayerContext context, CancellationToken ct)
+    {
+        try
+        {
+            await ConnectPlayerAsync(name, context, ct);
+        }
+        catch (Exception ex)
+        {
+            // This should not normally be reached since ConnectPlayerAsync has its own error handling,
+            // but we catch here as a safety net to ensure no exceptions are lost
+            _logger.LogError(ex, "Unhandled exception during player '{Name}' connection", name);
+            context.State = PlayerState.Error;
+            context.ErrorMessage = ex.Message;
+            _ = BroadcastStatusAsync();
+        }
+    }
+
     private async Task ConnectPlayerAsync(string name, PlayerContext context, CancellationToken ct)
     {
         try
         {
             context.State = PlayerState.Starting;
+            _ = BroadcastStatusAsync();
 
             // Discover server if URL not provided
             Uri? serverUri = null;
@@ -426,7 +571,7 @@ public class PlayerManagerService : IHostedService, IDisposable
             {
                 _logger.LogInformation("Discovering Sendspin servers via mDNS...");
                 var servers = await _serverDiscovery.ScanAsync(
-                    TimeSpan.FromSeconds(5), ct);
+                    MdnsDiscoveryTimeout, ct);
 
                 var server = servers.FirstOrDefault();
                 if (server == null)
@@ -443,10 +588,13 @@ public class PlayerManagerService : IHostedService, IDisposable
 
             // Connect
             context.State = PlayerState.Connecting;
+            _ = BroadcastStatusAsync();
+
             await context.Client.ConnectAsync(serverUri!, ct);
 
             context.State = PlayerState.Connected;
             context.ConnectedAt = DateTime.UtcNow;
+            _ = BroadcastStatusAsync();
 
             _logger.LogInformation("Player '{Name}' connected to server", name);
         }
@@ -459,6 +607,7 @@ public class PlayerManagerService : IHostedService, IDisposable
             _logger.LogError(ex, "Failed to connect player '{Name}'", name);
             context.State = PlayerState.Error;
             context.ErrorMessage = ex.Message;
+            _ = BroadcastStatusAsync();
         }
     }
 
@@ -474,6 +623,9 @@ public class PlayerManagerService : IHostedService, IDisposable
                 ConnectionState.Disconnected => PlayerState.Stopped,
                 _ => context.State
             };
+
+            // Broadcast status update on connection state change
+            _ = BroadcastStatusAsync();
         };
 
         context.Pipeline.StateChanged += (_, state) =>
@@ -484,6 +636,9 @@ public class PlayerManagerService : IHostedService, IDisposable
                 context.State = PlayerState.Playing;
             else if (state == AudioPipelineState.Buffering)
                 context.State = PlayerState.Buffering;
+
+            // Broadcast status update on pipeline state change
+            _ = BroadcastStatusAsync();
         };
 
         context.Pipeline.ErrorOccurred += (_, error) =>
@@ -491,6 +646,9 @@ public class PlayerManagerService : IHostedService, IDisposable
             _logger.LogError(error.Exception, "Player '{Name}' pipeline error: {Message}",
                 name, error.Message);
             context.ErrorMessage = error.Message;
+
+            // Broadcast status update on error
+            _ = BroadcastStatusAsync();
         };
 
         context.Player.ErrorOccurred += (_, error) =>
@@ -498,6 +656,9 @@ public class PlayerManagerService : IHostedService, IDisposable
             _logger.LogError(error.Exception, "Player '{Name}' audio error: {Message}",
                 name, error.Message);
             context.ErrorMessage = error.Message;
+
+            // Broadcast status update on error
+            _ = BroadcastStatusAsync();
         };
     }
 
@@ -545,6 +706,22 @@ public class PlayerManagerService : IHostedService, IDisposable
         };
     }
 
+    /// <summary>
+    /// Broadcasts the current player status to all connected SignalR clients.
+    /// </summary>
+    private async Task BroadcastStatusAsync()
+    {
+        try
+        {
+            var players = GetAllPlayers();
+            await _hubContext.BroadcastStatusUpdateAsync(players);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast player status update");
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -555,14 +732,58 @@ public class PlayerManagerService : IHostedService, IDisposable
             context.Cts.Cancel();
             try
             {
-                context.Client.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
-                context.Pipeline.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
-                context.Player.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
-                context.Connection.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
+                // Use Task.Run to avoid sync context deadlocks when calling async dispose methods
+                Task.Run(async () =>
+                {
+                    await context.Client.DisposeAsync();
+                    await context.Pipeline.DisposeAsync();
+                    await context.Player.DisposeAsync();
+                    await context.Connection.DisposeAsync();
+                }).Wait(DisposalTimeout);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error disposing player context");
+            }
         }
 
         _players.Clear();
+
+        // Note: MdnsServerDiscovery does not implement IDisposable
+        // If it did, we would dispose it here
+
+        _logger.LogInformation("PlayerManagerService disposed");
+    }
+
+    /// <summary>
+    /// Asynchronously disposes of all managed resources.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        foreach (var context in _players.Values)
+        {
+            context.Cts.Cancel();
+            try
+            {
+                await context.Client.DisposeAsync();
+                await context.Pipeline.DisposeAsync();
+                await context.Player.DisposeAsync();
+                await context.Connection.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error disposing player context");
+            }
+        }
+
+        _players.Clear();
+
+        // Note: MdnsServerDiscovery does not implement IDisposable or IAsyncDisposable
+        // If it did, we would dispose it here
+
+        _logger.LogInformation("PlayerManagerService disposed asynchronously");
     }
 }

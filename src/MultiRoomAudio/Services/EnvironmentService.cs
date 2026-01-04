@@ -24,23 +24,36 @@ public class EnvironmentService
     public EnvironmentService(ILogger<EnvironmentService> logger)
     {
         _logger = logger;
+
+        _logger.LogDebug("Detecting runtime environment...");
         _isHaos = DetectHaos();
 
         if (_isHaos)
         {
+            _logger.LogDebug("HAOS markers detected, configuring for Home Assistant add-on mode");
             _haosOptions = LoadHaosOptions();
             _configPath = "/data";
             _logPath = "/share/multiroom-audio/logs";
             _audioBackend = "pulse";
-            _logger.LogInformation("Environment: Home Assistant OS");
+
+            if (_haosOptions != null)
+            {
+                _logger.LogDebug("Loaded {OptionCount} options from HAOS configuration",
+                    _haosOptions.Count);
+            }
         }
         else
         {
+            _logger.LogDebug("No HAOS markers found, configuring for standalone Docker mode");
             _haosOptions = null;
             _configPath = Environment.GetEnvironmentVariable("CONFIG_PATH") ?? "/app/config";
             _logPath = Environment.GetEnvironmentVariable("LOG_PATH") ?? "/app/logs";
             _audioBackend = Environment.GetEnvironmentVariable("AUDIO_BACKEND")?.ToLower() ?? "alsa";
-            _logger.LogInformation("Environment: Standalone Docker");
+
+            _logger.LogDebug("CONFIG_PATH env: {ConfigPathEnv}",
+                Environment.GetEnvironmentVariable("CONFIG_PATH") ?? "(not set, using default)");
+            _logger.LogDebug("LOG_PATH env: {LogPathEnv}",
+                Environment.GetEnvironmentVariable("LOG_PATH") ?? "(not set, using default)");
         }
 
         // Allow explicit override via environment variable
@@ -48,12 +61,8 @@ public class EnvironmentService
         if (!string.IsNullOrEmpty(backendOverride))
         {
             _audioBackend = backendOverride.ToLower();
-            _logger.LogInformation("Audio backend override: {Backend}", _audioBackend);
+            _logger.LogDebug("Audio backend overridden via AUDIO_BACKEND env: {Backend}", _audioBackend);
         }
-
-        _logger.LogInformation("Config path: {ConfigPath}", _configPath);
-        _logger.LogInformation("Log path: {LogPath}", _logPath);
-        _logger.LogInformation("Audio backend: {AudioBackend}", _audioBackend);
     }
 
     /// <summary>
@@ -119,57 +128,109 @@ public class EnvironmentService
     /// </summary>
     public void EnsureDirectoriesExist()
     {
+        _logger.LogDebug("Ensuring required directories exist");
+
         try
         {
             if (!Directory.Exists(_configPath))
             {
                 Directory.CreateDirectory(_configPath);
-                _logger.LogInformation("Created config directory: {Path}", _configPath);
+                _logger.LogInformation("Created config directory: {ConfigPath}", _configPath);
+            }
+            else
+            {
+                _logger.LogDebug("Config directory exists: {ConfigPath}", _configPath);
             }
 
             if (!Directory.Exists(_logPath))
             {
                 Directory.CreateDirectory(_logPath);
-                _logger.LogInformation("Created log directory: {Path}", _logPath);
+                _logger.LogInformation("Created log directory: {LogPath}", _logPath);
+            }
+            else
+            {
+                _logger.LogDebug("Log directory exists: {LogPath}", _logPath);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create directories");
+            _logger.LogError(ex,
+                "Failed to create directories. ConfigPath: {ConfigPath}, LogPath: {LogPath}",
+                _configPath, _logPath);
         }
     }
 
     private bool DetectHaos()
     {
         // Check for HAOS-specific markers
+        _logger.LogDebug("Checking for HAOS environment markers...");
+
         if (File.Exists(HaosOptionsFile))
         {
-            _logger.LogDebug("Detected HAOS: {File} exists", HaosOptionsFile);
+            _logger.LogDebug("HAOS detected: options file exists at {OptionsFile}", HaosOptionsFile);
             return true;
         }
-
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(HaosSupervisorTokenEnv)))
+        else
         {
-            _logger.LogDebug("Detected HAOS: {EnvVar} is set", HaosSupervisorTokenEnv);
-            return true;
+            _logger.LogDebug("HAOS options file not found at {OptionsFile}", HaosOptionsFile);
         }
 
+        var supervisorToken = Environment.GetEnvironmentVariable(HaosSupervisorTokenEnv);
+        if (!string.IsNullOrEmpty(supervisorToken))
+        {
+            _logger.LogDebug("HAOS detected: {EnvVar} environment variable is set", HaosSupervisorTokenEnv);
+            return true;
+        }
+        else
+        {
+            _logger.LogDebug("{EnvVar} environment variable not set", HaosSupervisorTokenEnv);
+        }
+
+        _logger.LogDebug("No HAOS environment markers found");
         return false;
     }
 
     private Dictionary<string, JsonElement>? LoadHaosOptions()
     {
         if (!File.Exists(HaosOptionsFile))
+        {
+            _logger.LogDebug("HAOS options file does not exist, skipping load");
             return null;
+        }
 
         try
         {
+            _logger.LogDebug("Loading HAOS options from {OptionsFile}", HaosOptionsFile);
             var json = File.ReadAllText(HaosOptionsFile);
-            return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+            var options = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+
+            if (options != null)
+            {
+                _logger.LogDebug("Successfully loaded HAOS options: {Keys}",
+                    string.Join(", ", options.Keys));
+            }
+
+            return options;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex,
+                "Failed to parse HAOS options JSON from {OptionsFile}. File may be malformed",
+                HaosOptionsFile);
+            return null;
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex,
+                "Failed to read HAOS options file {OptionsFile}. Check file permissions",
+                HaosOptionsFile);
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load HAOS options from {File}", HaosOptionsFile);
+            _logger.LogError(ex,
+                "Unexpected error loading HAOS options from {OptionsFile}",
+                HaosOptionsFile);
             return null;
         }
     }

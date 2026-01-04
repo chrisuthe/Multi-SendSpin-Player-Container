@@ -12,6 +12,19 @@ public class AlsaCommandRunner
     private readonly ILogger<AlsaCommandRunner> _logger;
     private readonly bool _usePulse;
 
+    /// <summary>
+    /// Pattern for valid ALSA device strings.
+    /// Matches: hw:X,Y, hw:X, plughw:X,Y, default, sysdefault:CARD=X, or simple alphanumeric names.
+    /// </summary>
+    private static readonly Regex ValidDevicePattern = new(
+        @"^(hw:\d+,\d+|hw:\d+|plughw:\d+,\d+|plughw:\d+|default|sysdefault:CARD=[a-zA-Z0-9_]+|[a-zA-Z0-9_\-]+)$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Characters that are dangerous in shell commands and must be rejected.
+    /// </summary>
+    private static readonly char[] DangerousChars = { ';', '&', '|', '$', '`', '(', ')', '{', '}', '[', ']', '<', '>', '!', '\\', '"', '\'', '\n', '\r', '\0' };
+
     public AlsaCommandRunner(ILogger<AlsaCommandRunner> logger, bool usePulseAudio = false)
     {
         _logger = logger;
@@ -19,10 +32,57 @@ public class AlsaCommandRunner
     }
 
     /// <summary>
+    /// Validates a device string to prevent command injection.
+    /// </summary>
+    /// <param name="device">The device string to validate.</param>
+    /// <param name="errorMessage">Error message if validation fails.</param>
+    /// <returns>True if the device string is safe to use.</returns>
+    public static bool ValidateDeviceString(string? device, out string? errorMessage)
+    {
+        errorMessage = null;
+
+        // Null or empty device is allowed (will use default)
+        if (string.IsNullOrWhiteSpace(device))
+        {
+            return true;
+        }
+
+        // Check for dangerous shell metacharacters
+        if (device.IndexOfAny(DangerousChars) >= 0)
+        {
+            errorMessage = $"Device string contains invalid characters. Only alphanumeric characters, hyphens, underscores, colons, and commas are allowed.";
+            return false;
+        }
+
+        // Check maximum length (prevent buffer overflow attempts)
+        if (device.Length > 100)
+        {
+            errorMessage = "Device string exceeds maximum length of 100 characters.";
+            return false;
+        }
+
+        // Validate against whitelist pattern
+        if (!ValidDevicePattern.IsMatch(device))
+        {
+            errorMessage = $"Device string '{device}' does not match expected format. Expected formats: hw:X,Y, plughw:X,Y, default, or simple alphanumeric name.";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Get current volume as percentage (0-100).
     /// </summary>
     public async Task<int?> GetVolumeAsync(string device, CancellationToken cancellationToken = default)
     {
+        // Validate device string to prevent command injection
+        if (!ValidateDeviceString(device, out var validationError))
+        {
+            _logger.LogWarning("Invalid device string rejected: {Error}", validationError);
+            return null;
+        }
+
         try
         {
             if (_usePulse)
@@ -43,6 +103,13 @@ public class AlsaCommandRunner
     /// </summary>
     public async Task<bool> SetVolumeAsync(string device, int volume, CancellationToken cancellationToken = default)
     {
+        // Validate device string to prevent command injection
+        if (!ValidateDeviceString(device, out var validationError))
+        {
+            _logger.LogWarning("Invalid device string rejected: {Error}", validationError);
+            return false;
+        }
+
         volume = Math.Clamp(volume, 0, 100);
 
         try

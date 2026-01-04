@@ -3,14 +3,25 @@ using MultiRoomAudio.Hubs;
 using MultiRoomAudio.Services;
 using MultiRoomAudio.Utilities;
 
+// Application version - update this for releases
+const string AppVersion = "2.0.0";
+const string AppName = "Multi-Room Audio Controller";
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure logging
+// Configure logging for HAOS compatibility
+// Console logging goes to supervisor logs when running as add-on
 builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
+builder.Logging.AddConsole(options =>
+{
+    // Use simple format for better readability in HA logs
+    options.FormatterName = "simple";
+});
 builder.Logging.AddDebug();
 
-var logLevel = Environment.GetEnvironmentVariable("LOG_LEVEL")?.ToLower() switch
+// Parse log level from environment (HAOS passes this from config)
+var logLevelStr = Environment.GetEnvironmentVariable("LOG_LEVEL")?.ToLower() ?? "info";
+var logLevel = logLevelStr switch
 {
     "debug" => LogLevel.Debug,
     "trace" => LogLevel.Trace,
@@ -19,6 +30,14 @@ var logLevel = Environment.GetEnvironmentVariable("LOG_LEVEL")?.ToLower() switch
     _ => LogLevel.Information
 };
 builder.Logging.SetMinimumLevel(logLevel);
+
+// Reduce noise from framework loggers unless in debug mode
+if (logLevel > LogLevel.Debug)
+{
+    builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+    builder.Logging.AddFilter("Microsoft.Hosting", LogLevel.Warning);
+    builder.Logging.AddFilter("System.Net.Http", LogLevel.Warning);
+}
 
 // Configure services
 builder.Services.AddEndpointsApiExplorer();
@@ -67,9 +86,23 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<PlayerManagerServi
 builder.Services.AddDirectoryBrowser();
 
 // Configure Kestrel to listen on port 8096 (or PORT env var)
-var port = int.Parse(Environment.GetEnvironmentVariable("WEB_PORT")
-    ?? Environment.GetEnvironmentVariable("PORT")
-    ?? "8096");
+const int DefaultPort = 8096;
+var portString = Environment.GetEnvironmentVariable("WEB_PORT")
+    ?? Environment.GetEnvironmentVariable("PORT");
+
+int port;
+if (string.IsNullOrEmpty(portString))
+{
+    port = DefaultPort;
+}
+else if (!int.TryParse(portString, out port) || port < 1 || port > 65535)
+{
+    var tempLogger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger<Program>();
+    tempLogger.LogWarning(
+        "Invalid port value '{PortString}' specified. Using default port {DefaultPort}",
+        portString, DefaultPort);
+    port = DefaultPort;
+}
 
 builder.WebHost.ConfigureKestrel(options =>
 {
@@ -126,9 +159,29 @@ app.MapGet("/api", () => Results.Ok(new
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var environmentService = app.Services.GetRequiredService<EnvironmentService>();
 
-logger.LogInformation("Multi-Room Audio Controller starting on port {Port}", port);
-logger.LogInformation("Environment: {Env}", environmentService.EnvironmentName);
-logger.LogInformation("Config path: {Path}", environmentService.ConfigPath);
-logger.LogInformation("Audio backend: {Backend}", environmentService.AudioBackend);
+// Startup banner - visible in HAOS supervisor logs
+logger.LogInformation("========================================");
+logger.LogInformation("{AppName} v{Version}", AppName, AppVersion);
+logger.LogInformation("========================================");
+logger.LogInformation("Environment: {Environment}", environmentService.EnvironmentName);
+logger.LogInformation("Log level: {LogLevel}", logLevelStr);
+logger.LogInformation("Web port: {Port}", port);
+logger.LogInformation("Config path: {ConfigPath}", environmentService.ConfigPath);
+logger.LogInformation("Log path: {LogPath}", environmentService.LogPath);
+logger.LogInformation("Audio backend: {AudioBackend}", environmentService.AudioBackend);
+
+if (environmentService.IsHaos)
+{
+    logger.LogInformation("Running as Home Assistant add-on");
+    logger.LogDebug("Supervisor token present: {HasToken}",
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SUPERVISOR_TOKEN")));
+}
+else
+{
+    logger.LogInformation("Running in standalone Docker mode");
+}
+
+logger.LogInformation("API documentation available at /docs");
+logger.LogInformation("========================================");
 
 app.Run();

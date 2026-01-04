@@ -19,6 +19,14 @@ public class PortAudioPlayer : IAudioPlayer
     private string? _deviceId;
     private bool _disposed;
 
+    /// <summary>
+    /// Static reference counter for PortAudio initialization.
+    /// PortAudio.Initialize() must be called before use, and PortAudio.Terminate()
+    /// should only be called when all players are disposed.
+    /// </summary>
+    private static readonly object _portAudioLock = new();
+    private static int _portAudioRefCount = 0;
+
     // State
     public AudioPlayerState State { get; private set; } = AudioPlayerState.Uninitialized;
     public float Volume { get; set; } = 1.0f;
@@ -44,8 +52,17 @@ public class PortAudioPlayer : IAudioPlayer
                 _logger.LogInformation("Initializing PortAudio player with format: {SampleRate}Hz, {Channels}ch",
                     format.SampleRate, format.Channels);
 
-                // Initialize PortAudio if not already done
-                PortAudio.Initialize();
+                // Initialize PortAudio with reference counting (thread-safe)
+                lock (_portAudioLock)
+                {
+                    if (_portAudioRefCount == 0)
+                    {
+                        PortAudio.Initialize();
+                        _logger.LogDebug("PortAudio library initialized");
+                    }
+                    _portAudioRefCount++;
+                    _logger.LogDebug("PortAudio reference count: {RefCount}", _portAudioRefCount);
+                }
 
                 // Find device
                 var deviceIndex = FindDeviceIndex(_deviceId);
@@ -329,7 +346,20 @@ public class PortAudioPlayer : IAudioPlayer
                     _stream = null;
                 }
 
-                PortAudio.Terminate();
+                // Decrement reference count and terminate only when last player is disposed
+                lock (_portAudioLock)
+                {
+                    _portAudioRefCount--;
+                    _logger.LogDebug("PortAudio reference count: {RefCount}", _portAudioRefCount);
+
+                    if (_portAudioRefCount <= 0)
+                    {
+                        _portAudioRefCount = 0; // Ensure non-negative
+                        PortAudio.Terminate();
+                        _logger.LogDebug("PortAudio library terminated");
+                    }
+                }
+
                 _logger.LogInformation("PortAudio player disposed");
             }
             catch (Exception ex)

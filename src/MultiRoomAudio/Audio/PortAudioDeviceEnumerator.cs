@@ -41,9 +41,13 @@ public static class PortAudioDeviceEnumerator
                     ));
                 }
             }
-            catch
+            catch (Exception)
             {
-                // Skip devices that can't be queried
+                // Skip devices that can't be queried - this is expected behavior for
+                // devices that are in use, disconnected, or have driver issues.
+                // We intentionally swallow these exceptions since device enumeration
+                // should be fault-tolerant and return available devices only.
+                System.Diagnostics.Debug.WriteLine($"Skipping device {i} - could not query device info");
             }
         }
 
@@ -112,7 +116,11 @@ public static class PortAudioDeviceEnumerator
                 {
                     PortAudio.Terminate();
                 }
-                catch { }
+                catch (Exception)
+                {
+                    // Ignore termination errors - PortAudio may already be terminated
+                    // or in an invalid state. This is a cleanup operation.
+                }
                 _initialized = false;
             }
         }

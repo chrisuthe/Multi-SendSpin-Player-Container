@@ -47,6 +47,8 @@ public class ConfigurationService
         _environment = environment;
         _configPath = environment.PlayersConfigPath;
 
+        _logger.LogDebug("Initializing ConfigurationService with config path: {ConfigPath}", _configPath);
+
         _deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
@@ -73,9 +75,11 @@ public class ConfigurationService
     {
         lock (_lock)
         {
+            _logger.LogDebug("Loading player configuration from {ConfigPath}", _configPath);
+
             if (!File.Exists(_configPath))
             {
-                _logger.LogInformation("Config file {Path} does not exist, starting fresh", _configPath);
+                _logger.LogInformation("Config file {ConfigPath} does not exist, starting fresh", _configPath);
                 _players = new Dictionary<string, PlayerConfiguration>();
                 return;
             }
@@ -92,11 +96,32 @@ public class ConfigurationService
                     config.Name = name;
                 }
 
-                _logger.LogInformation("Loaded {Count} players from {Path}", _players.Count, _configPath);
+                _logger.LogInformation("Loaded {PlayerCount} players from configuration", _players.Count);
+
+                // Log player names at debug level for troubleshooting
+                if (_players.Count > 0)
+                {
+                    _logger.LogDebug("Configured players: {PlayerNames}",
+                        string.Join(", ", _players.Keys));
+                }
+            }
+            catch (YamlDotNet.Core.YamlException ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to parse YAML configuration from {ConfigPath}. File may be malformed",
+                    _configPath);
+                _players = new Dictionary<string, PlayerConfiguration>();
+            }
+            catch (IOException ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to read configuration file {ConfigPath}. Check file permissions",
+                    _configPath);
+                _players = new Dictionary<string, PlayerConfiguration>();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error loading config from {Path}", _configPath);
+                _logger.LogError(ex, "Unexpected error loading config from {ConfigPath}", _configPath);
                 _players = new Dictionary<string, PlayerConfiguration>();
             }
         }
@@ -111,14 +136,23 @@ public class ConfigurationService
         {
             try
             {
+                _logger.LogDebug("Saving {PlayerCount} players to configuration", _players.Count);
                 var yaml = _serializer.Serialize(_players);
                 File.WriteAllText(_configPath, yaml);
-                _logger.LogDebug("Saved {Count} players to {Path}", _players.Count, _configPath);
+                _logger.LogInformation("Configuration saved successfully ({PlayerCount} players)",
+                    _players.Count);
                 return true;
+            }
+            catch (IOException ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to write configuration file {ConfigPath}. Check disk space and permissions",
+                    _configPath);
+                return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error saving config to {Path}", _configPath);
+                _logger.LogError(ex, "Unexpected error saving config to {ConfigPath}", _configPath);
                 return false;
             }
         }
@@ -142,9 +176,22 @@ public class ConfigurationService
     {
         lock (_lock)
         {
+            var isUpdate = _players.ContainsKey(name);
             config.Name = name;
             _players[name] = config;
-            _logger.LogDebug("Set player config: {Name}", name);
+
+            if (isUpdate)
+            {
+                _logger.LogDebug("Updated player configuration: {PlayerName}", name);
+            }
+            else
+            {
+                _logger.LogInformation("Added player configuration: {PlayerName}", name);
+            }
+
+            _logger.LogDebug(
+                "Player {PlayerName} config: Device={Device}, Autostart={Autostart}, Server={Server}",
+                name, config.Device ?? "(default)", config.Autostart, config.Server ?? "(auto-discover)");
         }
     }
 
@@ -157,9 +204,11 @@ public class ConfigurationService
         {
             if (_players.Remove(name))
             {
-                _logger.LogDebug("Deleted player config: {Name}", name);
+                _logger.LogInformation("Deleted player configuration: {PlayerName}", name);
                 return true;
             }
+
+            _logger.LogDebug("Attempted to delete non-existent player: {PlayerName}", name);
             return false;
         }
     }
