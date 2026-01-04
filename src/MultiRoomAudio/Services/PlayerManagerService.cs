@@ -46,6 +46,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// <summary>
     /// Target buffer level in milliseconds for faster startup.
     /// Lower values = faster start but more sensitive to jitter.
+    /// With SDK 3.0's HasMinimalSync, typical startup is 300-500ms.
     /// </summary>
     private const int TargetBufferMs = 250;
 
@@ -285,8 +286,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                     // Wrap with resampling for smooth playback rate adjustment (±4%)
                     return new ResamplingAudioSampleSource(source, buffer);
                 },
-                waitForConvergence: true,      // Wait for Kalman filter to converge before playback
-                convergenceTimeoutMs: 5000);   // 5 second timeout for clock sync
+                waitForConvergence: true,      // Wait for minimal sync (2 measurements) before playback
+                convergenceTimeoutMs: 1000);   // 1 second timeout (SDK 3.0 uses HasMinimalSync for fast start)
 
             // 5. Create WebSocket connection
             var connection = new SendspinConnection(

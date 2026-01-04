@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <!-- Core SDK for Sendspin protocol -->
-    <PackageReference Include="SendSpin.SDK" Version="2.2.1" />
+    <PackageReference Include="SendSpin.SDK" Version="3.0.0" />
 
     <!-- PortAudio for Linux audio output -->
     <PackageReference Include="PortAudioSharp2" Version="1.0.6" />
