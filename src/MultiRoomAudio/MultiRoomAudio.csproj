@@ -29,7 +29,7 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.1.0" />
 
     <!-- API documentation -->
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.22" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
 
     <!-- Health checks -->
