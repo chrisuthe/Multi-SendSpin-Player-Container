@@ -5,11 +5,10 @@ description: >-
   Sendspin-powered multi-room audio controller. Stream audio from Music
   Assistant to USB DACs connected to your Home Assistant server.
 url: https://github.com/chrisuthe/Multi-SendSpin-Player-Container
-image: ghcr.io/chrisuthe/multiroom-audio-hassio:{arch}-test
+image: ghcr.io/chrisuthe/multiroom-audio-hassio:test
 startup: services
 arch:
-  - aarch64
-  - amd64
+  - amd64  # Testing only - aarch64 will be added after merge to main
 
 # Hardware access
 audio: true
