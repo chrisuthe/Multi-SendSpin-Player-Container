@@ -24,6 +24,7 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
 
     // Playback rate (1.0 = normal, clamped to 0.96-1.04)
     private double _playbackRate = 1.0;
+    private double _lastRate = 1.0; // Track previous rate for transition detection
     private const double MinRate = 0.96;
     private const double MaxRate = 1.04;
 
@@ -78,8 +79,21 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
     /// <inheritdoc/>
     public int Read(float[] buffer, int offset, int count)
     {
+        var currentRate = _playbackRate;
+        var wasInBypass = Math.Abs(_lastRate - 1.0) < 0.0001;
+        var isInBypass = Math.Abs(currentRate - 1.0) < 0.0001;
+
+        // Detect transition from bypass to resampling - reset fractional position
+        // to avoid discontinuities from stale interpolation state
+        if (wasInBypass && !isInBypass)
+        {
+            _fractionalPosition = 0;
+        }
+
+        _lastRate = currentRate;
+
         // Fast path: if rate is essentially 1.0, pass through directly
-        if (Math.Abs(_playbackRate - 1.0) < 0.0001)
+        if (isInBypass)
         {
             return _source.Read(buffer, offset, count);
         }
