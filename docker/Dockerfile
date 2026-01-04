@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Build stage - using Debian SDK for consistent glibc builds
-FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
+FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS build
 ARG TARGETARCH
 WORKDIR /src
 COPY src/MultiRoomAudio/MultiRoomAudio.csproj MultiRoomAudio/
