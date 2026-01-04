@@ -5,7 +5,7 @@ description: >-
   Sendspin-powered multi-room audio controller. Stream audio from Music
   Assistant to USB DACs connected to your Home Assistant server.
 url: https://github.com/chrisuthe/squeezelite-docker
-image: ghcr.io/chrisuthe/multiroom-audio-hassio
+image: ghcr.io/chrisuthe/multiroom-audio-hassio:{arch}-test
 startup: services
 arch:
   - aarch64
