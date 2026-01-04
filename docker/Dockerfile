@@ -6,7 +6,7 @@ ARG TARGETARCH
 
 # Base: Debian-slim for glibc compatibility with PortAudioSharp2 native bindings
 # Alpine (musl libc) causes SIGSEGV crashes with PortAudio native libraries
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-bookworm-slim AS base
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS base
 WORKDIR /app
 EXPOSE 8096
 
