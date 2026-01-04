@@ -284,7 +284,10 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 {
                     var source = new BufferedAudioSampleSource(buffer, timeFunc);
                     // Wrap with resampling for smooth playback rate adjustment (±4%)
-                    return new ResamplingAudioSampleSource(source, buffer);
+                    return new ResamplingAudioSampleSource(
+                        source,
+                        buffer,
+                        _loggerFactory.CreateLogger<ResamplingAudioSampleSource>());
                 },
                 waitForConvergence: true,      // Wait for minimal sync (2 measurements) before playback
                 convergenceTimeoutMs: 1000);   // 1 second timeout (SDK 3.0 uses HasMinimalSync for fast start)
@@ -350,7 +353,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             }
 
             // 14. Start connection in background with proper error handling
-            _ = ConnectPlayerWithErrorHandlingAsync(request.Name, context, ct);
+            // Use the player's own cancellation token, not the request token,
+            // so the connection persists after the HTTP response is sent
+            _ = ConnectPlayerWithErrorHandlingAsync(request.Name, context, context.Cts.Token);
 
             // 15. Broadcast status update to all clients
             _ = BroadcastStatusAsync();
@@ -419,7 +424,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
     /// <summary>
     /// Sets the volume for a player (0-100).
-    /// Updates local config, notifies server, and applies to audio output.
+    /// Updates local config, notifies server (if connected), and applies to audio output.
     /// </summary>
     public async Task<bool> SetVolumeAsync(string name, int volume, CancellationToken ct = default)
     {
@@ -429,46 +434,49 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         volume = Math.Clamp(volume, 0, 100);
         _logger.LogDebug("Setting volume for '{Name}' to {Volume}", name, volume);
 
-        try
+        // 1. Update local config (always)
+        context.Config.Volume = volume;
+
+        // 2. Apply software volume to audio player (0-100 -> 0.0-1.0)
+        // Using squared scaling for perceived loudness (volume 50 sounds half as loud)
+        var normalizedVolume = volume / 100f;
+        context.Player.Volume = normalizedVolume * normalizedVolume;
+
+        // 3. Notify server of volume change (only if connected)
+        if (context.State == PlayerState.Connected || context.State == PlayerState.Playing || context.State == PlayerState.Buffering)
         {
-            // 1. Notify server of volume change
-            await context.Client.SetVolumeAsync(volume);
-
-            // 2. Update local config
-            context.Config.Volume = volume;
-
-            // 3. Apply software volume to audio player (0-100 -> 0.0-1.0)
-            // Using squared scaling for perceived loudness (volume 50 sounds half as loud)
-            var normalizedVolume = volume / 100f;
-            context.Player.Volume = normalizedVolume * normalizedVolume;
-
-            // 4. Optionally set hardware/OS volume via ALSA/PulseAudio
-            // Only if we have a specific device (not default)
-            if (!string.IsNullOrEmpty(context.Config.DeviceId))
+            try
             {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _alsaRunner.SetVolumeAsync(context.Config.DeviceId, volume, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Hardware volume control not available for '{Name}'", name);
-                    }
-                }, ct);
+                await context.Client.SetVolumeAsync(volume);
             }
-
-            // 5. Broadcast status update to all clients
-            _ = BroadcastStatusAsync();
-
-            return true;
+            catch (Exception ex)
+            {
+                // Don't fail the whole operation if server notification fails
+                _logger.LogWarning(ex, "Failed to notify server of volume change for '{Name}'", name);
+            }
         }
-        catch (Exception ex)
+
+        // 4. Optionally set hardware/OS volume via ALSA/PulseAudio
+        // Only if we have a specific device (not default)
+        if (!string.IsNullOrEmpty(context.Config.DeviceId))
         {
-            _logger.LogError(ex, "Failed to set volume for player '{Name}'", name);
-            throw;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _alsaRunner.SetVolumeAsync(context.Config.DeviceId, volume, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Hardware volume control not available for '{Name}'", name);
+                }
+            }, ct);
         }
+
+        // 5. Broadcast status update to all clients
+        _ = BroadcastStatusAsync();
+
+        return true;
     }
 
     /// <summary>
@@ -481,6 +489,29 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
         context.Pipeline.SetMuted(muted);
         return true;
+    }
+
+    /// <summary>
+    /// Starts a stopped player by recreating its connection.
+    /// </summary>
+    public async Task<PlayerResponse?> StartPlayerAsync(string name, CancellationToken ct = default)
+    {
+        if (!_players.TryGetValue(name, out var context))
+            return null;
+
+        // If already running, just return current state
+        if (context.State == PlayerState.Playing || context.State == PlayerState.Connected ||
+            context.State == PlayerState.Buffering || context.State == PlayerState.Connecting ||
+            context.State == PlayerState.Starting)
+        {
+            _logger.LogDebug("Player '{Name}' is already running (state={State})", name, context.State);
+            return CreateResponse(name, context);
+        }
+
+        _logger.LogInformation("Starting player '{Name}'", name);
+
+        // Use restart to recreate the player with fresh connections
+        return await RestartPlayerAsync(name, ct);
     }
 
     /// <summary>

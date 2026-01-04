@@ -117,6 +117,38 @@ public static class PlayersEndpoint
         .WithName("StopPlayer")
         .WithDescription("Stop a player (config preserved for restart)");
 
+        // POST /api/players/{name}/start - Start a stopped player
+        group.MapPost("/{name}/start", async (
+            string name,
+            PlayerManagerService manager,
+            ILogger<PlayerManagerService> logger,
+            CancellationToken ct) =>
+        {
+            logger.LogDebug("API: POST /api/players/{PlayerName}/start", name);
+            try
+            {
+                var player = await manager.StartPlayerAsync(name, ct);
+                if (player == null)
+                {
+                    logger.LogDebug("API: Player {PlayerName} not found for start", name);
+                    return Results.NotFound(new ErrorResponse(false, $"Player '{name}' not found"));
+                }
+
+                logger.LogInformation("API: Player {PlayerName} started successfully", name);
+                return Results.Ok(player);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "API: Failed to start player {PlayerName}", name);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to start player");
+            }
+        })
+        .WithName("StartPlayer")
+        .WithDescription("Start a stopped player");
+
         // POST /api/players/{name}/restart - Restart player
         group.MapPost("/{name}/restart", async (
             string name,

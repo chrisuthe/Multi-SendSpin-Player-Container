@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 
@@ -21,6 +22,7 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
 {
     private readonly IAudioSampleSource _source;
     private readonly ITimedAudioBuffer? _buffer;
+    private readonly ILogger? _logger;
 
     // Playback rate (1.0 = normal, clamped to 0.96-1.04)
     private double _playbackRate = 1.0;
@@ -34,6 +36,11 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
     private int _sourceBufferPosition;
     private double _fractionalPosition; // Sub-sample position for interpolation
     private int _channels;
+
+    // Diagnostic tracking
+    private DateTime _lastRateLogTime = DateTime.MinValue;
+    private int _rateChangeCount;
+    private double _lastLoggedRate = 1.0;
 
     /// <inheritdoc/>
     public AudioFormat Format => _source.Format;
@@ -53,12 +60,14 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
     /// </summary>
     /// <param name="source">The underlying audio sample source.</param>
     /// <param name="buffer">Optional timed buffer to subscribe to rate changes. If null, resampling is disabled.</param>
-    public ResamplingAudioSampleSource(IAudioSampleSource source, ITimedAudioBuffer? buffer = null)
+    /// <param name="logger">Optional logger for diagnostic output.</param>
+    public ResamplingAudioSampleSource(IAudioSampleSource source, ITimedAudioBuffer? buffer = null, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(source);
 
         _source = source;
         _buffer = buffer;
+        _logger = logger;
         _channels = source.Format.Channels;
 
         // Pre-allocate source buffer for resampling (enough for ~4096 frames at max rate)
@@ -73,7 +82,41 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
 
     private void OnTargetPlaybackRateChanged(double newRate)
     {
+        var oldRate = _playbackRate;
         PlaybackRate = newRate;
+        _rateChangeCount++;
+
+        var now = DateTime.UtcNow;
+        var timeSinceLastLog = now - _lastRateLogTime;
+
+        // Log significant rate changes or periodic summary
+        var rateDelta = Math.Abs(newRate - _lastLoggedRate);
+        var isSignificantChange = rateDelta > 0.001; // >0.1% change
+        var wasInBypass = Math.Abs(_lastLoggedRate - 1.0) < 0.0001;
+        var isInBypass = Math.Abs(newRate - 1.0) < 0.0001;
+        var modeChanged = wasInBypass != isInBypass;
+
+        if (_logger != null && (modeChanged || isSignificantChange || timeSinceLastLog.TotalSeconds >= 5))
+        {
+            var mode = isInBypass ? "BYPASS" : (newRate > 1.0 ? "SPEEDUP" : "SLOWDOWN");
+            var ratePercent = (newRate - 1.0) * 100;
+
+            if (modeChanged)
+            {
+                _logger.LogInformation(
+                    "Resampler mode: {Mode} (rate={Rate:F4}, {Percent:+0.00;-0.00}%, changes={Count})",
+                    mode, newRate, ratePercent, _rateChangeCount);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Resampler: {Mode} rate={Rate:F4} ({Percent:+0.00;-0.00}%), changes={Count}",
+                    mode, newRate, ratePercent, _rateChangeCount);
+            }
+
+            _lastRateLogTime = now;
+            _lastLoggedRate = newRate;
+        }
     }
 
     /// <inheritdoc/>
