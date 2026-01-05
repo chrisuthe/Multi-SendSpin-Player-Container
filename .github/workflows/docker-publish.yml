@@ -121,6 +121,42 @@ jobs:
           readme-filepath: ./README.md
 
   # ==========================================================================
+  # Update HAOS Add-on Version for Dev Branch (commit SHA)
+  # ==========================================================================
+  update-addon-version-dev:
+    runs-on: ubuntu-latest
+    needs: build-docker
+    if: github.ref == 'refs/heads/dev'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update config.yaml with commit SHA
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          sed -i "s/^version: \".*\"/version: \"sha-${SHORT_SHA}\"/" multiroom-audio/config.yaml
+          echo "Updated config.yaml to version sha-${SHORT_SHA}"
+          cat multiroom-audio/config.yaml | head -5
+
+      - name: Commit and push version update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add multiroom-audio/config.yaml
+          if git diff --staged --quiet; then
+            echo "No version change needed"
+          else
+            git commit -m "chore: update dev version to sha-$(echo "${{ github.sha }}" | cut -c1-7) [skip ci]"
+            git push origin dev
+            echo "Version bump committed and pushed"
+          fi
+
+  # ==========================================================================
   # Update HAOS Add-on Version (after successful tag build)
   # ==========================================================================
   update-addon-version:
