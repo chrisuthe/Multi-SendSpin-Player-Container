@@ -222,6 +222,92 @@ if (environmentService.IsHaos)
     logger.LogInformation("Running as Home Assistant add-on");
     logger.LogDebug("Supervisor token present: {HasToken}",
         !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SUPERVISOR_TOKEN")));
+
+    // Log PulseAudio diagnostic info
+    var pulseServer = Environment.GetEnvironmentVariable("PULSE_SERVER");
+    logger.LogInformation("PULSE_SERVER: {PulseServer}", pulseServer ?? "(not set)");
+
+    // Check for PulseAudio socket
+    var pulseSocketPaths = new[] { "/run/pulse", "/var/run/pulse", "/tmp/pulse" };
+    foreach (var path in pulseSocketPaths)
+    {
+        if (Directory.Exists(path))
+        {
+            try
+            {
+                var files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+                logger.LogInformation("PulseAudio socket directory {Path}: {FileCount} files", path, files.Length);
+                foreach (var file in files.Take(5))
+                {
+                    logger.LogDebug("  {File}", file);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("Could not enumerate {Path}: {Error}", path, ex.Message);
+            }
+        }
+    }
+
+    // Try to run pactl info for diagnostics
+    try
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "pactl",
+            Arguments = "info",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var process = System.Diagnostics.Process.Start(psi);
+        if (process != null)
+        {
+            var output = process.StandardOutput.ReadToEnd();
+            var error = process.StandardError.ReadToEnd();
+            process.WaitForExit(5000);
+
+            if (process.ExitCode == 0)
+            {
+                logger.LogInformation("PulseAudio connected successfully");
+                // Log key info lines
+                foreach (var line in output.Split('\n').Where(l =>
+                    l.StartsWith("Server Name:") ||
+                    l.StartsWith("Default Sink:") ||
+                    l.StartsWith("Default Source:")))
+                {
+                    logger.LogInformation("  {Line}", line.Trim());
+                }
+            }
+            else
+            {
+                logger.LogWarning("PulseAudio connection failed: {Error}", error.Trim());
+            }
+        }
+
+        // Also list available sinks
+        psi.Arguments = "list sinks short";
+        using var sinkProcess = System.Diagnostics.Process.Start(psi);
+        if (sinkProcess != null)
+        {
+            var sinkOutput = sinkProcess.StandardOutput.ReadToEnd();
+            sinkProcess.WaitForExit(5000);
+
+            if (sinkProcess.ExitCode == 0 && !string.IsNullOrWhiteSpace(sinkOutput))
+            {
+                logger.LogInformation("PulseAudio sinks available:");
+                foreach (var line in sinkOutput.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)))
+                {
+                    logger.LogInformation("  {Sink}", line.Trim());
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("Could not run pactl diagnostics: {Error}", ex.Message);
+    }
 }
 else
 {
