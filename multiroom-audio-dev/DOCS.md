@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-5afbb9f
+## Development Build: sha-90b417e
 
 **Current Dev Build Changes** (recent)
 
+- fix pulseAudio on HAOS
 - Fix Pulse Starting when It shouldn't
 - feat: show dynamic version/build info on startup
 - fix: push dev HASSIO image with SHA tag for HAOS compatibility
@@ -14,7 +15,6 @@
 - use direct ALSA where available, show more devices that are software configured.
 - fix dev vs stable builds
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into dev
-- clean up stable vs dev
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
