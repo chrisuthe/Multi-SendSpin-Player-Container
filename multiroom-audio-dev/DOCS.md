@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-489a9e5
+## Development Build: sha-42852f4
 
 **Current Dev Build Changes** (recent)
 
+- Update ALSA for graceful reconnect
 - - Add startup check if on HAOS to make sure pulseaudio is ready - Add reconnection if connection drops to audio provider - Add friendly names where possible to device dropdown
 - use direct ALSA where available, show more devices that are software configured.
 - fix dev vs stable builds
@@ -12,7 +13,6 @@
 - clean up stable vs dev
 - docs: add 2.0.12 changelog entry for audio quality fixes
 - fix: configure PulseAudio sync options to disable frame drop/insert
-- fix: never bypass resampler to prevent pops on rate transitions
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
