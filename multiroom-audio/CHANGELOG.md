@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.12] - Audio Quality & PulseAudio Fixes
+
+### Fixed
+- **Audio artifacts from sync correction**: Eliminated clicks/pops caused by frame drop/insert by configuring SDK to use only smooth rate adjustment
+- **Resampler transition pops**: Fixed audible pops when rate changes by never bypassing resampler (maintains continuous interpolation state)
+- **PulseAudio timing jitter**: Wider deadband (5ms entry / 2ms exit) tolerates PulseAudio's ~15ms timing variability
+
+### Changed
+- **Sendspin.SDK 3.3.0**: Added `SyncCorrectionOptions` API for platform-specific tuning
+- **Timer-based PulseAudio scheduling**: Switched to `tsched=1` for more accurate timing
+- **Dynamic ALSA enumeration**: Uses `/proc/asound/cards` instead of udev for better Docker compatibility
+- **Resampling threshold**: Increased to 200ms to disable Tier 3 frame drop/insert entirely
+- **Max speed correction**: Increased to 4% (from 2%) for more responsive sync adjustment
+
+---
+
 ## [2.0.11] - Volume Stability & SDK 3.0.1
 
 ### Fixed
