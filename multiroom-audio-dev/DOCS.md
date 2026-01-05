@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-59b7e10
+## Development Build: sha-489a9e5
 
 **Current Dev Build Changes** (recent)
 
+- - Add startup check if on HAOS to make sure pulseaudio is ready - Add reconnection if connection drops to audio provider - Add friendly names where possible to device dropdown
 - use direct ALSA where available, show more devices that are software configured.
 - fix dev vs stable builds
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into dev
