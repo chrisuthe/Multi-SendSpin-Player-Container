@@ -74,7 +74,7 @@ if [ -f /proc/asound/cards ]; then
         if [ -n "$card_num" ]; then
             echo "Found ALSA card $card_num: $card_name"
             echo ".nofail" >> "$PULSE_CONFIG"
-            echo "load-module module-alsa-card device_id=$card_num tsched=0" >> "$PULSE_CONFIG"
+            echo "load-module module-alsa-card device_id=$card_num tsched=1" >> "$PULSE_CONFIG"
             echo ".fail" >> "$PULSE_CONFIG"
         fi
     done
