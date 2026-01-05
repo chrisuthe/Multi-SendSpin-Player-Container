@@ -52,6 +52,31 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     private const int TargetBufferMs = 250;
 
     /// <summary>
+    /// Sync correction options tuned for PulseAudio's timing characteristics.
+    /// PulseAudio has ~15ms timing jitter, so we use wider deadbands and
+    /// disable frame drop/insert (Tier 3) by setting a high resampling threshold.
+    /// </summary>
+    private static readonly SyncCorrectionOptions PulseAudioSyncOptions = new()
+    {
+        // Wider deadband for PulseAudio's timing jitter (~15ms)
+        EntryDeadbandMicroseconds = 5_000,      // 5ms entry (vs default 2ms)
+        ExitDeadbandMicroseconds = 2_000,       // 2ms exit (vs default 0.5ms)
+
+        // Use 4% max correction (matches CLI) for more responsive adjustment
+        MaxSpeedCorrection = 0.04,
+
+        // Set very high threshold to DISABLE frame drop/insert (Tier 3)
+        // All sync correction will use smooth rate adjustment via our resampler
+        ResamplingThresholdMicroseconds = 200_000,  // 200ms (vs default 15ms)
+
+        // Re-anchor at 500ms (same as default)
+        ReanchorThresholdMicroseconds = 500_000,
+
+        // Standard startup grace period
+        StartupGracePeriodMicroseconds = 500_000,
+    };
+
+    /// <summary>
     /// Timeout for mDNS server discovery.
     /// </summary>
     private static readonly TimeSpan MdnsDiscoveryTimeout = TimeSpan.FromSeconds(5);
@@ -319,7 +344,11 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 clockSync,
                 bufferFactory: (format, sync) =>
                 {
-                    var buffer = new TimedAudioBuffer(format, sync, bufferCapacityMs: AudioBufferCapacityMs);
+                    var buffer = new TimedAudioBuffer(
+                        format,
+                        sync,
+                        bufferCapacityMs: AudioBufferCapacityMs,
+                        syncOptions: PulseAudioSyncOptions);
                     buffer.TargetBufferMilliseconds = TargetBufferMs;  // Faster startup (250ms vs default 500ms)
                     return buffer;
                 },
