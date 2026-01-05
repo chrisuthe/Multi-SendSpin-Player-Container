@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using MultiRoomAudio.Models;
 using PortAudioSharp;
 
@@ -11,6 +12,16 @@ public static class PortAudioDeviceEnumerator
 {
     private static bool _initialized;
     private static readonly object _initLock = new();
+    private static ILogger? _logger;
+
+    /// <summary>
+    /// Configures the logger for device enumeration diagnostics.
+    /// </summary>
+    /// <param name="logger">The logger instance to use for diagnostic output.</param>
+    public static void SetLogger(ILogger? logger)
+    {
+        _logger = logger;
+    }
 
     /// <summary>
     /// Gets all available audio output devices.
@@ -41,13 +52,14 @@ public static class PortAudioDeviceEnumerator
                     ));
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Skip devices that can't be queried - this is expected behavior for
                 // devices that are in use, disconnected, or have driver issues.
-                // We intentionally swallow these exceptions since device enumeration
-                // should be fault-tolerant and return available devices only.
-                System.Diagnostics.Debug.WriteLine($"Skipping device {i} - could not query device info");
+                // We log the error for diagnostic purposes but continue enumeration
+                // to return all available devices.
+                _logger?.LogDebug(ex, "Skipping device {DeviceIndex} - could not query device info: {Message}",
+                    i, ex.Message);
             }
         }
 
@@ -132,6 +144,12 @@ public static class PortAudioDeviceEnumerator
         {
             if (!_initialized)
             {
+                // NOTE: We intentionally do NOT call PortAudio.Terminate() after initialization.
+                // PortAudio is designed to be initialized once and remain active for the lifetime
+                // of the process. Calling Terminate() and then re-initializing breaks device
+                // enumeration on subsequent calls, particularly on Linux/ALSA systems where the
+                // audio subsystem state becomes inconsistent. This is a known PortAudio behavior,
+                // not a resource leak - the library handles cleanup on process exit.
                 PortAudio.Initialize();
                 _initialized = true;
             }

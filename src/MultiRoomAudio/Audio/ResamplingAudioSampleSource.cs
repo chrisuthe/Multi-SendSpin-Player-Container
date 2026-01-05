@@ -18,7 +18,7 @@ namespace MultiRoomAudio.Audio;
 /// - >1.0 = speed up (we're behind, consume more source samples)
 /// - &lt;1.0 = slow down (we're ahead, consume fewer source samples)
 /// </remarks>
-public sealed class ResamplingAudioSampleSource : IAudioSampleSource
+public sealed class ResamplingAudioSampleSource : IAudioSampleSource, IDisposable
 {
     private readonly IAudioSampleSource _source;
     private readonly ITimedAudioBuffer? _buffer;
@@ -35,12 +35,19 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
     private int _sourceBufferValidSamples;
     private int _sourceBufferPosition;
     private double _fractionalPosition; // Sub-sample position for interpolation
+
+    // NOTE: _channels is guaranteed to be >= 1 because it's set from source.Format.Channels in the
+    // constructor. The SDK's AudioFormat validates that Channels is always positive (typically 1-8).
+    // Division by _channels in ReadWithResampling and EnsureSourceSamples is therefore safe.
     private int _channels;
 
     // Diagnostic tracking
     private DateTime _lastRateLogTime = DateTime.MinValue;
     private int _rateChangeCount;
     private double _lastLoggedRate = 1.0;
+
+    // Disposal tracking
+    private bool _disposed;
 
     /// <inheritdoc/>
     public AudioFormat Format => _source.Format;
@@ -219,7 +226,9 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
         if (remainingFrames > 0 && _sourceBufferPosition > 0)
         {
             var remainingSamples = remainingFrames * _channels;
-            Array.Copy(_sourceBuffer, _sourceBufferPosition * _channels, _sourceBuffer, 0, remainingSamples);
+            // Use Buffer.BlockCopy for better performance with value types (float = 4 bytes)
+            Buffer.BlockCopy(_sourceBuffer, _sourceBufferPosition * _channels * sizeof(float),
+                           _sourceBuffer, 0, remainingSamples * sizeof(float));
             _sourceBufferValidSamples = remainingSamples;
             _sourceBufferPosition = 0;
         }
@@ -239,5 +248,22 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource
         _sourceBufferValidSamples += read;
 
         return _sourceBufferValidSamples > _channels; // Need at least 2 frames for interpolation
+    }
+
+    /// <summary>
+    /// Disposes resources and unsubscribes from events to prevent memory leaks.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+
+        // Unsubscribe from rate change events to prevent memory leak
+        if (_buffer != null)
+        {
+            _buffer.TargetPlaybackRateChanged -= OnTargetPlaybackRateChanged;
+        }
     }
 }
