@@ -1,7 +1,7 @@
 # Multi-Room Audio Controller
 
 <!-- VERSION_INFO_START -->
-## Latest Release: 2.1.0
+## Latest Release: 3.0.0
 
 
 
