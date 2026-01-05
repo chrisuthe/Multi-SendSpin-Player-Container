@@ -121,7 +121,7 @@ jobs:
           readme-filepath: ./README.md
 
   # ==========================================================================
-  # Update HAOS Add-on Version for Dev Branch (commit SHA)
+  # Update HAOS Dev Add-on Version (commit SHA on main branch)
   # ==========================================================================
   update-addon-version-dev:
     runs-on: ubuntu-latest
@@ -130,70 +130,75 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
+      - name: Checkout main branch
         uses: actions/checkout@v6
         with:
-          ref: dev
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update config.yaml with commit SHA
+      - name: Update multiroom-audio-dev config.yaml with commit SHA
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          sed -i "s/^version: \".*\"/version: \"sha-${SHORT_SHA}\"/" multiroom-audio/config.yaml
-          echo "Updated config.yaml to version sha-${SHORT_SHA}"
-          cat multiroom-audio/config.yaml | head -5
+          sed -i "s/^version: .*/version: \"sha-${SHORT_SHA}\"/" multiroom-audio-dev/config.yaml
+          echo "Updated multiroom-audio-dev/config.yaml to version sha-${SHORT_SHA}"
+          cat multiroom-audio-dev/config.yaml | head -5
 
-      - name: Update DOCS.md with dev changes
+      - name: Update multiroom-audio-dev DOCS.md with dev changes
         shell: bash
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
 
+          # Fetch dev branch to get commit history
+          git fetch origin dev
+
           # Get the last release tag
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
-          # Get commit messages since last tag (or last 10 if no tag)
+          # Get commit messages since last tag from dev branch
           if [ -n "$LAST_TAG" ]; then
-            COMMITS=$(git log --oneline ${LAST_TAG}..HEAD --pretty=format:"- %s" | grep -v "\[skip ci\]" | head -20)
+            COMMITS=$(git log origin/dev --oneline ${LAST_TAG}..origin/dev --pretty=format:"- %s" | grep -v "\[skip ci\]" | head -20)
             SINCE_TEXT="since $LAST_TAG"
           else
-            COMMITS=$(git log --oneline -10 --pretty=format:"- %s" | grep -v "\[skip ci\]")
+            COMMITS=$(git log origin/dev --oneline -10 --pretty=format:"- %s" | grep -v "\[skip ci\]")
             SINCE_TEXT="(recent)"
           fi
 
           # Create the dev version info block using heredoc
           cat > /tmp/dev_info.txt << DEVEOF
-          ## 🚧 Development Build: sha-${SHORT_SHA}
+          ## Development Build: sha-${SHORT_SHA}
 
           **Current Dev Build Changes** ${SINCE_TEXT}
 
           ${COMMITS}
 
-          > ⚠️ This is a development build. For stable releases, use the \`latest\` tag.
+          > WARNING: This is a development build. For stable releases, use the stable add-on.
           DEVEOF
 
           # Remove leading spaces from heredoc
           sed -i 's/^          //' /tmp/dev_info.txt
 
-          # Replace the VERSION_INFO section in DOCS.md using sed
-          # First, extract everything before and after the markers
-          head -n $(grep -n "VERSION_INFO_START" multiroom-audio/DOCS.md | cut -d: -f1) multiroom-audio/DOCS.md > /tmp/docs_new.md
-          cat /tmp/dev_info.txt >> /tmp/docs_new.md
-          tail -n +$(grep -n "VERSION_INFO_END" multiroom-audio/DOCS.md | cut -d: -f1) multiroom-audio/DOCS.md >> /tmp/docs_new.md
-          mv /tmp/docs_new.md multiroom-audio/DOCS.md
+          # Check if multiroom-audio-dev/DOCS.md has VERSION_INFO markers
+          if grep -q "VERSION_INFO_START" multiroom-audio-dev/DOCS.md 2>/dev/null; then
+            head -n $(grep -n "VERSION_INFO_START" multiroom-audio-dev/DOCS.md | cut -d: -f1) multiroom-audio-dev/DOCS.md > /tmp/docs_new.md
+            cat /tmp/dev_info.txt >> /tmp/docs_new.md
+            tail -n +$(grep -n "VERSION_INFO_END" multiroom-audio-dev/DOCS.md | cut -d: -f1) multiroom-audio-dev/DOCS.md >> /tmp/docs_new.md
+            mv /tmp/docs_new.md multiroom-audio-dev/DOCS.md
+            echo "Updated multiroom-audio-dev/DOCS.md with dev changes"
+          else
+            echo "No VERSION_INFO markers in multiroom-audio-dev/DOCS.md, skipping"
+          fi
 
-          echo "Updated DOCS.md with dev changes"
-
-      - name: Commit and push version update
+      - name: Commit and push version update to main
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add multiroom-audio/config.yaml multiroom-audio/DOCS.md
+          git add multiroom-audio-dev/config.yaml multiroom-audio-dev/DOCS.md
           if git diff --staged --quiet; then
             echo "No version change needed"
           else
-            git commit -m "chore: update dev version to sha-$(echo "${{ github.sha }}" | cut -c1-7) [skip ci]"
-            git push origin dev
-            echo "Version bump committed and pushed"
+            git commit -m "chore: update dev add-on version to sha-$(echo "${{ github.sha }}" | cut -c1-7) [skip ci]"
+            git push origin main
+            echo "Dev add-on version bump committed to main"
           fi
 
   # ==========================================================================
@@ -241,7 +246,7 @@ jobs:
 
           # Create the release version info block
           cat > /tmp/release_info.txt << RELEOF
-          ## 📦 Latest Release: ${VERSION}
+          ## Latest Release: ${VERSION}
 
           ${RELEASE_TITLE}
           ${RELEASE_NOTES}
