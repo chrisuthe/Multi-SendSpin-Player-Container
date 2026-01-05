@@ -20,13 +20,17 @@ if [ -f "/data/options.json" ] || [ -n "$SUPERVISOR_TOKEN" ]; then
     # - /etc/asound.conf (ALSA config)
 
     # Ensure PULSE_SERVER is set correctly for HAOS
-    # The supervisor's client.conf should handle this, but set explicitly for reliability
-    if [ -S "/run/audio/native" ]; then
+    # HAOS uses /run/audio/pulse.sock as the socket path
+    if [ -S "/run/audio/pulse.sock" ]; then
+        export PULSE_SERVER="unix:/run/audio/pulse.sock"
+        echo "Found PulseAudio socket at /run/audio/pulse.sock"
+    elif [ -S "/run/audio/native" ]; then
         export PULSE_SERVER="unix:/run/audio/native"
         echo "Found PulseAudio socket at /run/audio/native"
     elif [ -d "/run/audio" ]; then
-        export PULSE_SERVER="unix:/run/audio"
-        echo "Found PulseAudio directory at /run/audio"
+        # Fallback - let pactl try to find it
+        export PULSE_SERVER="unix:/run/audio/pulse.sock"
+        echo "PulseAudio directory exists at /run/audio (socket may not be ready)"
     fi
 
     # Show mounted audio config for diagnostics
@@ -44,15 +48,22 @@ if [ -f "/data/options.json" ] || [ -n "$SUPERVISOR_TOKEN" ]; then
     MAX_WAIT=30
     WAIT_COUNT=0
 
-    # First wait for the socket file to exist
-    while [ ! -S "/run/audio/native" ] && [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+    # First wait for the socket file to exist (HAOS uses pulse.sock)
+    while [ ! -S "/run/audio/pulse.sock" ] && [ ! -S "/run/audio/native" ] && [ $WAIT_COUNT -lt $MAX_WAIT ]; do
         WAIT_COUNT=$((WAIT_COUNT + 1))
         if [ $((WAIT_COUNT % 5)) -eq 0 ]; then
-            echo "Waiting for /run/audio/native socket... (${WAIT_COUNT}s)"
+            echo "Waiting for PulseAudio socket... (${WAIT_COUNT}s)"
             ls -la /run/audio/ 2>/dev/null || echo "  /run/audio not mounted yet"
         fi
         sleep 1
     done
+
+    # Update PULSE_SERVER if socket appeared
+    if [ -S "/run/audio/pulse.sock" ]; then
+        export PULSE_SERVER="unix:/run/audio/pulse.sock"
+    elif [ -S "/run/audio/native" ]; then
+        export PULSE_SERVER="unix:/run/audio/native"
+    fi
 
     # Then verify pactl can connect
     WAIT_COUNT=0
@@ -63,7 +74,8 @@ if [ -f "/data/options.json" ] || [ -n "$SUPERVISOR_TOKEN" ]; then
             echo "WARNING: PulseAudio not responding after ${MAX_WAIT}s"
             echo "Diagnostics:"
             echo "  PULSE_SERVER=$PULSE_SERVER"
-            echo "  Socket exists: $([ -S /run/audio/native ] && echo yes || echo no)"
+            echo "  pulse.sock exists: $([ -S /run/audio/pulse.sock ] && echo yes || echo no)"
+            echo "  native exists: $([ -S /run/audio/native ] && echo yes || echo no)"
             ls -la /run/audio/ 2>/dev/null || echo "  /run/audio directory not found"
             echo ""
             echo "Starting anyway - audio devices may not be available."
