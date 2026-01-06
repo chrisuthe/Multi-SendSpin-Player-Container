@@ -37,10 +37,10 @@ internal static class AlsaNative
         S16_BE = 3,       // Signed 16 bit Big Endian
         U16_LE = 4,       // Unsigned 16 bit Little Endian
         U16_BE = 5,       // Unsigned 16 bit Big Endian
-        S24_LE = 6,       // Signed 24 bit Little Endian (3 bytes)
-        S24_BE = 7,       // Signed 24 bit Big Endian (3 bytes)
-        U24_LE = 8,       // Unsigned 24 bit Little Endian (3 bytes)
-        U24_BE = 9,       // Unsigned 24 bit Big Endian (3 bytes)
+        S24_LE = 6,       // Signed 24 bit Little Endian in 4-byte container (low 3 bytes used)
+        S24_BE = 7,       // Signed 24 bit Big Endian in 4-byte container (low 3 bytes used)
+        U24_LE = 8,       // Unsigned 24 bit Little Endian in 4-byte container (low 3 bytes used)
+        U24_BE = 9,       // Unsigned 24 bit Big Endian in 4-byte container (low 3 bytes used)
         S32_LE = 10,      // Signed 32 bit Little Endian
         S32_BE = 11,      // Signed 32 bit Big Endian
         U32_LE = 12,      // Unsigned 32 bit Little Endian
@@ -247,6 +247,135 @@ internal static class AlsaNative
     public const int ESTRPIPE = -86;    // Streams pipe error (suspend)
     public const int EAGAIN = -11;      // Try again (non-blocking)
     public const int EINTR = -4;        // Interrupted system call
+
+    #endregion
+
+    #region Hardware Parameters (Capability Detection)
+
+    /// <summary>
+    /// Allocate a hardware parameters structure.
+    /// Must be freed with HwParamsFree.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_malloc")]
+    public static extern int HwParamsMalloc(out IntPtr hwParams);
+
+    /// <summary>
+    /// Free a hardware parameters structure.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_free")]
+    public static extern void HwParamsFree(IntPtr hwParams);
+
+    /// <summary>
+    /// Fill params with a full configuration space for a PCM.
+    /// This retrieves ALL possible hardware configurations.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_any")]
+    public static extern int HwParamsAny(IntPtr pcm, IntPtr hwParams);
+
+    /// <summary>
+    /// Extract minimum sample rate from a configuration space.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_get_rate_min")]
+    public static extern int GetRateMin(IntPtr hwParams, out uint val, out int dir);
+
+    /// <summary>
+    /// Extract maximum sample rate from a configuration space.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_get_rate_max")]
+    public static extern int GetRateMax(IntPtr hwParams, out uint val, out int dir);
+
+    /// <summary>
+    /// Test if a specific sample rate is supported.
+    /// Returns 0 if supported, negative error code otherwise.
+    /// </summary>
+    /// <param name="pcm">PCM handle.</param>
+    /// <param name="hwParams">Hardware params filled with HwParamsAny.</param>
+    /// <param name="val">Sample rate to test.</param>
+    /// <param name="dir">Direction: -1 = less, 0 = exact, 1 = greater.</param>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_test_rate")]
+    public static extern int TestRate(IntPtr pcm, IntPtr hwParams, uint val, int dir);
+
+    /// <summary>
+    /// Test if a specific format is supported.
+    /// Returns 0 if supported, negative error code otherwise.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_test_format")]
+    public static extern int TestFormat(IntPtr pcm, IntPtr hwParams, Format format);
+
+    /// <summary>
+    /// Extract minimum channel count from a configuration space.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_get_channels_min")]
+    public static extern int GetChannelsMin(IntPtr hwParams, out uint val);
+
+    /// <summary>
+    /// Extract maximum channel count from a configuration space.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_get_channels_max")]
+    public static extern int GetChannelsMax(IntPtr hwParams, out uint val);
+
+    #endregion
+
+    #region Format Mask (Bulk Format Query)
+
+    /// <summary>
+    /// Allocate a format mask structure.
+    /// Must be freed with FormatMaskFree.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_format_mask_malloc")]
+    public static extern int FormatMaskMalloc(out IntPtr mask);
+
+    /// <summary>
+    /// Free a format mask structure.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_format_mask_free")]
+    public static extern void FormatMaskFree(IntPtr mask);
+
+    /// <summary>
+    /// Get format mask from hardware parameters.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_hw_params_get_format_mask")]
+    public static extern void GetFormatMask(IntPtr hwParams, IntPtr mask);
+
+    /// <summary>
+    /// Test if a format is present in the mask.
+    /// Returns non-zero if format is in mask.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_format_mask_test")]
+    public static extern int FormatMaskTest(IntPtr mask, Format format);
+
+    /// <summary>
+    /// Get the name of a format.
+    /// </summary>
+    [DllImport(LibAsound, EntryPoint = "snd_pcm_format_name")]
+    private static extern IntPtr FormatNameNative(Format format);
+
+    /// <summary>
+    /// Get format name as managed string.
+    /// </summary>
+    public static string GetFormatName(Format format)
+    {
+        var ptr = FormatNameNative(format);
+        return Marshal.PtrToStringAnsi(ptr) ?? format.ToString();
+    }
+
+    /// <summary>
+    /// Get bit depth for a format.
+    /// </summary>
+    public static int GetBitDepth(Format format)
+    {
+        return format switch
+        {
+            Format.S8 or Format.U8 => 8,
+            Format.S16_LE or Format.S16_BE or Format.U16_LE or Format.U16_BE => 16,
+            Format.S24_LE or Format.S24_BE or Format.U24_LE or Format.U24_BE or
+            Format.S24_3LE or Format.S24_3BE => 24,
+            Format.S32_LE or Format.S32_BE or Format.U32_LE or Format.U32_BE or
+            Format.FLOAT_LE or Format.FLOAT_BE => 32,
+            Format.FLOAT64_LE or Format.FLOAT64_BE => 64,
+            _ => 0
+        };
+    }
 
     #endregion
 }

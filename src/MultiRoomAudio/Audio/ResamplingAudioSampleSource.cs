@@ -30,6 +30,11 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource, IDisposabl
     private readonly ILogger? _logger;
 
     // Playback rate (1.0 = normal, clamped to 0.96-1.04)
+    // Thread safety note: This field is written by the event handler thread (OnTargetPlaybackRateChanged)
+    // and read by the audio callback thread (ReadWithResampling). On x64/ARM64 (our target platforms),
+    // aligned 64-bit reads/writes are atomic at the hardware level. The bounded range [0.96, 1.04]
+    // ensures any transient inconsistency is benign. We intentionally avoid Interlocked overhead
+    // since the audio callback frequency naturally provides rapid convergence to correct values.
     private double _playbackRate = 1.0;
     private const double MinRate = 0.96;
     private const double MaxRate = 1.04;
@@ -45,7 +50,7 @@ public sealed class ResamplingAudioSampleSource : IAudioSampleSource, IDisposabl
     // Division by _channels in ReadWithResampling and EnsureSourceSamples is therefore safe.
     private int _channels;
 
-    // Diagnostic tracking
+    // Diagnostic tracking (only accessed from event handler thread, no synchronization needed)
     private DateTime _lastRateLogTime = DateTime.MinValue;
     private int _rateChangeCount;
     private double _lastLoggedRate = 1.0;

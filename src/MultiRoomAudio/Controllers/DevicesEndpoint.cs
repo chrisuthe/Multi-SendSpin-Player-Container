@@ -117,6 +117,47 @@ public static class DevicesEndpoint
         .WithName("GetDevice")
         .WithDescription("Get details of a specific audio device");
 
+        // GET /api/devices/{id}/capabilities - Get device audio capabilities
+        group.MapGet("/{id}/capabilities", (string id, BackendFactory backendFactory, ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("DevicesEndpoint");
+            logger.LogDebug("API: GET /api/devices/{DeviceId}/capabilities", id);
+            try
+            {
+                var capabilities = backendFactory.GetDeviceCapabilities(id);
+                if (capabilities == null)
+                {
+                    logger.LogDebug("Could not query capabilities for device {DeviceId}", id);
+                    return Results.NotFound(new ErrorResponse(false, $"Could not query capabilities for device '{id}'"));
+                }
+
+                logger.LogDebug("Device {DeviceId} capabilities: rates=[{Rates}], depths=[{Depths}]",
+                    id,
+                    string.Join(",", capabilities.SupportedSampleRates),
+                    string.Join(",", capabilities.SupportedBitDepths));
+
+                return Results.Ok(new
+                {
+                    deviceId = id,
+                    capabilities.SupportedSampleRates,
+                    capabilities.SupportedBitDepths,
+                    capabilities.MaxChannels,
+                    capabilities.PreferredSampleRate,
+                    capabilities.PreferredBitDepth
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to get capabilities for device {DeviceId}", id);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to get device capabilities");
+            }
+        })
+        .WithName("GetDeviceCapabilities")
+        .WithDescription("Get audio format capabilities of a specific device (sample rates, bit depths)");
+
         // POST /api/devices/refresh - Refresh device list
         group.MapPost("/refresh", (BackendFactory backendFactory, ILoggerFactory loggerFactory) =>
         {

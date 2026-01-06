@@ -51,12 +51,36 @@ public class PulseAudioBackend : IBackend
         PulseAudioDeviceEnumerator.RefreshDevices();
     }
 
+    public DeviceCapabilities? GetDeviceCapabilities(string? deviceId)
+    {
+        // PulseAudio doesn't expose detailed device capabilities directly.
+        // Return default high-res support as PulseAudio handles resampling internally.
+        _logger.LogDebug("PulseAudio capability query for sink: {Sink} (returning defaults)", deviceId ?? "default");
+
+        return new DeviceCapabilities(
+            SupportedSampleRates: new[] { 44100, 48000, 88200, 96000, 176400, 192000 },
+            SupportedBitDepths: new[] { 16, 24, 32 },
+            MaxChannels: 2,
+            PreferredSampleRate: 192000,
+            PreferredBitDepth: 24
+        );
+    }
+
     public IAudioPlayer CreatePlayer(string? deviceId, ILoggerFactory loggerFactory)
     {
-        _logger.LogDebug("Creating PulseAudio player for sink: {Sink}", deviceId ?? "default");
+        return CreatePlayer(deviceId, loggerFactory, null);
+    }
+
+    public IAudioPlayer CreatePlayer(string? deviceId, ILoggerFactory loggerFactory, AudioOutputFormat? outputFormat)
+    {
+        _logger.LogDebug("Creating PulseAudio player for sink: {Sink}, format: {Format}",
+            deviceId ?? "default",
+            outputFormat != null ? $"{outputFormat.SampleRate}Hz/{outputFormat.BitDepth}-bit" : "default");
+
         return new PulseAudioPlayer(
             loggerFactory.CreateLogger<PulseAudioPlayer>(),
-            deviceId);
+            deviceId,
+            outputFormat);
     }
 
     public async Task<bool> SetVolumeAsync(string? deviceId, int volume, CancellationToken cancellationToken = default)

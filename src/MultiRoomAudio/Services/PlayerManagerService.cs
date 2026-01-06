@@ -121,13 +121,70 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// <summary>
     /// Disposes all resources for a player context in the correct order.
     /// Used by RemoveAndDisposePlayerAsync, Dispose, and DisposeAsync.
+    /// Ensures all resources are disposed even if some throw exceptions.
     /// </summary>
     private static async Task DisposePlayerContextAsync(PlayerContext context)
     {
-        await context.Client.DisposeAsync();
-        await context.Pipeline.DisposeAsync();
-        await context.Player.DisposeAsync();
-        await context.Connection.DisposeAsync();
+        List<Exception>? exceptions = null;
+
+        // Dispose each resource, collecting any exceptions
+        // Continue disposing remaining resources even if one fails
+        try
+        {
+            await context.Client.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            exceptions ??= new List<Exception>();
+            exceptions.Add(ex);
+        }
+
+        try
+        {
+            await context.Pipeline.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            exceptions ??= new List<Exception>();
+            exceptions.Add(ex);
+        }
+
+        try
+        {
+            await context.Player.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            exceptions ??= new List<Exception>();
+            exceptions.Add(ex);
+        }
+
+        try
+        {
+            await context.Connection.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            exceptions ??= new List<Exception>();
+            exceptions.Add(ex);
+        }
+
+        // Dispose the CancellationTokenSource to release internal resources
+        try
+        {
+            context.Cts.Dispose();
+        }
+        catch (Exception ex)
+        {
+            exceptions ??= new List<Exception>();
+            exceptions.Add(ex);
+        }
+
+        // If any exceptions occurred, throw an AggregateException
+        if (exceptions != null)
+        {
+            throw new AggregateException("One or more errors occurred during player context disposal", exceptions);
+        }
     }
 
     /// <summary>
@@ -214,7 +271,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                         ServerUrl = playerConfig.Server,
                         Volume = playerConfig.Volume ?? 100,
                         DelayMs = playerConfig.DelayMs,
-                        Persist = false // Already persisted, don't re-save
+                        Persist = false, // Already persisted, don't re-save
+                        OutputSampleRate = playerConfig.OutputSampleRate,
+                        OutputBitDepth = playerConfig.OutputBitDepth
                     };
 
                     await CreatePlayerAsync(request, cancellationToken);
@@ -318,8 +377,42 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
         try
         {
+            // Resolve output format: request > saved config > auto-detect > defaults
+            AudioOutputFormat? outputFormat = null;
+            if (request.OutputSampleRate.HasValue || request.OutputBitDepth.HasValue)
+            {
+                // Use explicitly specified values from request
+                outputFormat = new AudioOutputFormat(
+                    SampleRate: request.OutputSampleRate ?? 48000,
+                    BitDepth: request.OutputBitDepth ?? 32,
+                    Channels: 2);
+                _logger.LogInformation("Using requested output format: {SampleRate}Hz/{BitDepth}-bit",
+                    outputFormat.SampleRate, outputFormat.BitDepth);
+            }
+            else
+            {
+                // Try to auto-detect from device capabilities
+                var capabilities = _backendFactory.GetDeviceCapabilities(request.Device);
+                if (capabilities != null)
+                {
+                    outputFormat = new AudioOutputFormat(
+                        SampleRate: capabilities.PreferredSampleRate,
+                        BitDepth: capabilities.PreferredBitDepth,
+                        Channels: 2);
+                    _logger.LogInformation("Auto-detected output format: {SampleRate}Hz/{BitDepth}-bit (device supports: rates={Rates}, depths={Depths})",
+                        outputFormat.SampleRate, outputFormat.BitDepth,
+                        string.Join(",", capabilities.SupportedSampleRates),
+                        string.Join(",", capabilities.SupportedBitDepths));
+                }
+                else
+                {
+                    // Fallback to default (48kHz/32-bit float)
+                    _logger.LogDebug("No device capabilities available, using default output format");
+                }
+            }
+
             // 1. Create capabilities with player role
-            var capabilities = new ClientCapabilities
+            var clientCapabilities = new ClientCapabilities
             {
                 ClientId = request.ClientId ?? GenerateClientId(request.Name),
                 ClientName = request.Name,
@@ -332,8 +425,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             var clockSync = new KalmanClockSynchronizer(
                 _loggerFactory.CreateLogger<KalmanClockSynchronizer>());
 
-            // 3. Create audio player using the appropriate backend
-            var player = _backendFactory.CreatePlayer(request.Device, _loggerFactory);
+            // 3. Create audio player using the appropriate backend with output format
+            var player = _backendFactory.CreatePlayer(request.Device, _loggerFactory, outputFormat);
 
             // 4. Create audio pipeline with proper factories
             // Uses resampling source for smooth sync correction (SDK 2.2.0 tiered correction)
@@ -355,7 +448,22 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 playerFactory: () => player,
                 sourceFactory: (buffer, timeFunc) =>
                 {
-                    var source = new BufferedAudioSampleSource(buffer, timeFunc);
+                    IAudioSampleSource source = new BufferedAudioSampleSource(buffer, timeFunc);
+
+                    // Insert sample rate converter if output rate differs from source rate
+                    // Source is typically 48kHz from Sendspin, output may be up to 192kHz
+                    if (outputFormat != null && outputFormat.SampleRate != buffer.Format.SampleRate)
+                    {
+                        _logger.LogInformation(
+                            "Inserting sample rate converter: {SourceRate}Hz -> {OutputRate}Hz",
+                            buffer.Format.SampleRate, outputFormat.SampleRate);
+                        source = new SampleRateConverter(
+                            source,
+                            buffer.Format.SampleRate,
+                            outputFormat.SampleRate,
+                            _loggerFactory.CreateLogger<SampleRateConverter>());
+                    }
+
                     // Wrap with resampling for smooth playback rate adjustment (±4%)
                     return new ResamplingAudioSampleSource(
                         source,
@@ -374,7 +482,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 _loggerFactory.CreateLogger<SendspinClientService>(),
                 connection,
                 clockSync,
-                capabilities,
+                clientCapabilities,
                 pipeline);
 
             // 7. Create config for tracking
@@ -382,16 +490,19 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             {
                 Name = request.Name,
                 DeviceId = request.Device,
-                ClientId = capabilities.ClientId,
+                ClientId = clientCapabilities.ClientId,
                 ServerUrl = request.ServerUrl,
                 Volume = request.Volume,
-                DelayMs = request.DelayMs
+                DelayMs = request.DelayMs,
+                OutputSampleRate = outputFormat?.SampleRate,
+                OutputBitDepth = outputFormat?.BitDepth,
+                OutputFormat = outputFormat
             };
 
             // 8. Create context
             var cts = new CancellationTokenSource();
             var context = new PlayerContext(
-                client, connection, pipeline, player, clockSync, capabilities, config,
+                client, connection, pipeline, player, clockSync, clientCapabilities, config,
                 DateTime.UtcNow, cts)
             {
                 State = PlayerState.Created
@@ -417,7 +528,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                     Autostart = true,
                     DelayMs = request.DelayMs,
                     Server = request.ServerUrl,
-                    Volume = request.Volume
+                    Volume = request.Volume,
+                    OutputSampleRate = outputFormat?.SampleRate,
+                    OutputBitDepth = outputFormat?.BitDepth
                 };
                 _config.SetPlayer(request.Name, persistConfig);
                 _config.Save();
@@ -719,7 +832,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             ServerUrl = config.ServerUrl,
             Volume = config.Volume,
             DelayMs = config.DelayMs,
-            Persist = false // Already persisted
+            Persist = false, // Already persisted
+            OutputSampleRate = config.OutputSampleRate,
+            OutputBitDepth = config.OutputBitDepth
         };
 
         return await CreatePlayerAsync(request, ct);
@@ -935,7 +1050,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
             // Auto-stop player on pipeline error to prevent resource waste
             _logger.LogWarning("Auto-stopping player '{Name}' due to pipeline error", name);
-            _ = StopPlayerInternalAsync(name, "Pipeline error: " + error.Message);
+            FireAndForget(
+                StopPlayerInternalAsync(name, "Pipeline error: " + error.Message),
+                $"StopPlayerInternalAsync for '{name}' (pipeline error)");
         };
 
         context.Player.ErrorOccurred += (_, error) =>
@@ -946,7 +1063,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
             // Auto-stop player on audio error (e.g., device unavailable)
             _logger.LogWarning("Auto-stopping player '{Name}' due to audio error", name);
-            _ = StopPlayerInternalAsync(name, "Audio error: " + error.Message);
+            FireAndForget(
+                StopPlayerInternalAsync(name, "Audio error: " + error.Message),
+                $"StopPlayerInternalAsync for '{name}' (audio error)");
         };
 
         // Handle volume changes from server (Music Assistant UI, etc.)
@@ -1006,7 +1125,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 SamplesPlayed: context.SamplesPlayed,
                 Underruns: bufferStats.UnderrunCount,
                 Overruns: bufferStats.OverrunCount
-            ) : null
+            ) : null,
+            OutputFormat: context.Config.OutputFormat
         );
     }
 
@@ -1018,11 +1138,20 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
     private static List<AudioFormat> GetDefaultFormats()
     {
+        // Advertise hi-res formats to SendSpin/Music Assistant server
+        // Server will send highest quality available that we support
         return new List<AudioFormat>
         {
-            new AudioFormat { Codec = "opus", SampleRate = 48000, Channels = 2, Bitrate = 256 },
+            // Hi-res FLAC (preferred for quality)
+            new AudioFormat { Codec = "flac", SampleRate = 192000, Channels = 2 },
+            new AudioFormat { Codec = "flac", SampleRate = 96000, Channels = 2 },
+            new AudioFormat { Codec = "flac", SampleRate = 48000, Channels = 2 },
+            // Hi-res PCM
+            new AudioFormat { Codec = "pcm", SampleRate = 192000, Channels = 2, BitDepth = 24 },
+            new AudioFormat { Codec = "pcm", SampleRate = 96000, Channels = 2, BitDepth = 24 },
             new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 16 },
-            new AudioFormat { Codec = "flac", SampleRate = 48000, Channels = 2 }
+            // Opus for efficiency when streaming
+            new AudioFormat { Codec = "opus", SampleRate = 48000, Channels = 2, Bitrate = 256 },
         };
     }
 
@@ -1107,6 +1236,26 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         {
             _logger.LogWarning(ex, "Failed to broadcast player status update");
         }
+    }
+
+    /// <summary>
+    /// Safely executes a fire-and-forget task, ensuring any exceptions are logged.
+    /// Use this when discarding a Task to prevent unobserved exceptions.
+    /// </summary>
+    /// <param name="task">The task to execute.</param>
+    /// <param name="context">Description of what the task is doing (for logging).</param>
+    private void FireAndForget(Task task, string context)
+    {
+        task.ContinueWith(
+            t =>
+            {
+                if (t.IsFaulted && t.Exception != null)
+                {
+                    _logger.LogError(t.Exception.InnerException ?? t.Exception,
+                        "Unhandled exception in fire-and-forget task: {Context}", context);
+                }
+            },
+            TaskScheduler.Default);
     }
 
     /// <summary>

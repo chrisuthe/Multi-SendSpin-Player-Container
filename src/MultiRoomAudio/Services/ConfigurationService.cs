@@ -20,6 +20,10 @@ public class PlayerConfiguration
     // PortAudio device index (for Sendspin SDK)
     public int? PortAudioDeviceIndex { get; set; }
 
+    // Output format configuration (null = auto-detect from device)
+    public int? OutputSampleRate { get; set; }
+    public int? OutputBitDepth { get; set; }
+
     // Additional provider-specific settings
     public Dictionary<string, object>? Extra { get; set; }
 }

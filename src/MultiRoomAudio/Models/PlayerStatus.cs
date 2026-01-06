@@ -33,7 +33,8 @@ public record PlayerResponse(
     DateTime? ConnectedAt,
     string? ErrorMessage,
     bool IsClockSynced,
-    PlayerMetrics? Metrics
+    PlayerMetrics? Metrics,
+    AudioOutputFormat? OutputFormat = null
 );
 
 /// <summary>

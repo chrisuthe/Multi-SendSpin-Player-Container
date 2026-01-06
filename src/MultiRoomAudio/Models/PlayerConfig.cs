@@ -67,6 +67,20 @@ public class PlayerCreateRequest
     /// Persisted players will autostart on next launch.
     /// </summary>
     public bool Persist { get; set; } = true;
+
+    /// <summary>
+    /// Output sample rate in Hz. If null, auto-detect from device or use 48kHz default.
+    /// Supported values: 44100, 48000, 88200, 96000, 176400, 192000.
+    /// </summary>
+    [Range(44100, 192000, ErrorMessage = "OutputSampleRate must be between 44100 and 192000 Hz.")]
+    public int? OutputSampleRate { get; set; }
+
+    /// <summary>
+    /// Output bit depth. If null, auto-detect from device or use 32-bit float default.
+    /// Supported values: 16, 24, 32.
+    /// </summary>
+    [Range(16, 32, ErrorMessage = "OutputBitDepth must be 16, 24, or 32.")]
+    public int? OutputBitDepth { get; set; }
 }
 
 /// <summary>
@@ -124,4 +138,7 @@ public class PlayerConfig
     public int BufferSizeMs { get; set; } = 100;
     public int Volume { get; set; } = 75;
     public bool IsMuted { get; set; }
+    public int? OutputSampleRate { get; set; }
+    public int? OutputBitDepth { get; set; }
+    public AudioOutputFormat? OutputFormat { get; set; }
 }

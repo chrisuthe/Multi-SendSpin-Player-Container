@@ -1,3 +1,4 @@
+using MultiRoomAudio.Models;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 using static MultiRoomAudio.Audio.PulseAudio.PulseAudioNative;
@@ -32,6 +33,12 @@ public class PulseAudioPlayer : IAudioPlayer
     // Pre-allocated buffers for the playback thread
     private float[]? _sampleBuffer;
     private byte[]? _byteBuffer;
+
+    // Output format configuration
+    private AudioOutputFormat? _outputFormat;
+    private SampleFormat _paFormat = SampleFormat.FLOAT32LE;
+    private int _bytesPerSample = 4;
+    private bool _needsBitDepthConversion;
 
     /// <summary>
     /// Buffer size in milliseconds. Larger values increase latency but reduce underruns.
@@ -93,11 +100,33 @@ public class PulseAudioPlayer : IAudioPlayer
     /// Optional PulseAudio sink name. If null, uses the default sink.
     /// Can be a sink name like "alsa_output.usb-..." or sink index.
     /// </param>
-    public PulseAudioPlayer(ILogger<PulseAudioPlayer> logger, string? sinkName = null)
+    /// <param name="outputFormat">
+    /// Optional output format configuration. If null, uses 32-bit float output.
+    /// Specify sample rate and bit depth for hi-res output (e.g., 192kHz/24-bit).
+    /// </param>
+    public PulseAudioPlayer(ILogger<PulseAudioPlayer> logger, string? sinkName = null, AudioOutputFormat? outputFormat = null)
     {
         _logger = logger;
         _sinkName = sinkName;
+        _outputFormat = outputFormat;
+
+        // Determine PulseAudio format based on requested bit depth
+        if (outputFormat != null)
+        {
+            (_paFormat, _bytesPerSample, _needsBitDepthConversion) = outputFormat.BitDepth switch
+            {
+                16 => (SampleFormat.S16LE, 2, true),
+                24 => (SampleFormat.S24_32LE, 4, true),  // 24-bit in 32-bit container
+                32 => (SampleFormat.FLOAT32LE, 4, false),
+                _ => (SampleFormat.FLOAT32LE, 4, false)
+            };
+        }
     }
+
+    /// <summary>
+    /// Gets the configured output format, or null if using default.
+    /// </summary>
+    public AudioOutputFormat? OutputFormat => _outputFormat;
 
     public Task InitializeAsync(AudioFormat format, CancellationToken cancellationToken = default)
     {
@@ -105,15 +134,19 @@ public class PulseAudioPlayer : IAudioPlayer
         {
             try
             {
+                // Determine actual sample rate to use (output format overrides incoming)
+                var actualSampleRate = _outputFormat?.SampleRate ?? format.SampleRate;
+
                 _logger.LogInformation(
-                    "Initializing PulseAudio player with format: {SampleRate}Hz, {Channels}ch, sink: {Sink}",
-                    format.SampleRate, format.Channels, _sinkName ?? "default");
+                    "Initializing PulseAudio player: {SampleRate}Hz, {Channels}ch, {BitDepth}-bit, sink: {Sink}",
+                    actualSampleRate, format.Channels,
+                    _outputFormat?.BitDepth ?? 32, _sinkName ?? "default");
 
                 // Create sample spec for PulseAudio
                 var sampleSpec = new SampleSpec
                 {
-                    Format = SampleFormat.FLOAT32LE,
-                    Rate = (uint)format.SampleRate,
+                    Format = _paFormat,
+                    Rate = (uint)actualSampleRate,
                     Channels = (byte)format.Channels
                 };
 
@@ -172,7 +205,7 @@ public class PulseAudioPlayer : IAudioPlayer
                 // Pre-allocate buffers
                 var samplesPerWrite = FramesPerWrite * format.Channels;
                 _sampleBuffer = new float[samplesPerWrite];
-                _byteBuffer = new byte[samplesPerWrite * sizeof(float)];
+                _byteBuffer = new byte[samplesPerWrite * _bytesPerSample];
 
                 SetState(AudioPlayerState.Stopped);
 
@@ -418,8 +451,15 @@ public class PulseAudioPlayer : IAudioPlayer
                     continue;
                 }
 
+                // Capture handle under lock to prevent race with disposal/reconnection
+                IntPtr handle;
+                lock (_lock)
+                {
+                    handle = _paHandle;
+                }
+
                 // Check if handle is valid, attempt reconnect if needed
-                if (_paHandle == IntPtr.Zero)
+                if (handle == IntPtr.Zero)
                 {
                     _logger.LogWarning("PulseAudio handle is null - attempting reconnection...");
                     if (!TryReconnect())
@@ -449,19 +489,33 @@ public class PulseAudioPlayer : IAudioPlayer
                     buffer[i] *= vol;
                 }
 
-                // Convert float samples to bytes
-                Buffer.BlockCopy(buffer, 0, byteBuffer, 0, samplesRead * sizeof(float));
+                // Convert float samples to output format
+                if (_needsBitDepthConversion)
+                {
+                    var bitDepth = _outputFormat?.BitDepth ?? 32;
+                    BitDepthConverter.Convert(
+                        buffer.AsSpan(0, samplesRead),
+                        byteBuffer.AsSpan(0, samplesRead * _bytesPerSample),
+                        bitDepth);
+                }
+                else
+                {
+                    // Direct copy for float output
+                    Buffer.BlockCopy(buffer, 0, byteBuffer, 0, samplesRead * sizeof(float));
+                }
 
-                // Write to PulseAudio
+                // Write to PulseAudio using the captured handle
+                // Note: The handle was captured at loop start; if disposal occurred mid-loop,
+                // the native call may fail but won't crash due to null pointer
                 bool writeSuccess = false;
                 unsafe
                 {
                     fixed (byte* ptr = byteBuffer)
                     {
                         var result = SimpleWrite(
-                            _paHandle,
+                            handle,
                             (IntPtr)ptr,
-                            (UIntPtr)(samplesRead * sizeof(float)),
+                            (UIntPtr)(samplesRead * _bytesPerSample),
                             out var error);
 
                         if (result < 0)
@@ -570,11 +624,14 @@ public class PulseAudioPlayer : IAudioPlayer
 
             try
             {
+                // Use configured output sample rate if specified
+                var actualSampleRate = _outputFormat?.SampleRate ?? _currentFormat.SampleRate;
+
                 // Create new connection
                 var sampleSpec = new SampleSpec
                 {
-                    Format = SampleFormat.FLOAT32LE,
-                    Rate = (uint)_currentFormat.SampleRate,
+                    Format = _paFormat,
+                    Rate = (uint)actualSampleRate,
                     Channels = (byte)_currentFormat.Channels
                 };
 

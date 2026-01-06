@@ -48,12 +48,30 @@ public partial class AlsaBackend : IBackend
         AlsaDeviceEnumerator.RefreshDevices();
     }
 
+    public DeviceCapabilities? GetDeviceCapabilities(string? deviceId)
+    {
+        var device = deviceId ?? "default";
+        _logger.LogDebug("Probing capabilities for ALSA device: {Device}", device);
+
+        var probe = new AlsaCapabilityProbe(_logger);
+        return probe.Probe(device);
+    }
+
     public IAudioPlayer CreatePlayer(string? deviceId, ILoggerFactory loggerFactory)
     {
-        _logger.LogDebug("Creating ALSA player for device: {Device}", deviceId ?? "default");
+        return CreatePlayer(deviceId, loggerFactory, null);
+    }
+
+    public IAudioPlayer CreatePlayer(string? deviceId, ILoggerFactory loggerFactory, AudioOutputFormat? outputFormat)
+    {
+        _logger.LogDebug("Creating ALSA player for device: {Device}, format: {Format}",
+            deviceId ?? "default",
+            outputFormat != null ? $"{outputFormat.SampleRate}Hz/{outputFormat.BitDepth}-bit" : "default");
+
         return new AlsaPlayer(
             loggerFactory.CreateLogger<AlsaPlayer>(),
-            deviceId);
+            deviceId,
+            outputFormat);
     }
 
     /// <summary>

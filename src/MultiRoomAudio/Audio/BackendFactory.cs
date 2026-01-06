@@ -104,11 +104,27 @@ public class BackendFactory
     }
 
     /// <summary>
+    /// Gets device capabilities (supported sample rates, bit depths).
+    /// </summary>
+    public DeviceCapabilities? GetDeviceCapabilities(string? deviceId)
+    {
+        return _backend.GetDeviceCapabilities(deviceId);
+    }
+
+    /// <summary>
     /// Creates an audio player for the specified device.
     /// </summary>
     public Sendspin.SDK.Audio.IAudioPlayer CreatePlayer(string? deviceId, ILoggerFactory loggerFactory)
     {
         return _backend.CreatePlayer(deviceId, loggerFactory);
+    }
+
+    /// <summary>
+    /// Creates an audio player with a specific output format.
+    /// </summary>
+    public Sendspin.SDK.Audio.IAudioPlayer CreatePlayer(string? deviceId, ILoggerFactory loggerFactory, AudioOutputFormat? outputFormat)
+    {
+        return _backend.CreatePlayer(deviceId, loggerFactory, outputFormat);
     }
 
     /// <summary>

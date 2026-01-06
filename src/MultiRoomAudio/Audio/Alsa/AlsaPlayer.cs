@@ -1,3 +1,4 @@
+using MultiRoomAudio.Models;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 
@@ -27,6 +28,12 @@ public class AlsaPlayer : IAudioPlayer
     private CancellationTokenSource? _playbackCts;
     private volatile bool _isPlaying;
     private volatile bool _isPaused;
+
+    // Output format configuration
+    private AudioOutputFormat? _outputFormat;
+    private AlsaNative.Format _alsaFormat = AlsaNative.Format.FLOAT_LE;
+    private int _bytesPerSample = 4;
+    private bool _needsBitDepthConversion;
 
     // Pre-allocated buffers for the playback thread
     private float[]? _sampleBuffer;
@@ -95,11 +102,33 @@ public class AlsaPlayer : IAudioPlayer
     /// - "plughw:0,0" for plugin-wrapped hardware
     /// - Custom device from asound.conf (e.g., "zone1")
     /// </param>
-    public AlsaPlayer(ILogger<AlsaPlayer> logger, string? deviceName = null)
+    /// <param name="outputFormat">
+    /// Optional output format configuration. If null, uses 32-bit float output.
+    /// Specify sample rate and bit depth for hi-res output (e.g., 192kHz/24-bit).
+    /// </param>
+    public AlsaPlayer(ILogger<AlsaPlayer> logger, string? deviceName = null, AudioOutputFormat? outputFormat = null)
     {
         _logger = logger;
         _deviceName = deviceName ?? "default";
+        _outputFormat = outputFormat;
+
+        // Determine ALSA format based on requested bit depth
+        if (outputFormat != null)
+        {
+            (_alsaFormat, _bytesPerSample, _needsBitDepthConversion) = outputFormat.BitDepth switch
+            {
+                16 => (AlsaNative.Format.S16_LE, 2, true),
+                24 => (AlsaNative.Format.S24_LE, 4, true),  // 24-bit in 4-byte container
+                32 => (AlsaNative.Format.FLOAT_LE, 4, false),
+                _ => (AlsaNative.Format.FLOAT_LE, 4, false)
+            };
+        }
     }
+
+    /// <summary>
+    /// Gets the configured output format, or null if using default.
+    /// </summary>
+    public AudioOutputFormat? OutputFormat => _outputFormat;
 
     public Task InitializeAsync(AudioFormat format, CancellationToken cancellationToken = default)
     {
@@ -107,9 +136,13 @@ public class AlsaPlayer : IAudioPlayer
         {
             try
             {
+                // Determine actual sample rate to use (output format overrides incoming)
+                var actualSampleRate = _outputFormat?.SampleRate ?? format.SampleRate;
+
                 _logger.LogInformation(
-                    "Initializing ALSA player with format: {SampleRate}Hz, {Channels}ch, device: {Device}",
-                    format.SampleRate, format.Channels, _deviceName);
+                    "Initializing ALSA player: {SampleRate}Hz, {Channels}ch, {BitDepth}-bit, device: {Device}",
+                    actualSampleRate, format.Channels,
+                    _outputFormat?.BitDepth ?? 32, _deviceName);
 
                 // Open the ALSA device
                 var result = AlsaNative.Open(
@@ -128,10 +161,10 @@ public class AlsaPlayer : IAudioPlayer
                 // Configure PCM parameters using simplified API
                 result = AlsaNative.SetParams(
                     _pcmHandle,
-                    AlsaNative.Format.FLOAT_LE,
+                    _alsaFormat,
                     AlsaNative.Access.RwInterleaved,
                     (uint)format.Channels,
-                    (uint)format.SampleRate,
+                    (uint)actualSampleRate,
                     1,  // Allow software resampling
                     TargetLatencyUs);
 
@@ -152,13 +185,13 @@ public class AlsaPlayer : IAudioPlayer
                 // Pre-allocate buffers
                 var samplesPerWrite = FramesPerWrite * format.Channels;
                 _sampleBuffer = new float[samplesPerWrite];
-                _byteBuffer = new byte[samplesPerWrite * sizeof(float)];
+                _byteBuffer = new byte[samplesPerWrite * _bytesPerSample];
 
                 SetState(AudioPlayerState.Stopped);
 
                 _logger.LogInformation(
-                    "ALSA player initialized. Device: {Device}, Latency: {Latency}ms",
-                    _deviceName, OutputLatencyMs);
+                    "ALSA player initialized. Device: {Device}, Format: {Format}, Rate: {Rate}Hz, Latency: {Latency}ms",
+                    _deviceName, AlsaNative.GetFormatName(_alsaFormat), actualSampleRate, OutputLatencyMs);
             }
             catch (Exception ex)
             {
@@ -258,6 +291,7 @@ public class AlsaPlayer : IAudioPlayer
     public void Stop()
     {
         Thread? threadToJoin = null;
+        IntPtr handleToDrop = IntPtr.Zero;
 
         lock (_lock)
         {
@@ -268,6 +302,15 @@ public class AlsaPlayer : IAudioPlayer
             _isPaused = false;
             _playbackCts?.Cancel();
             threadToJoin = _playbackThread;
+            handleToDrop = _pcmHandle;
+        }
+
+        // Call Drop() BEFORE waiting for thread to unblock any blocking WriteInterleaved call.
+        // This allows the playback thread to exit promptly instead of waiting for the
+        // blocking write to complete or timeout.
+        if (handleToDrop != IntPtr.Zero)
+        {
+            AlsaNative.Drop(handleToDrop);
         }
 
         // Wait for thread outside lock
@@ -285,12 +328,6 @@ public class AlsaPlayer : IAudioPlayer
             _playbackThread = null;
             _playbackCts?.Dispose();
             _playbackCts = null;
-
-            // Drain any remaining audio
-            if (_pcmHandle != IntPtr.Zero)
-            {
-                AlsaNative.Drop(_pcmHandle);
-            }
 
             SetState(AudioPlayerState.Stopped);
             _logger.LogInformation("Playback stopped");
@@ -404,8 +441,15 @@ public class AlsaPlayer : IAudioPlayer
                     continue;
                 }
 
+                // Capture handle under lock to prevent race condition with Stop/Dispose
+                IntPtr pcmHandle;
+                lock (_lock)
+                {
+                    pcmHandle = _pcmHandle;
+                }
+
                 // Check if handle is valid, attempt reconnect if needed
-                if (_pcmHandle == IntPtr.Zero)
+                if (pcmHandle == IntPtr.Zero)
                 {
                     _logger.LogWarning("ALSA handle is null - attempting reconnection...");
                     if (!TryReconnect())
@@ -434,20 +478,32 @@ public class AlsaPlayer : IAudioPlayer
                     buffer[i] *= vol;
                 }
 
-                // Convert float samples to bytes
-                Buffer.BlockCopy(buffer, 0, byteBuffer, 0, samplesRead * sizeof(float));
+                // Convert float samples to output format
+                if (_needsBitDepthConversion)
+                {
+                    var bitDepth = _outputFormat?.BitDepth ?? 32;
+                    BitDepthConverter.Convert(
+                        buffer.AsSpan(0, samplesRead),
+                        byteBuffer.AsSpan(0, samplesRead * _bytesPerSample),
+                        bitDepth);
+                }
+                else
+                {
+                    // Direct copy for float output
+                    Buffer.BlockCopy(buffer, 0, byteBuffer, 0, samplesRead * sizeof(float));
+                }
 
                 // Calculate frames
                 var frames = samplesRead / format.Channels;
 
-                // Write to ALSA
+                // Write to ALSA using captured handle
                 bool writeSuccess = false;
                 unsafe
                 {
                     fixed (byte* ptr = byteBuffer)
                     {
                         var written = AlsaNative.WriteInterleaved(
-                            _pcmHandle,
+                            pcmHandle,
                             (IntPtr)ptr,
                             (nuint)frames);
 
@@ -455,7 +511,7 @@ public class AlsaPlayer : IAudioPlayer
                         {
                             // Handle errors
                             var errorCode = (int)written;
-                            var recovered = HandlePlaybackError(errorCode);
+                            var recovered = HandlePlaybackError(pcmHandle, errorCode);
 
                             if (!recovered)
                             {
@@ -516,15 +572,17 @@ public class AlsaPlayer : IAudioPlayer
     /// <summary>
     /// Handles ALSA playback errors with recovery attempts.
     /// </summary>
+    /// <param name="pcmHandle">The PCM handle to use for recovery (captured to avoid race conditions).</param>
+    /// <param name="errorCode">The error code from the failed operation.</param>
     /// <returns>True if recovery succeeded, false if reconnection is needed.</returns>
-    private bool HandlePlaybackError(int errorCode)
+    private bool HandlePlaybackError(IntPtr pcmHandle, int errorCode)
     {
         // Try to recover from common errors
         if (errorCode == AlsaNative.EPIPE)
         {
             // Underrun - buffer ran empty
             _logger.LogDebug("ALSA underrun occurred, recovering...");
-            var recoverResult = AlsaNative.Recover(_pcmHandle, errorCode, 1);
+            var recoverResult = AlsaNative.Recover(pcmHandle, errorCode, 1);
             if (recoverResult < 0)
             {
                 _logger.LogWarning("Failed to recover from underrun: {Error}",
@@ -540,7 +598,7 @@ public class AlsaPlayer : IAudioPlayer
 
             // Try to resume
             int resumeResult;
-            while ((resumeResult = AlsaNative.Resume(_pcmHandle)) == AlsaNative.EAGAIN)
+            while ((resumeResult = AlsaNative.Resume(pcmHandle)) == AlsaNative.EAGAIN)
             {
                 Thread.Sleep(10);
             }
@@ -548,7 +606,7 @@ public class AlsaPlayer : IAudioPlayer
             if (resumeResult < 0)
             {
                 // Resume failed, try full recovery
-                var recoverResult = AlsaNative.Recover(_pcmHandle, errorCode, 1);
+                var recoverResult = AlsaNative.Recover(pcmHandle, errorCode, 1);
                 if (recoverResult < 0)
                 {
                     _logger.LogWarning("Failed to recover from suspend: {Error}",
@@ -569,7 +627,7 @@ public class AlsaPlayer : IAudioPlayer
             // Other error - try generic recovery
             _logger.LogWarning("ALSA write error: {Error}",
                 AlsaNative.GetErrorMessage(errorCode));
-            var recoverResult = AlsaNative.Recover(_pcmHandle, errorCode, 1);
+            var recoverResult = AlsaNative.Recover(pcmHandle, errorCode, 1);
             if (recoverResult < 0)
             {
                 _logger.LogError("Failed to recover from error: {Error}",
@@ -647,13 +705,16 @@ public class AlsaPlayer : IAudioPlayer
                     continue;
                 }
 
+                // Use configured output sample rate if specified
+                var actualSampleRate = _outputFormat?.SampleRate ?? _currentFormat.SampleRate;
+
                 // Configure PCM parameters
                 result = AlsaNative.SetParams(
                     newHandle,
-                    AlsaNative.Format.FLOAT_LE,
+                    _alsaFormat,
                     AlsaNative.Access.RwInterleaved,
                     (uint)_currentFormat.Channels,
-                    (uint)_currentFormat.SampleRate,
+                    (uint)actualSampleRate,
                     1,
                     TargetLatencyUs);
 
