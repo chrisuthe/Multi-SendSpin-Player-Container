@@ -13,18 +13,18 @@ This project enables you to run a single centralized server (like a NAS, Raspber
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     CENTRAL SERVER (Docker Host)                │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Multi-Room Audio Container                  │   │
-│  │                                                          │   │
-│  │   ┌──────────┐  ┌──────────┐  ┌──────────┐             │   │
-│  │   │ Player 1 │  │ Player 2 │  │ Player 3 │  ...        │   │
-│  │   │(Kitchen) │  │(Bedroom) │  │ (Patio)  │             │   │
-│  │   └────┬─────┘  └────┬─────┘  └────┬─────┘             │   │
-│  └────────┼─────────────┼─────────────┼────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              Multi-Room Audio Container                 │    │
+│  │                                                         │    │
+│  │   ┌──────────┐  ┌──────────┐  ┌──────────┐              │    │
+│  │   │ Player 1 │  │ Player 2 │  │ Player 3 │  ...         │    │
+│  │   │(Kitchen) │  │(Bedroom) │  │ (Patio)  │              │    │
+│  │   └────┬─────┘  └────┬─────┘  └────┬─────┘              │    │
+│  └────────┼─────────────┼─────────────┼────────────────────┘    │
 │           │             │             │                         │
-│      ┌────▼────┐   ┌────▼────┐   ┌────▼────┐                   │
-│      │USB DAC 1│   │USB DAC 2│   │USB DAC 3│                   │
-│      └────┬────┘   └────┬────┘   └────┬────┘                   │
+│      ┌────▼────┐   ┌────▼────┐   ┌────▼────┐                    │
+│      │USB DAC 1│   │USB DAC 2│   │SoundCard│                    │
+│      └────┬────┘   └────┬────┘   └────┬────┘                    │
 └───────────┼─────────────┼─────────────┼─────────────────────────┘
             │             │             │
        ┌────▼────┐   ┌────▼────┐   ┌────▼────┐
@@ -58,7 +58,7 @@ This project enables you to run a single centralized server (like a NAS, Raspber
 - **USB DACs**: Automatic detection via PortAudio
 - **Built-in Audio**: Support for motherboard audio outputs
 - **HDMI Audio**: Multi-channel HDMI audio output support
-- **Virtual Devices**: Null devices for testing
+- **Virtual Devices**: Null devices for testing, software defined ALSA devices
 
 ### Enterprise-Ready Features
 - **REST API**: Full programmatic control with Swagger documentation
@@ -81,6 +81,7 @@ This project enables you to run a single centralized server (like a NAS, Raspber
 ```bash
 docker run -d \
   --name multiroom-audio \
+  --network host \
   -p 8096:8096 \
   --device /dev/snd:/dev/snd \
   -v audio_config:/app/config \
@@ -92,12 +93,12 @@ Access web interface at `http://localhost:8096`
 ### Docker Compose
 
 ```yaml
-version: '3.8'
 services:
   multiroom-audio:
     image: ghcr.io/chrisuthe/multiroom-audio:latest
     container_name: multiroom-audio
     restart: unless-stopped
+    network_mode: host
     ports:
       - "8096:8096"
     devices:
@@ -161,15 +162,16 @@ See [HAOS Add-on Guide](docs/HAOS_ADDON_GUIDE.md) for detailed instructions.
 
 ```yaml
 volumes:
-  - ./config:/app/config       # Player configurations
-  - ./logs:/app/logs           # Application logs
+  - ./config:/app/config               # Player configurations
+  - ./logs:/app/logs                   # Application logs
+  - /etc/asound.conf:/etc/asound.conf  # Required only if you need to access software defined devices 
 ```
 
 ### Audio Device Access
 
 ```yaml
 devices:
-  - /dev/snd:/dev/snd          # All audio devices (Linux)
+  - /dev/snd:/dev/snd    # All audio devices (Linux)
 ```
 
 ## REST API
