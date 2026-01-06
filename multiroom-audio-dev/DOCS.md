@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-9003370
+## Development Build: sha-389b780
 
 **Current Dev Build Changes** (recent)
 
+- Fix 32-bit output
 - Initial draft of High Bitrate Support
 - Sort Cards alphabetically on server side, assume finer grain sorting on client side later.
 - fix rename
@@ -14,7 +15,6 @@
 - fix the fix though for HAOS
 - fix pulseAudio on HAOS
 - Fix Pulse Starting when It shouldn't
-- feat: show dynamic version/build info on startup
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
