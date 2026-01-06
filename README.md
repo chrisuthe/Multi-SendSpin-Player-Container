@@ -162,16 +162,16 @@ See [HAOS Add-on Guide](docs/HAOS_ADDON_GUIDE.md) for detailed instructions.
 
 ```yaml
 volumes:
-  - ./config:/app/config       # Player configurations
-  - ./logs:/app/logs           # Application logs
+  - ./config:/app/config               # Player configurations
+  - ./logs:/app/logs                   # Application logs
+  - /etc/asound.conf:/etc/asound.conf  # Required only if you need to access software defined devices 
 ```
 
 ### Audio Device Access
 
 ```yaml
 devices:
-  - /dev/snd:/dev/snd                  # All audio devices (Linux)
-  - /etc/asound.conf:/etc/asound.conf  # Required only if you need to access software defined devices 
+  - /dev/snd:/dev/snd    # All audio devices (Linux)
 ```
 
 ## REST API
