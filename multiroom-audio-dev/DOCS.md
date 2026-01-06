@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-3a11d79
+## Development Build: sha-0b65ecd
 
 **Current Dev Build Changes** (recent)
 
+- Add rename to player menu
 - include note about custom ALSA configs have health and status return proper version
 - Fix whitespace for linter
 - fix the fix though for HAOS
@@ -14,7 +15,6 @@
 - fix: push dev HASSIO image with SHA tag for HAOS compatibility
 - Filter more ALSA plugin devices
 - Update ALSA for graceful reconnect
-- - Add startup check if on HAOS to make sure pulseaudio is ready - Add reconnection if connection drops to audio provider - Add friendly names where possible to device dropdown
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
