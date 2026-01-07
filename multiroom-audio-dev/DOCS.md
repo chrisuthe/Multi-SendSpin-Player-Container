@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-0956d39
+## Development Build: sha-720a756
 
 **Current Dev Build Changes** (recent)
 
+- Attempt to diagnose timing issues by adding native rate option
 - Fix ALSA latency detection and delay offset functionality
 - Add Stats for Nerds feature to CHANGELOG
 - Update documentation for unified resampler and Stats for Nerds
@@ -14,7 +15,6 @@
 - Fix TPDF dithering to use triangular probability distribution
 - Show device capabilities and what is being used
 - Fix 32-bit output
-- Initial draft of High Bitrate Support
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
