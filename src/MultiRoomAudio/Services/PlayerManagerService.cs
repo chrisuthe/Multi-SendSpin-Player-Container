@@ -546,21 +546,21 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             // 11. Apply initial volume (software volume scaling)
             player.Volume = NormalizeVolume(request.Volume);
 
-            // 12. Apply delay offset: user offset + output latency compensation
-            // The SDK doesn't account for output buffer latency in sync calculations,
-            // so we compensate by advancing the target playback time by the output latency.
-            // Negative StaticDelayMs = play samples earlier to compensate for buffer delay.
-            var outputLatencyCompensation = -player.OutputLatencyMs;
-            var totalDelayMs = request.DelayMs + outputLatencyCompensation;
+            // 12. Apply delay offset: user offset + ALSA startup compensation
+            // ALSA has two sources of delay not accounted for by the SDK:
+            // 1. Output buffer latency (~50ms) - SDK sees this but doesn't use it for scheduling
+            // 2. Initial buffer fill time (~150ms) - 4-5 writes before ALSA auto-starts
+            // Total unaccounted delay is ~200ms, which matches observed sync error.
+            // Negative StaticDelayMs = play samples earlier to compensate.
+            const int AlsaStartupCompensationMs = 200; // 50ms buffer + ~150ms fill time
+            var startupCompensation = -AlsaStartupCompensationMs;
+            var totalDelayMs = request.DelayMs + startupCompensation;
 
-            if (totalDelayMs != 0)
-            {
-                clockSync.StaticDelayMs = totalDelayMs;
-            }
+            clockSync.StaticDelayMs = totalDelayMs;
 
             _logger.LogInformation(
-                "Delay offset for '{Name}': user={UserDelayMs}ms, latency compensation={LatencyCompMs}ms, total={TotalMs}ms",
-                request.Name, request.DelayMs, outputLatencyCompensation, totalDelayMs);
+                "Delay offset for '{Name}': user={UserDelayMs}ms, ALSA compensation={AlsaCompMs}ms, total={TotalMs}ms",
+                request.Name, request.DelayMs, startupCompensation, totalDelayMs);
 
             // 13. Persist configuration if requested
             if (request.Persist)
@@ -736,18 +736,19 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // Clamp to valid range
         delayMs = Math.Clamp(delayMs, -5000, 5000);
 
-        // Apply to the clock synchronizer: user delay + output latency compensation
-        // The SDK doesn't account for output buffer latency, so we compensate here.
-        var outputLatencyCompensation = -context.Player.OutputLatencyMs;
-        var totalDelayMs = delayMs + outputLatencyCompensation;
+        // Apply to the clock synchronizer: user delay + ALSA startup compensation
+        // ALSA has ~200ms of unaccounted delay (buffer + fill time).
+        const int AlsaStartupCompensationMs = 200;
+        var startupCompensation = -AlsaStartupCompensationMs;
+        var totalDelayMs = delayMs + startupCompensation;
         context.ClockSync.StaticDelayMs = totalDelayMs;
 
         // Update the stored config (user's value only, not the compensation)
         context.Config.DelayMs = delayMs;
 
         _logger.LogInformation(
-            "Set delay offset for '{Name}': user={UserDelayMs}ms, latency compensation={LatencyCompMs}ms, total={TotalMs}ms",
-            name, delayMs, outputLatencyCompensation, totalDelayMs);
+            "Set delay offset for '{Name}': user={UserDelayMs}ms, ALSA compensation={AlsaCompMs}ms, total={TotalMs}ms",
+            name, delayMs, startupCompensation, totalDelayMs);
 
         return true;
     }
