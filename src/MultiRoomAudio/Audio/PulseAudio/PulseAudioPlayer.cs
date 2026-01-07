@@ -101,7 +101,8 @@ public class PulseAudioPlayer : IAudioPlayer
     /// </param>
     /// <param name="outputFormat">
     /// Optional output format configuration. If null, uses 32-bit float output.
-    /// Specify sample rate and bit depth for hi-res output (e.g., 192kHz/24-bit).
+    /// Specifies the sample rate and bit depth to send to PulseAudio.
+    /// PulseAudio handles any necessary format conversion to the device.
     /// </param>
     public PulseAudioPlayer(ILogger<PulseAudioPlayer> logger, string? sinkName = null, AudioOutputFormat? outputFormat = null)
     {

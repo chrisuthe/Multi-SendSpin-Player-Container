@@ -4,93 +4,80 @@ This document provides detailed documentation of the Multi-Room Audio Controller
 
 ## Overview
 
-The audio pipeline transforms network-streamed audio from Music Assistant into high-quality output for USB DACs and sound cards. Key features include:
+The audio pipeline streams audio from Music Assistant to USB DACs and sound cards via PulseAudio. The architecture uses direct passthrough with PulseAudio handling all format conversion natively.
 
-- High-quality sample rate conversion (48kHz → 192kHz)
+Key features:
+- Direct audio passthrough to PulseAudio
 - Synchronized multi-room playback via clock synchronization
-- Dynamic playback rate adjustment for drift correction
-- Support for multiple audio backends (ALSA, PulseAudio)
+- Dynamic playback rate adjustment for drift correction via SDK
+- PulseAudio handles sample rate and format conversion to devices
 
 ---
 
 ## Signal Flow Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Music Assistant                                  │
-│                                                                          │
-│  - Audio library management                                              │
-│  - Streaming source selection                                            │
-│  - Player group coordination                                             │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-                                 │ Sendspin Protocol
-                                 │ (WebSocket + mDNS discovery)
-                                 │
-                                 v
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         SendSpin.SDK                                     │
-│                                                                          │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────┐  │
-│  │ ClockSync       │    │ TimedAudioBuffer│    │ SendspinClient      │  │
-│  │                 │    │                 │    │                     │  │
-│  │ - NTP-like sync │◄──►│ - Audio buffer  │◄───│ - Protocol handler  │  │
-│  │ - Drift measure │    │ - Sync timing   │    │ - Connection mgmt   │  │
-│  │ - Rate target   │    │ - Rate events   │    │ - Volume control    │  │
-│  └─────────────────┘    └────────┬────────┘    └─────────────────────┘  │
-│                                  │                                       │
-│                                  │ TargetPlaybackRateChanged event       │
-│                                  │ (0.96 - 1.04 range)                   │
-└──────────────────────────────────┼──────────────────────────────────────┘
-                                   │
-                                   │ PCM Float32 samples (typically 48kHz)
-                                   v
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    UnifiedPolyphaseResampler                             │
-│                                                                          │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │ Polyphase Filter Bank                                              │  │
-│  │                                                                     │  │
-│  │  Phase 0: [c0,0  c0,1  c0,2  ... c0,N]                            │  │
-│  │  Phase 1: [c1,0  c1,1  c1,2  ... c1,N]                            │  │
-│  │  Phase 2: [c2,0  c2,1  c2,2  ... c2,N]                            │  │
-│  │     ...                                                            │  │
-│  │  Phase M: [cM,0  cM,1  cM,2  ... cM,N]                            │  │
-│  │                                                                     │  │
-│  │  Quality Presets:                                                  │  │
-│  │  - HighestQuality: 128 phases × 48 taps                           │  │
-│  │  - MediumQuality:   64 phases × 32 taps [DEFAULT]                 │  │
-│  │  - LowResource:     32 phases × 24 taps                           │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-│  Algorithm:                                                              │
-│  1. Calculate effectiveRatio = (outputRate/inputRate) × playbackRate    │
-│  2. For each output sample:                                              │
-│     a. Calculate fractional input position                               │
-│     b. Select two adjacent polyphase filters                             │
-│     c. Convolve input samples with each filter                           │
-│     d. Interpolate between filter outputs                                │
-│     e. Advance input position by 1/effectiveRatio                        │
-│                                                                          │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-                                 │ Resampled PCM Float32 (device rate)
-                                 v
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     AlsaPlayer / PulseAudioPlayer                        │
-│                                                                          │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────┐  │
-│  │ Format Convert  │    │ Volume Control  │    │ Device Output       │  │
-│  │                 │    │                 │    │                     │  │
-│  │ Float32 → S32   │───►│ Software gain   │───►│ ALSA/PulseAudio     │  │
-│  │ Float32 → S24   │    │ (0-100%)        │    │ device write        │  │
-│  │ Float32 → S16   │    │                 │    │                     │  │
-│  └─────────────────┘    └─────────────────┘    └─────────────────────┘  │
-│                                                                          │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-                                 v
-                          USB DAC / Sound Card
++-------------------------------------------------------------------------+
+|                         Music Assistant                                  |
+|                                                                          |
+|  - Audio library management                                              |
+|  - Streaming source selection                                            |
+|  - Player group coordination                                             |
++------------------------------------+------------------------------------+
+                                     |
+                                     | Sendspin Protocol
+                                     | (WebSocket + mDNS discovery)
+                                     |
+                                     v
++-------------------------------------------------------------------------+
+|                         SendSpin.SDK                                     |
+|                                                                          |
+|  +-------------------+    +-------------------+    +---------------------+
+|  | ClockSync         |    | TimedAudioBuffer  |    | SendspinClient      |
+|  |                   |    |                   |    |                     |
+|  | - NTP-like sync   |<-->| - Audio buffer    |<---| - Protocol handler  |
+|  | - Drift measure   |    | - Sync timing     |    | - Connection mgmt   |
+|  | - Rate target     |    | - Rate correction |    | - Volume control    |
+|  +-------------------+    +---------+---------+    +---------------------+
+|                                     |                                     |
+|                                     | Sync-adjusted PCM Float32 samples   |
++-------------------------------------+-------------------------------------+
+                                      |
+                                      v
++-------------------------------------------------------------------------+
+|                    BufferedAudioSampleSource                             |
+|                                                                          |
+|  - Bridges TimedAudioBuffer to IAudioSampleSource                        |
+|  - Provides current time for timed sample release                        |
+|  - Direct passthrough (no resampling)                                    |
++-------------------------------------+------------------------------------+
+                                      |
+                                      | PCM Float32 samples (source rate)
+                                      v
++-------------------------------------------------------------------------+
+|                         PulseAudioPlayer                                 |
+|                                                                          |
+|  +-------------------+    +-------------------+    +---------------------+
+|  | Format Convert    |    | Volume Control    |    | Device Output       |
+|  |                   |    |                   |    |                     |
+|  | Float32 -> S32    |--->| Software gain     |--->| PulseAudio          |
+|  | Float32 -> S24    |    | (0-100%)          |    | pa_simple API       |
+|  | Float32 -> S16    |    |                   |    |                     |
+|  +-------------------+    +-------------------+    +---------------------+
+|                                                                          |
++-------------------------------------+------------------------------------+
+                                      |
+                                      v
++-------------------------------------------------------------------------+
+|                         PulseAudio Server                                |
+|                                                                          |
+|  - Handles sample rate conversion to device native rate                  |
+|  - Manages audio routing and mixing                                      |
+|  - Device format negotiation                                             |
++-------------------------------------+------------------------------------+
+                                      |
+                                      v
+                               USB DAC / Sound Card
 ```
 
 ---
@@ -105,135 +92,65 @@ The SDK handles all network communication and synchronization:
 |-----------|---------|
 | `SendspinClientService` | WebSocket connection to Music Assistant |
 | `ClockSynchronization` | NTP-like clock sync between client and server |
-| `TimedAudioBuffer` | Buffer with timestamp-aware sample management |
+| `TimedAudioBuffer` | Buffer with timestamp-aware sample management and sync correction |
 
-**Key Event:** `TargetPlaybackRateChanged`
-- Fired when clock sync detects drift
-- Rate range: 0.96 (slow down) to 1.04 (speed up)
-- Used by resampler for dynamic rate adjustment
+**Sync Correction:** The SDK's `TimedAudioBuffer` handles playback rate adjustment internally via the `TargetPlaybackRateChanged` event, using tiered correction:
+- Tier 1: Deadband (no correction for small errors)
+- Tier 2: Rate adjustment (+/-4% speed correction)
+- Tier 3: Frame drop/insert (disabled in our config)
 
-### 2. UnifiedPolyphaseResampler
+### 2. BufferedAudioSampleSource
 
-The core audio processing component that handles both static rate conversion and dynamic sync adjustment.
-
-#### Why Unified?
-
-Previous implementation used two separate resamplers:
-1. `SampleRateConverter` - High-quality windowed-sinc for static conversion
-2. `ResamplingAudioSampleSource` - Linear interpolation for dynamic ±4% adjustment
-
-**Problem:** When upsampling (48kHz → 192kHz), the linear interpolation operated on the 192kHz signal, causing aliasing that manifested as audible "warbling."
-
-**Solution:** Single polyphase resampler that combines both operations with consistent high quality.
-
-#### Polyphase Filter Design
-
-The filter bank is designed using a Kaiser-windowed sinc function:
-
-```
-Prototype filter length = phases × taps
-Cutoff frequency = min(1.0 / baseRatio, 1.0)
-Window: Kaiser with β = 6.0
-
-For each phase p from 0 to phases-1:
-  For each tap t from 0 to taps-1:
-    filterBank[p][t] = prototype[t × phases + p] × phases
-```
-
-#### Quality Presets
-
-| Preset | Phases | Taps | Memory | CPU | Use Case |
-|--------|--------|------|--------|-----|----------|
-| HighestQuality | 128 | 48 | ~48 KB | High | Critical listening |
-| MediumQuality | 64 | 32 | ~16 KB | Medium | General use [DEFAULT] |
-| LowResource | 32 | 24 | ~6 KB | Low | Raspberry Pi, etc. |
-
-#### Fractional Phase Interpolation
-
-For arbitrary conversion ratios, we interpolate between adjacent polyphase filters:
+A simple bridge that connects the SDK's `ITimedAudioBuffer` to the audio player's `IAudioSampleSource` interface.
 
 ```csharp
-fractionalPhase = (inputPosition - floor(inputPosition)) × polyphaseCount;
-phase0 = (int)fractionalPhase;
-phase1 = (phase0 + 1) % polyphaseCount;
-phaseFrac = fractionalPhase - phase0;
-
-// Convolve with both filters
-sum0 = convolve(input, filterBank[phase0]);
-sum1 = convolve(input, filterBank[phase1]);
-
-// Interpolate
-output = sum0 + (sum1 - sum0) × phaseFrac;
+public sealed class BufferedAudioSampleSource : IAudioSampleSource
+{
+    // Provides current time to the timed buffer for synchronized sample release
+    // Direct passthrough - no processing or resampling
+}
 ```
 
-#### Thread Safety
+### 3. PulseAudioPlayer
 
-The playback rate is updated by the event handler thread and read by the audio callback thread. On x64/ARM64, aligned 64-bit reads/writes are atomic. The bounded range [0.96, 1.04] ensures any transient inconsistency is benign.
-
-### 3. Audio Output (AlsaPlayer / PulseAudioPlayer)
-
-Handles the final audio output:
+Handles the final audio output using PulseAudio's simple API:
 
 | Feature | Description |
 |---------|-------------|
-| Format Conversion | Float32 → S32_LE/S24_LE/S16_LE based on device support |
+| Format Conversion | Float32 -> S32_LE/S24_LE/S16_LE based on configured bit depth |
 | Volume Control | Software gain applied before output |
-| Buffering | Ring buffer to handle timing variations |
-| Backend Selection | ALSA for Docker, PulseAudio for HAOS |
-| Latency Detection | Queries actual buffer size for accurate sync |
+| Reconnection | Automatic reconnection with exponential backoff |
+| Backend Selection | PulseAudio for both HAOS and Docker environments |
 
-#### Latency Detection
+### 4. PulseAudio Server
 
-Accurate output latency reporting is critical for multi-room synchronization. The SDK uses the reported latency to determine when samples will actually reach the speaker.
-
-**ALSA Backend:**
-- Queries actual buffer size via `snd_pcm_get_params()` after configuration
-- ALSA may allocate larger buffers than requested for USB devices, dmix, or virtual devices
-- Reports actual latency instead of target latency for accurate sync
-
-**PulseAudio Backend:**
-- Queries latency via `pa_simple_get_latency()`
-- Includes server-side buffering in the calculation
-
-If the reported latency is wrong, sync correction will chase a phantom offset, causing the buffer to grow indefinitely.
+PulseAudio handles all format conversion to the target device:
+- **Sample Rate Conversion**: Converts to device native rate (e.g., 48kHz -> 192kHz)
+- **Format Negotiation**: Adapts to device capabilities automatically
+- **Mixing**: Allows multiple audio streams if needed
 
 ---
 
 ## Configuration Options
 
-### Resampler Quality
-
-The resampler quality can be changed at runtime. The filter bank rebuilds on the next `Read()` call.
-
-```csharp
-// Default: MediumQuality
-resampler.Quality = ResamplerQuality.HighestQuality;
-```
-
-### Output Sample Rate
+### Output Format
 
 Set via the player's output format configuration:
 
 ```csharp
 var outputFormat = new AudioOutputFormat
 {
-    SampleRate = 192000,  // 48000, 96000, 192000
+    SampleRate = 192000,  // 48000, 96000, 192000 (sent to PulseAudio)
     BitDepth = 32,        // 16, 24, 32
     Channels = 2
 };
 ```
 
+PulseAudio will convert to this format and further convert to the device's native format if needed.
+
 ---
 
 ## Troubleshooting
-
-### Warbling or Pitch Wobble
-
-**Symptom:** Audio has a warbling or pitch modulation effect
-
-**Cause:** Historical issue with dual-resampler chain (now fixed)
-
-**Solution:** Ensure using version 2.0.13 or later with unified resampler
 
 ### Clicks or Pops During Playback
 
@@ -241,10 +158,10 @@ var outputFormat = new AudioOutputFormat
 
 **Possible Causes:**
 1. Buffer underrun - increase buffer size
-2. CPU overload - try LowResource quality preset
+2. PulseAudio configuration issues
 3. USB DAC issues - try different USB port
 
-**Solution:** Check logs for underrun messages, reduce quality preset
+**Solution:** Check logs for underrun messages, verify PulseAudio is running correctly
 
 ### Sync Drift Not Correcting
 
@@ -252,10 +169,10 @@ var outputFormat = new AudioOutputFormat
 
 **Check:**
 1. Verify `isClockSynced: true` in player status
-2. Check logs for `Resampler: rate=` messages
+2. Check logs for sync correction messages
 3. Ensure network latency is stable
 
-### Constant Sync Error (~200ms) with Growing Buffer
+### Constant Sync Error with Growing Buffer
 
 **Symptom:** Stats for Nerds shows:
 - Constant sync error (e.g., -199ms or +250ms)
@@ -265,32 +182,31 @@ var outputFormat = new AudioOutputFormat
 **Cause:** Output latency mismatch - the actual device latency differs from reported latency
 
 **Solution:**
-- **Version 2.0.14+**: ALSA now queries actual buffer size automatically
-- **Older versions**: Check logs for `ALSA actual buffer: X frames (Yms)` to see true latency
-- For virtual devices or complex audio routing, the actual buffer may be 100-300ms instead of the target 50ms
+- Check PulseAudio latency via `pa_simple_get_latency()`
+- Verify device is correctly configured in PulseAudio
 
-**Diagnostic:** Open Stats for Nerds and check "Output Latency" in Clock Sync section. If this is significantly lower than expected for your device, the sync correction will be chasing a phantom offset.
+**Diagnostic:** Open Stats for Nerds and check "Output Latency" in Clock Sync section.
 
 ---
 
 ## Performance Considerations
 
-### CPU Usage by Quality
+### CPU Usage
 
-| Quality | Typical CPU (per player) |
-|---------|-------------------------|
-| HighestQuality | ~5-8% (Raspberry Pi 4) |
-| MediumQuality | ~3-5% (Raspberry Pi 4) |
-| LowResource | ~2-3% (Raspberry Pi 4) |
+With PulseAudio handling resampling, CPU usage is minimal:
+
+| Component | Typical CPU (per player) |
+|-----------|-------------------------|
+| SDK Processing | ~1-2% |
+| PulseAudio | Handled by system |
 
 ### Memory Usage
 
 | Component | Memory |
 |-----------|--------|
-| Filter Bank (MediumQuality) | ~16 KB |
-| Input Buffer | ~16 KB |
-| History Buffer | ~256 bytes |
-| **Total per player** | **~32 KB** |
+| Audio Buffer | ~32 KB |
+| PulseAudio Buffers | ~8 KB |
+| **Total per player** | **~40 KB** |
 
 ---
 

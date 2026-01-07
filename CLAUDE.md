@@ -45,9 +45,10 @@ ASP.NET Core 8.0 Application
 │   ├── PlayerManagerService.cs   # SDK player lifecycle
 │   ├── ConfigurationService.cs   # YAML persistence
 │   └── EnvironmentService.cs     # Docker vs HAOS detection
-├── Audio/                        # PortAudio SDK integration
-│   ├── PortAudioPlayer.cs       # IAudioPlayer implementation
-│   └── PortAudioDeviceEnumerator.cs
+├── Audio/                        # Audio output layer
+│   ├── BufferedAudioSampleSource.cs  # Bridges timed buffer to audio output
+│   ├── PulseAudio/              # PulseAudio backend (primary)
+│   └── Alsa/                    # ALSA backend (Docker fallback)
 ├── Utilities/
 │   ├── ClientIdGenerator.cs     # MD5-based IDs
 │   └── AlsaCommandRunner.cs     # Volume control
@@ -233,31 +234,8 @@ The `EnvironmentService` automatically detects the runtime environment:
 
 ---
 
-## Known Issues & Investigation Notes
-
-### ~200ms Sync Error (Dev Branch)
-
-The dev branch shows a persistent ~200ms sync error in SDK logs. Key findings:
-
-1. **NOT the resampler** - A/B testing with both `UnifiedPolyphaseResampler` and `ResamplingAudioSampleSource` shows identical error
-2. **SDK's latencyComp is informational only** - The SDK logs `latencyComp=XXms` but does NOT use it in the sync error calculation
-3. **StaticDelayMs affects scheduling, not error** - Setting negative values shifts when samples play but doesn't change error calculation
-4. **Inflating OutputLatencyMs makes it worse** - SDK reads further ahead, showing bigger negative error
-
-**Sync error formula:** `error = elapsed - readTime` (latencyComp not subtracted)
-
-**ALSA has two delay sources:**
-- Buffer latency (~50ms)
-- Startup fill time (~150ms) - ALSA auto-starts after buffer ~75% full
-
-See [docs/SYNC_ERROR_INVESTIGATION.md](docs/SYNC_ERROR_INVESTIGATION.md) for full details.
-
----
-
 ## Quick Links
 
 - [Implementation Plan](nextgen.md) - Original development roadmap
-- [Sync Error Investigation](docs/SYNC_ERROR_INVESTIGATION.md) - Debugging notes
-- [Main vs Dev Comparison](docs/MAIN_VS_DEV_COMPARISON.md) - Branch differences
 - [Home Assistant Add-on Docs](https://developers.home-assistant.io/docs/add-ons/configuration/)
 - [API Documentation](http://localhost:8096/docs) (when running)

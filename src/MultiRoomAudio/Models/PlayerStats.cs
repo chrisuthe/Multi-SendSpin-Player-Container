@@ -73,7 +73,8 @@ public record ThroughputStats(
 );
 
 /// <summary>
-/// Resampler state and configuration.
+/// Audio format conversion information.
+/// Shows input vs output sample rates. PulseAudio handles format conversion.
 /// </summary>
 public record ResamplerStats(
     int InputRate,

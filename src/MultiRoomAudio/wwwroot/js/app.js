@@ -821,15 +821,15 @@ function renderStatsPanel(stats) {
             </div>
         </div>
 
-        <!-- Resampler Section -->
+        <!-- Format Conversion Section -->
         <div class="stats-section">
-            <div class="stats-section-header">Resampler</div>
+            <div class="stats-section-header">Format Conversion</div>
             <div class="stats-row">
-                <span class="stats-label">Conversion</span>
+                <span class="stats-label">Rate</span>
                 <span class="stats-value info">${formatSampleRate(stats.resampler.inputRate)} → ${formatSampleRate(stats.resampler.outputRate)}</span>
             </div>
             <div class="stats-row">
-                <span class="stats-label">Quality</span>
+                <span class="stats-label">Handler</span>
                 <span class="stats-value">${escapeHtml(stats.resampler.quality)}</span>
             </div>
             <div class="stats-row">

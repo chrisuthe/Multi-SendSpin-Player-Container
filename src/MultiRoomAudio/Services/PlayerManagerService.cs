@@ -53,15 +53,15 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
     /// <summary>
     /// Sync correction options tuned for PulseAudio's timing characteristics.
-    /// Disables frame drop/insert (Tier 3) by setting a high resampling threshold.
+    /// Uses a high threshold for Tier 3 (frame drop/insert) to prefer smooth rate adjustment.
     /// </summary>
     private static readonly SyncCorrectionOptions PulseAudioSyncOptions = new()
     {
         // Use 4% max correction (matches CLI) for more responsive adjustment
         MaxSpeedCorrection = 0.04,
 
-        // Set very high threshold to DISABLE frame drop/insert (Tier 3)
-        // All sync correction will use smooth rate adjustment via our resampler
+        // Set high threshold to prefer rate adjustment over frame drop/insert (Tier 3)
+        // SDK handles sync correction via TimedAudioBuffer's rate adjustment
         ResamplingThresholdMicroseconds = 200_000,  // 200ms (vs default 15ms)
 
         // Re-anchor at 500ms (same as default)
@@ -425,7 +425,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             var player = _backendFactory.CreatePlayer(request.Device, _loggerFactory, outputFormat);
 
             // 4. Create audio pipeline with proper factories
-            // Uses resampling source for smooth sync correction (SDK 2.2.0 tiered correction)
+            // Uses direct passthrough - PulseAudio handles format conversion to devices
             var decoderFactory = new AudioDecoderFactory();
             var pipeline = new AudioPipeline(
                 _loggerFactory.CreateLogger<AudioPipeline>(),
@@ -1216,7 +1216,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             SamplesDroppedOverflow: bufferStats?.DroppedSamples ?? 0
         );
 
-        // Resampler Stats (use SDK OutputFormat if available, fall back to config)
+        // Format Conversion Stats (PulseAudio handles actual conversion)
+        // Shows input vs output rates for informational purposes
         var inputRate = inputFormat?.SampleRate ?? 48000;
         var outputRate = pipelineOutputFormat?.SampleRate ?? configOutputFormat?.SampleRate ?? inputRate;
         var effectiveRatio = outputRate / (double)inputRate * (bufferStats?.TargetPlaybackRate ?? 1.0);
@@ -1224,7 +1225,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         var resampler = new ResamplerStats(
             InputRate: inputRate,
             OutputRate: outputRate,
-            Quality: "MediumQuality", // Default quality preset
+            Quality: "PulseAudio", // PulseAudio handles format conversion
             EffectiveRatio: effectiveRatio
         );
 

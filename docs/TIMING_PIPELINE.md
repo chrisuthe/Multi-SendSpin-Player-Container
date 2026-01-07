@@ -9,33 +9,33 @@ This document explains how MultiRoomAudio handles each step of the timing adjust
 Audio comes from Music Assistant **timestamped** - each audio chunk has a specific time it should be played. We have an **unknown amount of latency** that our software + hardware stack introduces:
 
 ```
-┌──────────────────────┐
-│   Music Assistant    │
-│   Server Clock       │──────────────────┐
-└──────────────────────┘                  │
-         │                                │
-         │ "Play this audio at            │ Clock Sync
-         │  timestamp T=12345.678s"       │ (NTP-like)
-         │                                │
-         ▼                                ▼
-┌──────────────────────────────────────────────────────┐
-│                 MultiRoomAudio                        │
-│                                                       │
-│  ┌─────────────┐    ┌──────────────┐    ┌─────────┐  │
-│  │ Network     │───►│ Decode &     │───►│ ALSA    │  │
-│  │ Buffer      │    │ Resample     │    │ Output  │  │
-│  │ (latency 1) │    │ (latency 2)  │    │ (lat 3) │  │
-│  └─────────────┘    └──────────────┘    └─────────┘  │
-│                                                       │
-│  Total latency = lat1 + lat2 + lat3 + ???            │
-└──────────────────────────────────────────────────────┘
-         │
-         ▼
-    ┌─────────┐
-    │ Speaker │  ← Audio plays at actual time T'
-    └─────────┘
++----------------------+
+|   Music Assistant    |
+|   Server Clock       |----------------------+
++----------------------+                      |
+         |                                    | Clock Sync
+         | "Play this audio at               | (NTP-like)
+         |  timestamp T=12345.678s"          |
+         |                                    |
+         v                                    v
++------------------------------------------------------+
+|                 MultiRoomAudio                        |
+|                                                       |
+|  +-------------+    +--------------+    +---------+  |
+|  | Network     |--->| SDK Buffer   |--->| Pulse   |  |
+|  | Buffer      |    | + Sync Adj   |    | Audio   |  |
+|  | (latency 1) |    | (latency 2)  |    | (lat 3) |  |
+|  +-------------+    +--------------+    +---------+  |
+|                                                       |
+|  Total latency = lat1 + lat2 + lat3 + ???            |
++------------------------------------------------------+
+         |
+         v
+    +---------+
+    | Speaker |  <- Audio plays at actual time T'
+    +---------+
 
-    If T' ≠ T, we're out of sync!
+    If T' != T, we're out of sync!
 ```
 
 ---
@@ -56,7 +56,7 @@ The SDK's `KalmanClockSynchronizer` implements an NTP-like protocol:
    Client receives at local time T4
 
    Round-trip time = (T4 - T1) - (T3 - T2)
-   Clock offset ≈ ((T2 - T1) + (T3 - T4)) / 2
+   Clock offset ~ ((T2 - T1) + (T3 - T4)) / 2
    ```
 
 2. **Kalman Filter**: Refines offset estimate over multiple measurements
@@ -93,27 +93,27 @@ The SDK considers sync "minimal" after just 2 measurements (`HasMinimalSync`), e
 The SDK's `TimedAudioBuffer` receives audio chunks with timestamps:
 
 ```
-┌───────────────────────────────────────────────────────┐
-│               TimedAudioBuffer                         │
-│                                                        │
-│  Capacity: 8000ms    Target: 250ms                    │
-│                                                        │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │ T=100ms │ T=110ms │ T=120ms │ ... │ T=350ms │   │  │
-│  └─────────────────────────────────────────────────┘  │
-│           ▲                               ▲           │
-│           │                               │           │
-│        Read pointer              Write pointer        │
-│        (current playback)        (incoming audio)     │
-└───────────────────────────────────────────────────────┘
++-------------------------------------------------------+
+|               TimedAudioBuffer                         |
+|                                                        |
+|  Capacity: 8000ms    Target: 250ms                    |
+|                                                        |
+|  +---------------------------------------------+      |
+|  | T=100ms | T=110ms | T=120ms | ... | T=350ms |      |
+|  +---------------------------------------------+      |
+|           ^                               ^           |
+|           |                               |           |
+|        Read pointer              Write pointer        |
+|        (current playback)        (incoming audio)     |
++-------------------------------------------------------+
 ```
 
 ### Buffer Behavior
 
 1. **On Write**: Audio chunks are added with their server timestamps
 2. **On Read**: Buffer checks current synchronized time
-   - If read timestamp < current time: **We're behind** → speed up
-   - If read timestamp > current time: **We're ahead** → slow down or wait
+   - If read timestamp < current time: **We're behind** -> speed up
+   - If read timestamp > current time: **We're ahead** -> slow down or wait
 
 ### Sendspin Protocol Specifics
 
@@ -150,7 +150,7 @@ Where:
 Started playing at T=0
 After 10 seconds (wall clock):
 - If we've read 480,000 samples at 48kHz = 10.0 seconds of audio
-- Sync error = 10.0s - 10.0s = 0ms ✓
+- Sync error = 10.0s - 10.0s = 0ms (good)
 
 - If we've read 479,040 samples = 9.98 seconds of audio
 - Sync error = 10.0s - 9.98s = +20ms (we're behind, playing old audio)
@@ -163,7 +163,7 @@ After 10 seconds (wall clock):
 
 **Output latency is NOT used in sync error calculation!**
 
-The `OutputLatencyMs` we report (from ALSA buffer size) is used for:
+The `OutputLatencyMs` we report (from PulseAudio) is used for:
 - Diagnostics in Stats for Nerds
 - Knowing when audio will actually reach the speaker
 
@@ -185,12 +185,12 @@ ExitDeadbandMicroseconds = 2_000,   // 2ms to exit correction
 
 ### Tier 2: Rate Adjustment (Smooth Correction)
 
-For errors between deadband and resampling threshold:
+For errors between deadband and threshold:
 ```csharp
-MaxSpeedCorrection = 0.04,  // ±4% speed adjustment
+MaxSpeedCorrection = 0.04,  // +/-4% speed adjustment
 ```
 
-The SDK fires `TargetPlaybackRateChanged` events, and our `UnifiedPolyphaseResampler` adjusts:
+The SDK's TimedAudioBuffer handles rate adjustment internally:
 - Rate 1.04 = play 4% faster (catch up)
 - Rate 0.96 = play 4% slower (slow down)
 
@@ -201,11 +201,11 @@ For very large errors (>200ms in our config):
 ResamplingThresholdMicroseconds = 200_000,  // 200ms
 ```
 
-**We effectively disable this** by setting such a high threshold. The SDK would:
+**We set a high threshold** to prefer smooth rate adjustment. The SDK would:
 - Drop frames to catch up
 - Insert silence/repeat frames to slow down
 
-But this causes clicks, so we rely purely on rate adjustment.
+But this causes clicks, so we rely primarily on rate adjustment.
 
 ### Re-anchoring
 
@@ -216,55 +216,23 @@ ReanchorThresholdMicroseconds = 500_000,  // 500ms
 
 ---
 
-## Step 5: Sample Rate Conversion + Rate Adjustment
+## Step 5: Audio Output
 
-**Purpose**: Convert sample rates AND apply sync correction in one pass.
+**Purpose**: Send audio to the sound card via PulseAudio.
 
-### Why Unified Resampling?
+### Direct Passthrough Architecture
 
-Previous dual-resampler approach had issues:
+The audio path is simple - no application-level resampling:
+
 ```
-OLD: 48kHz → [SRC to 192kHz] → [Linear interp for ±4%] → ALSA
-     Problem: Linear interpolation on 192kHz signal = aliasing = warbling
-```
-
-New unified approach:
-```
-NEW: 48kHz → [Polyphase resampler: 4x * rate adjustment] → ALSA
-     Single high-quality operation, no aliasing
+TimedAudioBuffer --> BufferedAudioSampleSource --> PulseAudioPlayer --> PulseAudio
+     (SDK)                (Bridge)                   (Output)           (Server)
 ```
 
-### How It Works
-
-```csharp
-public UnifiedPolyphaseResampler(
-    source,
-    inputRate: 48000,
-    outputRate: 192000,
-    timedBuffer,  // Subscribes to TargetPlaybackRateChanged
-    logger
-)
-```
-
-The resampler:
-1. Subscribes to SDK's `TargetPlaybackRateChanged` event
-2. Calculates effective ratio: `(192000 / 48000) * playbackRate`
-3. Uses polyphase filter bank for high-quality conversion
-4. Interpolates between filter phases for fractional ratios
-
-### Quality Presets
-
-| Preset | Phases | Taps | Memory |
-|--------|--------|------|--------|
-| HighestQuality | 128 | 48 | ~48KB |
-| MediumQuality | 64 | 32 | ~16KB (DEFAULT) |
-| LowResource | 32 | 24 | ~6KB |
-
----
-
-## Step 6: ALSA Output
-
-**Purpose**: Write audio to the sound card.
+PulseAudio handles all format conversion:
+- Sample rate conversion (e.g., 48kHz -> 192kHz)
+- Bit depth conversion (e.g., float -> S24_LE)
+- Device format negotiation
 
 ### Our Push-Based Model
 
@@ -273,38 +241,33 @@ private void PlaybackLoop()
 {
     while (_isPlaying)
     {
-        // 1. Read from resampler (which reads from buffer)
+        // 1. Read from buffer source (sync-adjusted samples)
         var samplesRead = source.Read(buffer, 0, buffer.Length);
 
         // 2. Apply volume
         for (int i = 0; i < samplesRead; i++)
             buffer[i] *= volume;
 
-        // 3. Convert to output format (float → S32_LE)
+        // 3. Convert to output format (float -> S32_LE/S24_LE/S16_LE)
         BitDepthConverter.Convert(floatBuffer, byteBuffer, bitDepth);
 
-        // 4. Write to ALSA (BLOCKING)
-        AlsaNative.WriteInterleaved(pcmHandle, ptr, frames);
+        // 4. Write to PulseAudio (BLOCKING)
+        SimpleWrite(paHandle, ptr, bytes);
     }
 }
 ```
 
 ### Latency Reporting
 
-We query actual ALSA buffer size after configuration:
+We query PulseAudio latency:
 ```csharp
-AlsaNative.GetParams(pcmHandle, out bufferSize, out periodSize);
-OutputLatencyMs = (bufferSize * 1000) / sampleRate;
+var latencyUs = SimpleGetLatency(paHandle, out error);
+OutputLatencyMs = (int)(latencyUs / 1000);
 ```
-
-ALSA may allocate larger buffers than requested for:
-- USB audio devices
-- dmix/PulseAudio plugins
-- Virtual/networked devices
 
 ---
 
-## Step 7: Delay Offset (User Fine-Tuning)
+## Step 6: Delay Offset (User Fine-Tuning)
 
 **Purpose**: Allow manual adjustment for speaker placement, etc.
 
@@ -321,8 +284,8 @@ This shifts the effective playback schedule:
 
 ### Use Cases
 
-- Speaker closer to listener → negative delay
-- Speaker farther from listener → positive delay
+- Speaker closer to listener -> negative delay
+- Speaker farther from listener -> positive delay
 - Compensate for DSP processing in DAC/receiver
 
 ---
@@ -330,64 +293,70 @@ This shifts the effective playback schedule:
 ## Complete Data Flow
 
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                          TIMING PIPELINE                                    │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   Music Assistant                                                           │
-│        │                                                                    │
-│        │ WebSocket (Sendspin Protocol)                                      │
-│        │ Audio chunks with timestamps                                       │
-│        ▼                                                                    │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │  SendSpin.SDK                                                        │  │
-│   │                                                                      │  │
-│   │  ┌──────────────┐   ┌───────────────────┐   ┌──────────────────┐    │  │
-│   │  │ ClockSync    │   │ TimedAudioBuffer  │   │ Sync Correction  │    │  │
-│   │  │              │   │                   │   │                  │    │  │
-│   │  │ Offset: Xms  │◄──│ Stores audio with │──►│ Tier 1: Deadband │    │  │
-│   │  │ Drift: Yppm  │   │ timestamps        │   │ Tier 2: Rate Adj │    │  │
-│   │  │ Converged: ✓ │   │ Buffer: 4000ms    │   │ Tier 3: Drop/Ins │    │  │
-│   │  └──────────────┘   └───────────────────┘   └────────┬─────────┘    │  │
-│   │                                                       │              │  │
-│   └───────────────────────────────────────────────────────┼──────────────┘  │
-│                                                           │                 │
-│                                                           │ TargetPlayback  │
-│                                                           │ RateChanged     │
-│                                                           ▼                 │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │  UnifiedPolyphaseResampler (MultiRoomAudio)                          │  │
-│   │                                                                      │  │
-│   │  Input: 48kHz   Output: 192kHz   Rate: 1.02x   Effective: 4.08x     │  │
-│   │                                                                      │  │
-│   │  64 phases × 32 taps (MediumQuality)                                │  │
-│   └─────────────────────────────────────────────────────────────────────┘  │
-│        │                                                                    │
-│        │ Float32 PCM at output rate                                         │
-│        ▼                                                                    │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │  AlsaPlayer (MultiRoomAudio)                                         │  │
-│   │                                                                      │  │
-│   │  PlaybackLoop: Read → Volume → Convert → WriteInterleaved (block)   │  │
-│   │                                                                      │  │
-│   │  Output: S32_LE   Latency: 50ms (queried from ALSA)                 │  │
-│   └─────────────────────────────────────────────────────────────────────┘  │
-│        │                                                                    │
-│        ▼                                                                    │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │  USB DAC / Sound Card                                                │  │
-│   │                                                                      │  │
-│   │  Hardware buffer: ~10-50ms depending on device                      │  │
-│   └─────────────────────────────────────────────────────────────────────┘  │
-│        │                                                                    │
-│        ▼                                                                    │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │  Speaker                                                             │  │
-│   │                                                                      │  │
-│   │  ♪ Audio plays synchronized with other rooms ♪                      │  │
-│   └─────────────────────────────────────────────────────────────────────┘  │
-│                                                                             │
-└────────────────────────────────────────────────────────────────────────────┘
++----------------------------------------------------------------------------+
+|                          TIMING PIPELINE                                    |
++----------------------------------------------------------------------------+
+|                                                                             |
+|   Music Assistant                                                           |
+|        |                                                                    |
+|        | WebSocket (Sendspin Protocol)                                      |
+|        | Audio chunks with timestamps                                       |
+|        v                                                                    |
+|   +---------------------------------------------------------------------+  |
+|   |  SendSpin.SDK                                                        |  |
+|   |                                                                      |  |
+|   |  +--------------+   +-------------------+   +------------------+    |  |
+|   |  | ClockSync    |   | TimedAudioBuffer  |   | Sync Correction  |    |  |
+|   |  |              |   |                   |   |                  |    |  |
+|   |  | Offset: Xms  |<--| Stores audio with |-->| Tier 1: Deadband |    |  |
+|   |  | Drift: Yppm  |   | timestamps        |   | Tier 2: Rate Adj |    |  |
+|   |  | Converged: Y |   | Buffer: 4000ms    |   | Tier 3: Drop/Ins |    |  |
+|   |  +--------------+   +-------------------+   +--------+---------+    |  |
+|   |                                                       |              |  |
+|   +-------------------------------------------------------+--------------+  |
+|                                                           |                 |
+|                                                           | Sync-adjusted   |
+|                                                           | samples         |
+|                                                           v                 |
+|   +---------------------------------------------------------------------+  |
+|   |  BufferedAudioSampleSource (MultiRoomAudio)                          |  |
+|   |                                                                      |  |
+|   |  Direct passthrough - bridges SDK buffer to audio player            |  |
+|   +---------------------------------------------------------------------+  |
+|        |                                                                    |
+|        | Float32 PCM at source rate                                         |
+|        v                                                                    |
+|   +---------------------------------------------------------------------+  |
+|   |  PulseAudioPlayer (MultiRoomAudio)                                   |  |
+|   |                                                                      |  |
+|   |  PlaybackLoop: Read -> Volume -> Convert -> SimpleWrite (block)     |  |
+|   |                                                                      |  |
+|   |  Output: S32_LE/S24_LE/S16_LE   Latency: ~50ms (from PulseAudio)   |  |
+|   +---------------------------------------------------------------------+  |
+|        |                                                                    |
+|        v                                                                    |
+|   +---------------------------------------------------------------------+  |
+|   |  PulseAudio Server                                                   |  |
+|   |                                                                      |  |
+|   |  - Sample rate conversion to device native rate                     |  |
+|   |  - Format negotiation and conversion                                |  |
+|   +---------------------------------------------------------------------+  |
+|        |                                                                    |
+|        v                                                                    |
+|   +---------------------------------------------------------------------+  |
+|   |  USB DAC / Sound Card                                                |  |
+|   |                                                                      |  |
+|   |  Hardware buffer: ~10-50ms depending on device                      |  |
+|   +---------------------------------------------------------------------+  |
+|        |                                                                    |
+|        v                                                                    |
+|   +---------------------------------------------------------------------+  |
+|   |  Speaker                                                             |  |
+|   |                                                                      |  |
+|   |  Audio plays synchronized with other rooms                          |  |
+|   +---------------------------------------------------------------------+  |
+|                                                                             |
++----------------------------------------------------------------------------+
 ```
 
 ---
@@ -396,7 +365,7 @@ This shifts the effective playback schedule:
 
 | Section | Metric | Healthy Value | Concern |
 |---------|--------|---------------|---------|
-| **Sync Status** | Sync Error | ±5ms (green) | >20ms (red) |
+| **Sync Status** | Sync Error | +/-5ms (green) | >20ms (red) |
 | **Sync Status** | Playback Rate | 0.98-1.02 | Stuck at 0.96 or 1.04 |
 | **Buffer** | Buffered | 2000-5000ms | <100ms or growing unbounded |
 | **Buffer** | Underruns | 0 | Any value > 0 |
@@ -413,7 +382,7 @@ This shifts the effective playback schedule:
 **Symptom**: Sync error never reaches zero, playback rate stuck at extreme.
 
 **Likely Causes**:
-1. ALSA latency mismatch (now fixed in v2.0.14)
+1. PulseAudio latency mismatch
 2. Push vs pull timing model difference
 3. Buffer state at playback start
 
@@ -425,16 +394,20 @@ This shifts the effective playback schedule:
 
 **Explanation**: This is actually NORMAL. The server sends audio ahead, and we buffer it. The Sendspin protocol allows up to 5 seconds of look-ahead.
 
-### Warbling Audio
+### Audio Clicks or Pops
 
-**Symptom**: Pitch wobble during playback.
+**Symptom**: Intermittent clicks during playback.
 
-**Fix**: Already fixed in v2.0.13 with unified resampler. If still occurring, check resampler integration.
+**Possible Causes**:
+1. Buffer underrun
+2. PulseAudio configuration issues
+3. USB device issues
+
+**Fix**: Check logs for underrun messages, verify PulseAudio is running correctly.
 
 ---
 
 ## Related Documents
 
-- [WINDOWSSPIN_COMPARISON.md](WINDOWSSPIN_COMPARISON.md) - Detailed comparison with reference implementation
 - [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md) - Technical pipeline architecture
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Overall system design

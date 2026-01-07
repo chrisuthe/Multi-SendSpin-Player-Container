@@ -60,8 +60,8 @@ Both use `TimedAudioBuffer` from the SDK, but the timing context differs.
 ```
 1. Our thread reads continuously in a tight loop
 2. BufferedAudioSampleSource reads from TimedAudioBuffer
-3. UnifiedPolyphaseResampler adjusts rate based on SDK events
-4. Write to ALSA with blocking I/O
+3. SDK handles rate adjustment via TimedAudioBuffer
+4. Write to PulseAudio with blocking I/O
 ```
 
 **Investigation Points**:
@@ -182,25 +182,24 @@ TargetBufferMs = 250              // 250ms target
 
 ### 8. Sample Rate Conversion Path
 
-**MultiRoomAudio**: Uses `UnifiedPolyphaseResampler` (our custom implementation).
+**MultiRoomAudio**: Direct passthrough to PulseAudio. PulseAudio handles all sample rate conversion.
 
-**windowsSpin**: Likely uses SDK's built-in or OS-level conversion.
+**windowsSpin**: Uses WASAPI, which may use OS-level conversion.
 
 **Investigation Points**:
-- [ ] Does our resampler introduce timing artifacts?
-- [ ] Try disabling resampling (match input to output rate) to isolate
-- [ ] Check `TargetPlaybackRateChanged` event handling
-- [ ] Verify effective ratio calculation
+- [ ] Does PulseAudio's resampling introduce timing artifacts?
+- [ ] Check PulseAudio resampler quality settings
+- [ ] Verify timing behavior with different PulseAudio configurations
 
 **Key Code Locations**:
-- `UnifiedPolyphaseResampler.cs`
-- Check event subscription for `TargetPlaybackRateChanged`
+- `PulseAudioPlayer.cs`
+- `BufferedAudioSampleSource.cs`
 
 ---
 
 ## Quick Tests to Run
 
-1. **Disable Resampler Test**: Set output rate = input rate (48000Hz)
+1. **Match Rates Test**: Set output rate = input rate to minimize PulseAudio conversion
 2. **Latency Zero Test**: Hardcode `OutputLatencyMs = 0` and observe sync error
 3. **SDK Defaults Test**: Use default `SyncCorrectionOptions` instead of custom
 4. **Buffer Target Test**: Try `TargetBufferMs = 500` or `1000`
@@ -212,10 +211,10 @@ TargetBufferMs = 250              // 250ms target
 
 | Component | windowsSpin | MultiRoomAudio |
 |-----------|-------------|----------------|
-| Audio Output | `WasapiRenderer.cs` | `AlsaPlayer.cs` |
+| Audio Output | `WasapiRenderer.cs` | `PulseAudioPlayer.cs` |
 | Stats/Debug | `StatsViewModel.cs` | `PlayerManagerService.GetPlayerStats()` |
 | Main Entry | `MainViewModel.cs` | `PlayerManagerService.CreatePlayerAsync()` |
-| Pipeline | SDK's `AudioPipeline` | Same SDK + custom resampler |
+| Pipeline | SDK's `AudioPipeline` | Same SDK (direct passthrough) |
 
 ---
 
