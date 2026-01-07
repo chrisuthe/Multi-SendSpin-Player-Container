@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-7415ed6
+## Development Build: sha-35a3964
 
 **Current Dev Build Changes** (recent)
 
+- test theory on clock timing
 - Testing Theory on Sync Error
 - Add capability to use legacy timing to do A/B Testing
 - Attempt to diagnose timing issues by adding native rate option
@@ -14,7 +15,6 @@
 - Add Stats for Nerds real-time diagnostics panel
 - Update SendSpin.SDK to version 3.3.1
 - Add unified polyphase resampler for high-quality sample rate conversion
-- Fix TPDF dithering to use triangular probability distribution
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
