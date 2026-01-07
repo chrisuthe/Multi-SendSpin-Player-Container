@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-b172269
+## Development Build: sha-3638793
 
 **Current Dev Build Changes** (recent)
 
+- Remove ALSA support, standardize on PulseAudio
 - Update SendSpin.SDK to v3.5.1
 - add ALSA calibration passing to the SDK, updated to 3.5.0 and removed deadband entry/exit.
 - Fix Native Rate Option
@@ -14,7 +15,6 @@
 - Testing Theory on Sync Error
 - Add capability to use legacy timing to do A/B Testing
 - Attempt to diagnose timing issues by adding native rate option
-- Fix ALSA latency detection and delay offset functionality
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
