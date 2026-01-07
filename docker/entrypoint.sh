@@ -199,10 +199,21 @@ elif [ -d /dev/snd ]; then
 
             # Use module-alsa-sink for direct device access (doesn't need /proc/asound)
             sink_name="alsa_output_hw_${card_num}_${dev_num}"
-            if pactl load-module module-alsa-sink device=hw:$card_num,$dev_num sink_name="$sink_name" tsched=0 2>&1; then
-                echo "    -> Loaded as $sink_name"
-                CARDS_LOADED=$((CARDS_LOADED + 1))
-            else
+
+            # Try to load at higher sample rates for better quality
+            # Try 192kHz first, then 96kHz, then 48kHz
+            LOADED=0
+            for rate in 192000 96000 48000; do
+                if [ $LOADED -eq 0 ]; then
+                    if pactl load-module module-alsa-sink device=hw:$card_num,$dev_num sink_name="$sink_name" rate=$rate tsched=0 2>/dev/null; then
+                        echo "    -> Loaded as $sink_name @ ${rate}Hz"
+                        CARDS_LOADED=$((CARDS_LOADED + 1))
+                        LOADED=1
+                    fi
+                fi
+            done
+
+            if [ $LOADED -eq 0 ]; then
                 echo "    -> Failed to load (device may be in use or unsupported)"
             fi
         fi
