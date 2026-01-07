@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-a0f29bd
+## Development Build: sha-e6c545c
 
 **Current Dev Build Changes** (recent)
 
+- Add debug output and /proc/asound mount instructions
 - Fix ALSA device detection in Docker standalone mode
 - Fix Docker standalone mode to use PulseAudio
 - Remove ALSA support, standardize on PulseAudio
@@ -14,7 +15,6 @@
 - add alsa calibration
 - test another theroy
 - test theory on clock timing
-- Testing Theory on Sync Error
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
