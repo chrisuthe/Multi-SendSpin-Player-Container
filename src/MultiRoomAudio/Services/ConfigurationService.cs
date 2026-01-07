@@ -30,6 +30,12 @@ public class PlayerConfiguration
     /// </summary>
     public bool NativeRate { get; set; }
 
+    /// <summary>
+    /// When true, uses the simple linear interpolation resampler instead of the polyphase resampler.
+    /// Only valid when NativeRate is also true.
+    /// </summary>
+    public bool UseSimpleResampler { get; set; }
+
     // Additional provider-specific settings
     public Dictionary<string, object>? Extra { get; set; }
 }

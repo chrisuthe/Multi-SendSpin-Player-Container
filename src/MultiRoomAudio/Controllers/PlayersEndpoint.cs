@@ -354,6 +354,106 @@ public static class PlayersEndpoint
         .WithName("ResumePlayer")
         .WithDescription("Resume player playback");
 
+        // PUT /api/players/{name} - Update player configuration
+        group.MapPut("/{name}", async (
+            string name,
+            PlayerUpdateRequest request,
+            PlayerManagerService manager,
+            ConfigurationService config,
+            ILogger<PlayerManagerService> logger,
+            CancellationToken ct) =>
+        {
+            logger.LogDebug("API: PUT /api/players/{PlayerName}", name);
+
+            // Check player exists
+            var player = manager.GetPlayer(name);
+            if (player == null)
+                return PlayerNotFoundResult(name, logger, "update");
+
+            try
+            {
+                var needsRestart = false;
+                var currentName = name;
+
+                // Handle rename first (affects subsequent operations)
+                if (!string.IsNullOrEmpty(request.Name) && request.Name != name)
+                {
+                    var renamed = manager.RenamePlayer(name, request.Name);
+                    if (!renamed)
+                        return Results.Conflict(new ErrorResponse(false, $"Player '{request.Name}' already exists"));
+                    currentName = request.Name;
+                    logger.LogInformation("API: Player renamed from {OldName} to {NewName}", name, request.Name);
+                }
+
+                // Apply live changes
+                if (request.Volume.HasValue)
+                {
+                    await manager.SetVolumeAsync(currentName, request.Volume.Value, ct);
+                }
+
+                if (request.Device != null)
+                {
+                    await manager.SwitchDeviceAsync(currentName, request.Device == "" ? null : request.Device, ct);
+                }
+
+                // Update config for changes that require restart
+                var savedConfig = config.GetPlayer(currentName);
+                if (savedConfig != null)
+                {
+                    if (request.ServerUrl != null && request.ServerUrl != (savedConfig.Server ?? ""))
+                    {
+                        savedConfig.Server = request.ServerUrl == "" ? null : request.ServerUrl;
+                        needsRestart = true;
+                    }
+
+                    if (request.NativeRate.HasValue && request.NativeRate.Value != savedConfig.NativeRate)
+                    {
+                        savedConfig.NativeRate = request.NativeRate.Value;
+                        needsRestart = true;
+                    }
+
+                    if (request.UseSimpleResampler.HasValue && request.UseSimpleResampler.Value != savedConfig.UseSimpleResampler)
+                    {
+                        savedConfig.UseSimpleResampler = request.UseSimpleResampler.Value;
+                        needsRestart = true;
+                    }
+
+                    config.Save();
+                }
+
+                // Return response indicating if restart is needed
+                return Results.Ok(new
+                {
+                    success = true,
+                    message = needsRestart
+                        ? "Configuration updated. Restart required for changes to take effect."
+                        : "Player updated successfully.",
+                    needsRestart,
+                    playerName = currentName
+                });
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
+            {
+                logger.LogWarning("API: Player update conflict - {Message}", ex.Message);
+                return Results.Conflict(new ErrorResponse(false, ex.Message));
+            }
+            catch (ArgumentException ex)
+            {
+                logger.LogWarning("API: Player update bad request - {Message}", ex.Message);
+                return Results.BadRequest(new ErrorResponse(false, ex.Message));
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "API: Failed to update player {PlayerName}", name);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to update player");
+            }
+        })
+        .WithName("UpdatePlayer")
+        .WithDescription("Update player configuration. Returns whether restart is needed for changes to take effect.");
+
         // PUT /api/players/{name}/rename - Rename a player
         group.MapPut("/{name}/rename", (
             string name,

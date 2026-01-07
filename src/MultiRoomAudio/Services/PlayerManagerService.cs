@@ -477,6 +477,17 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                     IAudioSampleSource source = new BufferedAudioSampleSource(buffer, timeFunc);
                     var targetRate = outputFormat?.SampleRate ?? buffer.Format.SampleRate;
 
+                    // A/B test: Use simple linear resampler when requested (for sync debugging)
+                    if (request.UseSimpleResampler && request.NativeRate)
+                    {
+                        _logger.LogInformation(
+                            "Using simple linear resampler (main branch style) for sync debugging");
+                        return new ResamplingAudioSampleSource(
+                            source,
+                            buffer,
+                            _loggerFactory.CreateLogger<ResamplingAudioSampleSource>());
+                    }
+
                     // Unified polyphase resampler handles both rate conversion and sync adjustment
                     // in a single high-quality pass, eliminating warbling artifacts
                     return new UnifiedPolyphaseResampler(
@@ -513,7 +524,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 OutputSampleRate = outputFormat?.SampleRate,
                 OutputBitDepth = outputFormat?.BitDepth,
                 OutputFormat = outputFormat,
-                NativeRate = request.NativeRate
+                NativeRate = request.NativeRate,
+                UseSimpleResampler = request.UseSimpleResampler
             };
 
             // 8. Create context

@@ -145,12 +145,101 @@ async function refreshDevices() {
     }
 }
 
-async function addPlayer() {
+// Enable/disable simple resampler checkbox based on native rate
+document.getElementById('nativeRate').addEventListener('change', function() {
+    const simpleResamplerCheckbox = document.getElementById('useSimpleResampler');
+    simpleResamplerCheckbox.disabled = !this.checked;
+    if (!this.checked) {
+        simpleResamplerCheckbox.checked = false;
+    }
+});
+
+// Open the modal in Add mode
+function openAddPlayerModal() {
+    // Reset form
+    document.getElementById('playerForm').reset();
+    document.getElementById('editingPlayerName').value = '';
+    document.getElementById('initialVolumeValue').textContent = '75%';
+    document.getElementById('useSimpleResampler').disabled = true;
+
+    // Set modal to Add mode
+    document.getElementById('playerModalIcon').className = 'fas fa-plus-circle me-2';
+    document.getElementById('playerModalTitleText').textContent = 'Add New Player';
+    document.getElementById('playerModalSubmitIcon').className = 'fas fa-plus me-1';
+    document.getElementById('playerModalSubmitText').textContent = 'Add Player';
+
+    // Refresh devices and show modal
+    refreshDevices();
+    const modal = new bootstrap.Modal(document.getElementById('playerModal'));
+    modal.show();
+}
+
+// Open the modal in Edit mode with player data
+async function openEditPlayerModal(playerName) {
+    try {
+        // Fetch current player data
+        const response = await fetch(`./api/players/${encodeURIComponent(playerName)}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch player data');
+        }
+        const player = await response.json();
+
+        // Reset form first
+        document.getElementById('playerForm').reset();
+
+        // Store original name for update logic
+        document.getElementById('editingPlayerName').value = playerName;
+
+        // Populate form with current values
+        document.getElementById('playerName').value = player.name;
+        document.getElementById('serverUrl').value = player.serverUrl || '';
+        document.getElementById('initialVolume').value = player.volume;
+        document.getElementById('initialVolumeValue').textContent = player.volume + '%';
+
+        // Set native rate and simple resampler (need to get from config)
+        // For now, we'll get these from the stats endpoint which has more details
+        const statsResponse = await fetch(`./api/players/${encodeURIComponent(playerName)}/stats`);
+        if (statsResponse.ok) {
+            const stats = await statsResponse.json();
+            // Native rate is when input rate == output rate
+            const isNativeRate = stats.resampler?.inputRate === stats.resampler?.outputRate;
+            document.getElementById('nativeRate').checked = isNativeRate;
+            document.getElementById('useSimpleResampler').disabled = !isNativeRate;
+            // Simple resampler info isn't in stats, default to false
+            document.getElementById('useSimpleResampler').checked = false;
+        }
+
+        // Set device dropdown
+        await refreshDevices();
+        if (player.device) {
+            document.getElementById('audioDevice').value = player.device;
+        }
+
+        // Set modal to Edit mode
+        document.getElementById('playerModalIcon').className = 'fas fa-edit me-2';
+        document.getElementById('playerModalTitleText').textContent = 'Edit Player';
+        document.getElementById('playerModalSubmitIcon').className = 'fas fa-save me-1';
+        document.getElementById('playerModalSubmitText').textContent = 'Save Changes';
+
+        const modal = new bootstrap.Modal(document.getElementById('playerModal'));
+        modal.show();
+    } catch (error) {
+        console.error('Error opening edit modal:', error);
+        showAlert(error.message, 'danger');
+    }
+}
+
+// Save player (handles both add and edit)
+async function savePlayer() {
+    const editingName = document.getElementById('editingPlayerName').value;
+    const isEditing = editingName !== '';
+
     const name = document.getElementById('playerName').value.trim();
     const device = document.getElementById('audioDevice').value;
     const serverUrl = document.getElementById('serverUrl').value.trim();
     const volume = parseInt(document.getElementById('initialVolume').value);
     const nativeRate = document.getElementById('nativeRate').checked;
+    const useSimpleResampler = document.getElementById('useSimpleResampler').checked;
 
     if (!name) {
         showAlert('Please enter a player name', 'warning');
@@ -158,32 +247,83 @@ async function addPlayer() {
     }
 
     try {
-        const response = await fetch('./api/players', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name,
-                device: device || null,
-                serverUrl: serverUrl || null,
+        if (isEditing) {
+            // Edit mode: Use PUT to update config, then restart if needed
+            const updatePayload = {
+                name: name !== editingName ? name : undefined,  // Only include if changed
+                device: device || '',  // Empty string = default device
+                serverUrl: serverUrl || '',  // Empty string = mDNS discovery
                 volume,
                 nativeRate,
-                persist: true
-            })
-        });
+                useSimpleResampler
+            };
 
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to create player');
+            const response = await fetch(`./api/players/${encodeURIComponent(editingName)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatePayload)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to update player');
+            }
+
+            const result = await response.json();
+            const finalName = result.playerName || name;
+
+            // If restart is needed, trigger it
+            if (result.needsRestart) {
+                const restartResponse = await fetch(`./api/players/${encodeURIComponent(finalName)}/restart`, {
+                    method: 'POST'
+                });
+                if (!restartResponse.ok) {
+                    console.warn('Restart request failed, player may need manual restart');
+                }
+            }
+
+            // Close modal and refresh
+            bootstrap.Modal.getInstance(document.getElementById('playerModal')).hide();
+            document.getElementById('playerForm').reset();
+            document.getElementById('initialVolumeValue').textContent = '75%';
+            await refreshStatus();
+
+            if (result.needsRestart) {
+                showAlert(`Player "${finalName}" updated and restarted`, 'success');
+            } else {
+                showAlert(`Player "${finalName}" updated successfully`, 'success');
+            }
+        } else {
+            // Add mode: Create new player
+            const response = await fetch('./api/players', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name,
+                    device: device || null,
+                    serverUrl: serverUrl || null,
+                    volume,
+                    nativeRate,
+                    useSimpleResampler,
+                    persist: true
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to create player');
+            }
+
+            // Close modal and refresh
+            bootstrap.Modal.getInstance(document.getElementById('playerModal')).hide();
+            document.getElementById('playerForm').reset();
+            document.getElementById('initialVolumeValue').textContent = '75%';
+            await refreshStatus();
+
+            showAlert(`Player "${name}" created successfully`, 'success');
         }
-
-        // Close modal and refresh
-        bootstrap.Modal.getInstance(document.getElementById('addPlayerModal')).hide();
-        document.getElementById('addPlayerForm').reset();
-        document.getElementById('initialVolumeValue').textContent = '75%';
-        await refreshStatus();
-        showAlert(`Player "${name}" created successfully`, 'success');
     } catch (error) {
-        console.error('Error adding player:', error);
+        console.error('Error saving player:', error);
         showAlert(error.message, 'danger');
     }
 }
@@ -245,41 +385,6 @@ async function restartPlayer(name) {
         showAlert(`Player "${name}" restarted`, 'success');
     } catch (error) {
         console.error('Error restarting player:', error);
-        showAlert(error.message, 'danger');
-    }
-}
-
-async function renamePlayer(name) {
-    const newName = prompt(`Enter a new name for "${name}":`, name);
-
-    // User cancelled or entered empty name
-    if (newName === null || newName.trim() === '') {
-        return;
-    }
-
-    const trimmedName = newName.trim();
-
-    // No change
-    if (trimmedName === name) {
-        return;
-    }
-
-    try {
-        const response = await fetch(`./api/players/${encodeURIComponent(name)}/rename`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ newName: trimmedName })
-        });
-
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to rename player');
-        }
-
-        await refreshStatus();
-        showAlert(`Player renamed to "${trimmedName}"`, 'success');
-    } catch (error) {
-        console.error('Error renaming player:', error);
         showAlert(error.message, 'danger');
     }
 }
@@ -481,9 +586,9 @@ function renderPlayers() {
                                         <i class="fas fa-ellipsis-v"></i>
                                     </button>
                                     <ul class="dropdown-menu">
+                                        <li><a class="dropdown-item" href="#" onclick="openEditPlayerModal('${escapeHtml(name)}'); return false;"><i class="fas fa-edit me-2"></i>Edit</a></li>
                                         <li><a class="dropdown-item" href="#" onclick="restartPlayer('${escapeHtml(name)}'); return false;"><i class="fas fa-sync me-2"></i>Restart</a></li>
                                         <li><a class="dropdown-item" href="#" onclick="stopPlayer('${escapeHtml(name)}'); return false;"><i class="fas fa-stop me-2"></i>Stop</a></li>
-                                        <li><a class="dropdown-item" href="#" onclick="renamePlayer('${escapeHtml(name)}'); return false;"><i class="fas fa-edit me-2"></i>Rename</a></li>
                                         <li><hr class="dropdown-divider"></li>
                                         <li><a class="dropdown-item text-danger" href="#" onclick="deletePlayer('${escapeHtml(name)}'); return false;"><i class="fas fa-trash me-2"></i>Delete</a></li>
                                     </ul>

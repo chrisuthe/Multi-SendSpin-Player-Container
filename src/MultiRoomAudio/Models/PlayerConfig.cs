@@ -88,6 +88,13 @@ public class PlayerCreateRequest
     /// Useful for testing or when upsampling is not desired.
     /// </summary>
     public bool NativeRate { get; set; }
+
+    /// <summary>
+    /// When true, uses the simple linear interpolation resampler instead of the polyphase resampler.
+    /// Only valid when NativeRate is also true (no rate conversion needed).
+    /// Used for A/B testing to isolate sync issues.
+    /// </summary>
+    public bool UseSimpleResampler { get; set; }
 }
 
 /// <summary>
@@ -131,6 +138,47 @@ public record RenameRequest(
     string NewName);
 
 /// <summary>
+/// Request to update a player's configuration.
+/// All fields are optional - only provided fields will be updated.
+/// </summary>
+public class PlayerUpdateRequest
+{
+    /// <summary>
+    /// New name for the player. If provided, the player will be renamed.
+    /// </summary>
+    [StringLength(100, MinimumLength = 1, ErrorMessage = "Player name must be between 1 and 100 characters.")]
+    [RegularExpression(@"^[a-zA-Z0-9\s\-_]+$", ErrorMessage = "Player name can only contain alphanumeric characters, spaces, hyphens, and underscores.")]
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// The audio device to use. Set to empty string for default device.
+    /// </summary>
+    [StringLength(100, ErrorMessage = "Device name cannot exceed 100 characters.")]
+    public string? Device { get; set; }
+
+    /// <summary>
+    /// The server URL to connect to. Set to empty string for mDNS discovery.
+    /// </summary>
+    public string? ServerUrl { get; set; }
+
+    /// <summary>
+    /// Volume level from 0 to 100.
+    /// </summary>
+    [Range(0, 100, ErrorMessage = "Volume must be between 0 and 100.")]
+    public int? Volume { get; set; }
+
+    /// <summary>
+    /// When true, output sample rate matches input sample rate.
+    /// </summary>
+    public bool? NativeRate { get; set; }
+
+    /// <summary>
+    /// When true, uses the simple linear interpolation resampler.
+    /// </summary>
+    public bool? UseSimpleResampler { get; set; }
+}
+
+/// <summary>
 /// Player configuration stored in memory.
 /// </summary>
 public class PlayerConfig
@@ -149,4 +197,5 @@ public class PlayerConfig
     public int? OutputBitDepth { get; set; }
     public AudioOutputFormat? OutputFormat { get; set; }
     public bool NativeRate { get; set; }
+    public bool UseSimpleResampler { get; set; }
 }
