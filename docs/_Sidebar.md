@@ -7,6 +7,7 @@
 
 **Development**
 * [Architecture](ARCHITECTURE)
+* [Audio Pipeline](AUDIO_PIPELINE)
 * [Code Structure](CODE_STRUCTURE)
 
 **Links**

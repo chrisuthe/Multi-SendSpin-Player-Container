@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.0.13] - Unified Polyphase Resampler
+
+### Fixed
+- **Warbling artifacts with hi-res output**: Eliminated audio warbling during 96kHz/192kHz playback with sync correction active
+
+### Changed
+- **Unified polyphase resampler**: Replaced dual-resampler chain with single high-quality resampler
+  - Combines static rate conversion AND dynamic sync adjustment in one pass
+  - 64-phase polyphase filter bank with Kaiser window (β=6.0)
+  - Fractional phase interpolation for seamless rate changes
+  - No more aliasing from linear interpolation on upsampled signals
+
+### Added
+- **Configurable quality presets**: Choose resampler quality based on CPU/quality tradeoff
+  - `HighestQuality`: 128 phases, 48 taps (~48KB filter bank)
+  - `MediumQuality`: 64 phases, 32 taps (~16KB filter bank) [DEFAULT]
+  - `LowResource`: 32 phases, 24 taps (~6KB filter bank)
+- Quality can be changed at runtime (filter bank rebuilds on next Read)
+
+### Technical
+- New `UnifiedPolyphaseResampler` replaces `SampleRateConverter` + `ResamplingAudioSampleSource`
+- Thread-safe playback rate updates via atomic double (no locks)
+- Same-rate passthrough optimization when inputRate == outputRate and rate == 1.0
+
+---
+
 ## [2.0.12] - Audio Quality & PulseAudio Fixes
 
 ### Fixed

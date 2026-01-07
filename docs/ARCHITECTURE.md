@@ -270,34 +270,39 @@ Music Assistant
       │
       │ Sendspin Protocol (mDNS discovery, audio streaming)
       v
-┌─────────────────┐
-│ SendSpin.SDK    │
-│                 │
-│ - Protocol impl │
-│ - Buffering     │
-│ - Sync timing   │
-└────────┬────────┘
-         │ PCM samples
-         v
-┌─────────────────┐
-│ PortAudioPlayer │
-│                 │
-│ - Sample buffer │
-│ - Rate convert  │
-│ - Volume apply  │
-└────────┬────────┘
-         │ Audio frames
-         v
-┌─────────────────┐
-│ PortAudio       │
-│                 │
-│ - Device I/O    │
-│ - Low latency   │
-└────────┬────────┘
-         │
-         v
-    USB DAC / Sound Card
+┌─────────────────────────────────────────────────────────────┐
+│ SendSpin.SDK                                                 │
+│                                                              │
+│ - Protocol impl                                              │
+│ - TimedAudioBuffer (buffering + sync timing)                │
+│ - Clock synchronization                                      │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ PCM samples (typically 48kHz)
+                           v
+┌─────────────────────────────────────────────────────────────┐
+│ UnifiedPolyphaseResampler                                    │
+│                                                              │
+│ - Polyphase filter bank (Kaiser window, β=6.0)              │
+│ - Fractional phase interpolation                             │
+│ - Static rate conversion (e.g., 48kHz → 192kHz)             │
+│ - Dynamic sync adjustment (±4% playback rate)               │
+│ - Quality presets: Highest/Medium/Low                       │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ Resampled PCM (device rate)
+                           v
+┌─────────────────────────────────────────────────────────────┐
+│ AlsaPlayer / PulseAudioPlayer                                │
+│                                                              │
+│ - Sample format conversion (float → S32_LE/S24_LE/S16_LE)   │
+│ - Volume control                                             │
+│ - Low-latency output                                         │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           v
+                   USB DAC / Sound Card
 ```
+
+For detailed audio pipeline documentation, see [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md).
 
 ---
 
