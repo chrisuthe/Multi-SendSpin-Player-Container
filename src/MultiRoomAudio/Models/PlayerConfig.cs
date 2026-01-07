@@ -81,20 +81,6 @@ public class PlayerCreateRequest
     /// </summary>
     [Range(16, 32, ErrorMessage = "OutputBitDepth must be 16, 24, or 32.")]
     public int? OutputBitDepth { get; set; }
-
-    /// <summary>
-    /// When true, output sample rate matches input sample rate (typically 48kHz).
-    /// This eliminates sample rate conversion, leaving only sync adjustment.
-    /// Useful for testing or when upsampling is not desired.
-    /// </summary>
-    public bool NativeRate { get; set; }
-
-    /// <summary>
-    /// When true, uses the simple linear interpolation resampler instead of the polyphase resampler.
-    /// Only valid when NativeRate is also true (no rate conversion needed).
-    /// Used for A/B testing to isolate sync issues.
-    /// </summary>
-    public bool UseSimpleResampler { get; set; }
 }
 
 /// <summary>
@@ -166,16 +152,6 @@ public class PlayerUpdateRequest
     /// </summary>
     [Range(0, 100, ErrorMessage = "Volume must be between 0 and 100.")]
     public int? Volume { get; set; }
-
-    /// <summary>
-    /// When true, output sample rate matches input sample rate.
-    /// </summary>
-    public bool? NativeRate { get; set; }
-
-    /// <summary>
-    /// When true, uses the simple linear interpolation resampler.
-    /// </summary>
-    public bool? UseSimpleResampler { get; set; }
 }
 
 /// <summary>
@@ -196,6 +172,4 @@ public class PlayerConfig
     public int? OutputSampleRate { get; set; }
     public int? OutputBitDepth { get; set; }
     public AudioOutputFormat? OutputFormat { get; set; }
-    public bool NativeRate { get; set; }
-    public bool UseSimpleResampler { get; set; }
 }

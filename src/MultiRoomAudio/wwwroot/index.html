@@ -89,24 +89,6 @@
                             <input type="range" class="form-range" id="initialVolume" min="0" max="100" value="75">
                             <span id="initialVolumeValue">75%</span>
                         </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="nativeRate">
-                            <label class="form-check-label" for="nativeRate">
-                                Native Rate (no upsampling)
-                            </label>
-                            <div class="form-text">
-                                Output at input sample rate (typically 48kHz). Eliminates sample rate conversion for testing sync.
-                            </div>
-                        </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="useSimpleResampler" disabled>
-                            <label class="form-check-label" for="useSimpleResampler">
-                                Use Simple Resampler (A/B test)
-                            </label>
-                            <div class="form-text">
-                                Uses the main branch's linear resampler. Requires Native Rate to be enabled.
-                            </div>
-                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">

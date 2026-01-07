@@ -24,18 +24,6 @@ public class PlayerConfiguration
     public int? OutputSampleRate { get; set; }
     public int? OutputBitDepth { get; set; }
 
-    /// <summary>
-    /// When true, output sample rate matches input sample rate (typically 48kHz).
-    /// This eliminates sample rate conversion, leaving only sync adjustment.
-    /// </summary>
-    public bool NativeRate { get; set; }
-
-    /// <summary>
-    /// When true, uses the simple linear interpolation resampler instead of the polyphase resampler.
-    /// Only valid when NativeRate is also true.
-    /// </summary>
-    public bool UseSimpleResampler { get; set; }
-
     // Additional provider-specific settings
     public Dictionary<string, object>? Extra { get; set; }
 }

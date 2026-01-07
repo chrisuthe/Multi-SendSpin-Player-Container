@@ -406,18 +406,6 @@ public static class PlayersEndpoint
                         needsRestart = true;
                     }
 
-                    if (request.NativeRate.HasValue && request.NativeRate.Value != savedConfig.NativeRate)
-                    {
-                        savedConfig.NativeRate = request.NativeRate.Value;
-                        needsRestart = true;
-                    }
-
-                    if (request.UseSimpleResampler.HasValue && request.UseSimpleResampler.Value != savedConfig.UseSimpleResampler)
-                    {
-                        savedConfig.UseSimpleResampler = request.UseSimpleResampler.Value;
-                        needsRestart = true;
-                    }
-
                     config.Save();
                 }
 

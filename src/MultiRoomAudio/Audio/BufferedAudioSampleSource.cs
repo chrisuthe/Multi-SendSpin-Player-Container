@@ -22,7 +22,6 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
 
     /// <summary>
     /// Gets the underlying timed audio buffer.
-    /// Used by <see cref="ResamplingAudioSampleSource"/> to subscribe to rate changes.
     /// </summary>
     public ITimedAudioBuffer Buffer => _buffer;
 

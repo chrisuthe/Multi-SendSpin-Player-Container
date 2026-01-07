@@ -145,22 +145,12 @@ async function refreshDevices() {
     }
 }
 
-// Enable/disable simple resampler checkbox based on native rate
-document.getElementById('nativeRate').addEventListener('change', function() {
-    const simpleResamplerCheckbox = document.getElementById('useSimpleResampler');
-    simpleResamplerCheckbox.disabled = !this.checked;
-    if (!this.checked) {
-        simpleResamplerCheckbox.checked = false;
-    }
-});
-
 // Open the modal in Add mode
 function openAddPlayerModal() {
     // Reset form
     document.getElementById('playerForm').reset();
     document.getElementById('editingPlayerName').value = '';
     document.getElementById('initialVolumeValue').textContent = '75%';
-    document.getElementById('useSimpleResampler').disabled = true;
 
     // Set modal to Add mode
     document.getElementById('playerModalIcon').className = 'fas fa-plus-circle me-2';
@@ -196,11 +186,6 @@ async function openEditPlayerModal(playerName) {
         document.getElementById('initialVolume').value = player.volume;
         document.getElementById('initialVolumeValue').textContent = player.volume + '%';
 
-        // Set native rate and simple resampler from the player config
-        document.getElementById('nativeRate').checked = player.nativeRate || false;
-        document.getElementById('useSimpleResampler').checked = player.useSimpleResampler || false;
-        document.getElementById('useSimpleResampler').disabled = !player.nativeRate;
-
         // Set device dropdown
         await refreshDevices();
         if (player.device) {
@@ -230,8 +215,6 @@ async function savePlayer() {
     const device = document.getElementById('audioDevice').value;
     const serverUrl = document.getElementById('serverUrl').value.trim();
     const volume = parseInt(document.getElementById('initialVolume').value);
-    const nativeRate = document.getElementById('nativeRate').checked;
-    const useSimpleResampler = document.getElementById('useSimpleResampler').checked;
 
     if (!name) {
         showAlert('Please enter a player name', 'warning');
@@ -245,9 +228,7 @@ async function savePlayer() {
                 name: name !== editingName ? name : undefined,  // Only include if changed
                 device: device || '',  // Empty string = default device
                 serverUrl: serverUrl || '',  // Empty string = mDNS discovery
-                volume,
-                nativeRate,
-                useSimpleResampler
+                volume
             };
 
             const response = await fetch(`./api/players/${encodeURIComponent(editingName)}`, {
@@ -295,8 +276,6 @@ async function savePlayer() {
                     device: device || null,
                     serverUrl: serverUrl || null,
                     volume,
-                    nativeRate,
-                    useSimpleResampler,
                     persist: true
                 })
             });

@@ -269,8 +269,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                         DelayMs = playerConfig.DelayMs,
                         Persist = false, // Already persisted, don't re-save
                         OutputSampleRate = playerConfig.OutputSampleRate,
-                        OutputBitDepth = playerConfig.OutputBitDepth,
-                        NativeRate = playerConfig.NativeRate
+                        OutputBitDepth = playerConfig.OutputBitDepth
                     };
 
                     await CreatePlayerAsync(request, cancellationToken);
@@ -377,34 +376,10 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             // Probe device capabilities (used for format selection and reporting)
             var deviceCapabilities = _backendFactory.GetDeviceCapabilities(request.Device);
 
-            // Resolve output format: native rate > request > saved config > auto-detect > defaults
+            // Resolve output format: request > saved config > auto-detect > defaults
+            // PulseAudio handles any necessary format conversion to the device
             AudioOutputFormat? outputFormat = null;
-            if (request.NativeRate)
-            {
-                // Native rate mode: output at input rate (typically 48kHz)
-                // This eliminates sample rate conversion, leaving only sync adjustment
-                // The resampler will be in passthrough mode when inputRate == outputRate
-                var nativeRate = 48000; // Music Assistant typically sends 48kHz
-                var bitDepth = request.OutputBitDepth ?? deviceCapabilities?.PreferredBitDepth ?? 32;
-
-                // Verify device supports native rate (if we have capability info)
-                if (deviceCapabilities != null && !deviceCapabilities.SupportedSampleRates.Contains(nativeRate))
-                {
-                    _logger.LogWarning(
-                        "Device does not support native rate {NativeRate}Hz (supports: {Supported}). Using lowest supported rate.",
-                        nativeRate, string.Join(",", deviceCapabilities.SupportedSampleRates));
-                    nativeRate = deviceCapabilities.SupportedSampleRates.Min();
-                }
-
-                outputFormat = new AudioOutputFormat(
-                    SampleRate: nativeRate,
-                    BitDepth: bitDepth,
-                    Channels: 2);
-                _logger.LogInformation(
-                    "Native rate mode: output at {SampleRate}Hz/{BitDepth}-bit (no sample rate conversion)",
-                    outputFormat.SampleRate, outputFormat.BitDepth);
-            }
-            else if (request.OutputSampleRate.HasValue || request.OutputBitDepth.HasValue)
+            if (request.OutputSampleRate.HasValue || request.OutputBitDepth.HasValue)
             {
                 // Use explicitly specified values from request
                 outputFormat = new AudioOutputFormat(
@@ -469,28 +444,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 playerFactory: () => player,
                 sourceFactory: (buffer, timeFunc) =>
                 {
-                    IAudioSampleSource source = new BufferedAudioSampleSource(buffer, timeFunc);
-                    var targetRate = outputFormat?.SampleRate ?? buffer.Format.SampleRate;
-
-                    // A/B test: Use simple linear resampler when requested (for sync debugging)
-                    if (request.UseSimpleResampler && request.NativeRate)
-                    {
-                        _logger.LogInformation(
-                            "Using simple linear resampler (main branch style) for sync debugging");
-                        return new ResamplingAudioSampleSource(
-                            source,
-                            buffer,
-                            _loggerFactory.CreateLogger<ResamplingAudioSampleSource>());
-                    }
-
-                    // Unified polyphase resampler handles both rate conversion and sync adjustment
-                    // in a single high-quality pass, eliminating warbling artifacts
-                    return new UnifiedPolyphaseResampler(
-                        source,
-                        buffer.Format.SampleRate,
-                        targetRate,
-                        buffer,
-                        _loggerFactory.CreateLogger<UnifiedPolyphaseResampler>());
+                    // Direct passthrough - no resampling
+                    // PulseAudio handles format conversion to device natively
+                    return new BufferedAudioSampleSource(buffer, timeFunc);
                 },
                 waitForConvergence: true,      // Wait for minimal sync (2 measurements) before playback
                 convergenceTimeoutMs: 1000);   // 1 second timeout (SDK 3.0 uses HasMinimalSync for fast start)
@@ -518,9 +474,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 DelayMs = request.DelayMs,
                 OutputSampleRate = outputFormat?.SampleRate,
                 OutputBitDepth = outputFormat?.BitDepth,
-                OutputFormat = outputFormat,
-                NativeRate = request.NativeRate,
-                UseSimpleResampler = request.UseSimpleResampler
+                OutputFormat = outputFormat
             };
 
             // 8. Create context
@@ -561,8 +515,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                     Server = request.ServerUrl,
                     Volume = request.Volume,
                     OutputSampleRate = outputFormat?.SampleRate,
-                    OutputBitDepth = outputFormat?.BitDepth,
-                    NativeRate = request.NativeRate
+                    OutputBitDepth = outputFormat?.BitDepth
                 };
                 _config.SetPlayer(request.Name, persistConfig);
                 _config.Save();
@@ -894,8 +847,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             DelayMs = config.DelayMs,
             Persist = false, // Already persisted
             OutputSampleRate = config.OutputSampleRate,
-            OutputBitDepth = config.OutputBitDepth,
-            NativeRate = config.NativeRate
+            OutputBitDepth = config.OutputBitDepth
         };
 
         return await CreatePlayerAsync(request, ct);
@@ -1188,9 +1140,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 Overruns: bufferStats.OverrunCount
             ) : null,
             OutputFormat: context.Config.OutputFormat,
-            DeviceCapabilities: context.DeviceCapabilities,
-            NativeRate: context.Config.NativeRate,
-            UseSimpleResampler: context.Config.UseSimpleResampler
+            DeviceCapabilities: context.DeviceCapabilities
         );
     }
 
