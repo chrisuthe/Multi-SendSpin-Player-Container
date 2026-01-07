@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-66a0593
+## Development Build: sha-0c40ecb
 
 **Current Dev Build Changes** (recent)
 
+- Update player details UI after output format removal
+- Remove BitDepthConverter and output format configuration
 - cleanup ALSA destruction
 - Remove resampling - use direct passthrough to PulseAudio
 - Load ALSA sinks at higher sample rates when supported
@@ -13,8 +15,6 @@
 - Fix ALSA device detection in Docker standalone mode
 - Fix Docker standalone mode to use PulseAudio
 - Remove ALSA support, standardize on PulseAudio
-- Update SendSpin.SDK to v3.5.1
-- add ALSA calibration passing to the SDK, updated to 3.5.0 and removed deadband entry/exit.
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
