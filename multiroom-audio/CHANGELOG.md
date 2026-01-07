@@ -1,9 +1,10 @@
 # Changelog
 
-## [2.0.13] - Unified Polyphase Resampler
+## [2.0.13] - Unified Polyphase Resampler & Stats for Nerds
 
 ### Fixed
 - **Warbling artifacts with hi-res output**: Eliminated audio warbling during 96kHz/192kHz playback with sync correction active
+- **TPDF dithering**: Fixed dithering to use proper triangular probability distribution instead of rectangular
 
 ### Changed
 - **Unified polyphase resampler**: Replaced dual-resampler chain with single high-quality resampler
@@ -11,8 +12,17 @@
   - 64-phase polyphase filter bank with Kaiser window (β=6.0)
   - Fractional phase interpolation for seamless rate changes
   - No more aliasing from linear interpolation on upsampled signals
+- **SendSpin.SDK 3.3.1**: Added OutputFormat properties for accurate format reporting
 
 ### Added
+- **Stats for Nerds**: Real-time audio diagnostics panel accessible from each player card
+  - Audio format info (input/output rates, channels, bit depth, bitrate)
+  - Sync status with color-coded error display (green <5ms, yellow <20ms, red >20ms)
+  - Buffer statistics (level, underruns, overruns)
+  - Clock sync details (offset, drift rate, measurement count)
+  - Resampler info (conversion ratio, quality preset, effective ratio)
+  - Throughput counters (samples read/written, dropped/inserted)
+  - Dark-themed modal with 500ms auto-refresh polling
 - **Configurable quality presets**: Choose resampler quality based on CPU/quality tradeoff
   - `HighestQuality`: 128 phases, 48 taps (~48KB filter bank)
   - `MediumQuality`: 64 phases, 32 taps (~16KB filter bank) [DEFAULT]
@@ -23,6 +33,7 @@
 - New `UnifiedPolyphaseResampler` replaces `SampleRateConverter` + `ResamplingAudioSampleSource`
 - Thread-safe playback rate updates via atomic double (no locks)
 - Same-rate passthrough optimization when inputRate == outputRate and rate == 1.0
+- New `/api/players/{name}/stats` endpoint for real-time diagnostics
 
 ---
 
