@@ -140,6 +140,151 @@
     margin-right: 0.25rem;
 }
 
+/* Stats for Nerds Modal */
+.stats-modal {
+    max-width: 420px;
+    margin-right: 0;
+    margin-left: auto;
+}
+
+.stats-modal .modal-content {
+    background: #1a1a2e !important;
+    border: 1px solid #2d2d44;
+    border-radius: 12px;
+}
+
+.stats-modal .modal-header {
+    background: #16162a;
+    border-bottom: 1px solid #2d2d44;
+    border-radius: 12px 12px 0 0;
+    padding: 0.75rem 1rem;
+}
+
+.stats-modal .modal-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+.stats-body {
+    padding: 0.75rem !important;
+    font-size: 12px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.stats-section {
+    background: #2d2d44;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+}
+
+.stats-section:last-child {
+    margin-bottom: 0;
+}
+
+.stats-section-header {
+    color: #a78bfa;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #3d3d5c;
+}
+
+.stats-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    line-height: 1.4;
+}
+
+.stats-row:last-child {
+    margin-bottom: 0;
+}
+
+.stats-label {
+    color: #888;
+    font-size: 11px;
+}
+
+.stats-value {
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: right;
+}
+
+.stats-value.good {
+    color: #4ade80;
+}
+
+.stats-value.warning {
+    color: #fbbf24;
+}
+
+.stats-value.bad {
+    color: #f87171;
+}
+
+.stats-value.info {
+    color: #60a5fa;
+}
+
+.stats-value.muted {
+    color: #666;
+}
+
+/* Sync status indicator */
+.sync-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sync-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4ade80;
+}
+
+.sync-dot.syncing {
+    background: #fbbf24;
+    animation: pulse-sync 1s infinite;
+}
+
+.sync-dot.not-synced {
+    background: #f87171;
+}
+
+@keyframes pulse-sync {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Stats modal scrollbar styling */
+.stats-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.stats-body::-webkit-scrollbar-track {
+    background: #1a1a2e;
+}
+
+.stats-body::-webkit-scrollbar-thumb {
+    background: #3d3d5c;
+    border-radius: 3px;
+}
+
+.stats-body::-webkit-scrollbar-thumb:hover {
+    background: #4d4d6c;
+}
+
 /* Dark mode support */
 @media (prefers-color-scheme: dark) {
     body {

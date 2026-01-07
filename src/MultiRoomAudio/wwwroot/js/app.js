@@ -460,8 +460,11 @@ function renderPlayers() {
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <h5 class="card-title mb-0">${escapeHtml(player.name)}</h5>
                             <div class="d-flex">
-                                <button class="btn btn-sm btn-outline-info me-1" onclick="showPlayerStats('${escapeHtml(name)}')" title="Player Stats">
-                                    <i class="fas fa-chart-bar"></i>
+                                <button class="btn btn-sm btn-outline-info me-1" onclick="showPlayerStats('${escapeHtml(name)}')" title="Player Details">
+                                    <i class="fas fa-info-circle"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary me-1" onclick="openStatsForNerds('${escapeHtml(name)}')" title="Stats for Nerds">
+                                    <i class="fas fa-terminal"></i>
                                 </button>
                                 <div class="dropdown">
                                     <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="dropdown">
@@ -550,4 +553,243 @@ function showAlert(message, type = 'info') {
         alert.classList.remove('show');
         setTimeout(() => alert.remove(), 150);
     }, 5000);
+}
+
+// ========== Stats for Nerds ==========
+let statsInterval = null;
+let currentStatsPlayer = null;
+
+function openStatsForNerds(playerName) {
+    currentStatsPlayer = playerName;
+
+    // Update player name in modal header
+    const playerNameSpan = document.getElementById('statsPlayerName');
+    if (playerNameSpan) {
+        playerNameSpan.textContent = '• ' + playerName;
+    }
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('statsForNerdsModal'));
+    modal.show();
+
+    // Start polling
+    fetchAndRenderStats();
+    statsInterval = setInterval(fetchAndRenderStats, 500);
+
+    // Stop polling when modal closes
+    document.getElementById('statsForNerdsModal').addEventListener('hidden.bs.modal', () => {
+        clearInterval(statsInterval);
+        statsInterval = null;
+        currentStatsPlayer = null;
+    }, { once: true });
+}
+
+async function fetchAndRenderStats() {
+    if (!currentStatsPlayer) return;
+
+    try {
+        const response = await fetch(`./api/players/${encodeURIComponent(currentStatsPlayer)}/stats`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch stats');
+        }
+        const stats = await response.json();
+        renderStatsPanel(stats);
+    } catch (error) {
+        console.error('Error fetching stats:', error);
+        const body = document.getElementById('statsForNerdsBody');
+        body.innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-exclamation-triangle text-warning mb-2" style="font-size: 2rem;"></i>
+                <p class="text-muted mb-0">Failed to load stats</p>
+            </div>
+        `;
+    }
+}
+
+function renderStatsPanel(stats) {
+    const body = document.getElementById('statsForNerdsBody');
+
+    body.innerHTML = `
+        <!-- Audio Format Section -->
+        <div class="stats-section">
+            <div class="stats-section-header">Audio Format</div>
+            <div class="stats-row">
+                <span class="stats-label">Input</span>
+                <span class="stats-value info">${escapeHtml(stats.audioFormat.inputFormat)}</span>
+            </div>
+            ${stats.audioFormat.inputBitrate ? `
+            <div class="stats-row">
+                <span class="stats-label">Bitrate</span>
+                <span class="stats-value">${escapeHtml(stats.audioFormat.inputBitrate)}</span>
+            </div>
+            ` : ''}
+            <div class="stats-row">
+                <span class="stats-label">Output</span>
+                <span class="stats-value info">${escapeHtml(stats.audioFormat.outputFormat)}</span>
+            </div>
+        </div>
+
+        <!-- Sync Status Section -->
+        <div class="stats-section">
+            <div class="stats-section-header">Sync Status</div>
+            <div class="stats-row">
+                <span class="stats-label">Sync Error</span>
+                <span class="stats-value ${getSyncErrorClass(stats.sync.syncErrorMs)}">${formatMs(stats.sync.syncErrorMs)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Correction Mode</span>
+                <span class="stats-value ${getCorrectionModeClass(stats.sync.correctionMode)}">${escapeHtml(stats.sync.correctionMode)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Playback Active</span>
+                <span class="stats-value ${stats.sync.isPlaybackActive ? 'good' : 'muted'}">${stats.sync.isPlaybackActive ? 'Yes' : 'No'}</span>
+            </div>
+        </div>
+
+        <!-- Buffer Section -->
+        <div class="stats-section">
+            <div class="stats-section-header">Buffer</div>
+            <div class="stats-row">
+                <span class="stats-label">Buffered</span>
+                <span class="stats-value">${stats.buffer.bufferedMs}ms / ${stats.buffer.targetMs}ms</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Underruns</span>
+                <span class="stats-value ${stats.buffer.underruns > 0 ? 'bad' : 'good'}">${formatCount(stats.buffer.underruns)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Overruns</span>
+                <span class="stats-value ${stats.buffer.overruns > 0 ? 'warning' : 'good'}">${formatCount(stats.buffer.overruns)}</span>
+            </div>
+        </div>
+
+        <!-- Sync Correction Section -->
+        <div class="stats-section">
+            <div class="stats-section-header">Sync Correction</div>
+            <div class="stats-row">
+                <span class="stats-label">Playback Rate</span>
+                <span class="stats-value ${getPlaybackRateClass(stats.sync.playbackRate)}">${stats.sync.playbackRate.toFixed(4)}x</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Dropped (Sync)</span>
+                <span class="stats-value ${stats.throughput.samplesDroppedSync > 0 ? 'warning' : ''}">${formatSampleCount(stats.throughput.samplesDroppedSync)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Inserted (Sync)</span>
+                <span class="stats-value ${stats.throughput.samplesInsertedSync > 0 ? 'warning' : ''}">${formatSampleCount(stats.throughput.samplesInsertedSync)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Dropped (Overflow)</span>
+                <span class="stats-value ${stats.throughput.samplesDroppedOverflow > 0 ? 'bad' : ''}">${formatSampleCount(stats.throughput.samplesDroppedOverflow)}</span>
+            </div>
+        </div>
+
+        <!-- Clock Sync Section -->
+        <div class="stats-section">
+            <div class="stats-section-header">Clock Sync</div>
+            <div class="stats-row">
+                <span class="stats-label">Status</span>
+                <span class="stats-value">
+                    <span class="sync-indicator">
+                        <span class="sync-dot ${stats.clockSync.isSynchronized ? '' : (stats.clockSync.measurementCount > 0 ? 'syncing' : 'not-synced')}"></span>
+                        <span class="${stats.clockSync.isSynchronized ? 'good' : 'warning'}">${stats.clockSync.isSynchronized ? 'Synchronized' : (stats.clockSync.measurementCount > 0 ? 'Syncing...' : 'Not synced')}</span>
+                    </span>
+                </span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Clock Offset</span>
+                <span class="stats-value">${formatMs(stats.clockSync.clockOffsetMs)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Uncertainty</span>
+                <span class="stats-value">${formatMs(stats.clockSync.uncertaintyMs)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Drift Rate</span>
+                <span class="stats-value ${stats.clockSync.isDriftReliable ? '' : 'muted'}">${stats.clockSync.driftRatePpm.toFixed(1)} ppm ${stats.clockSync.isDriftReliable ? '' : '(unstable)'}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Measurements</span>
+                <span class="stats-value">${formatCount(stats.clockSync.measurementCount)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Output Latency</span>
+                <span class="stats-value">${stats.clockSync.outputLatencyMs}ms</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Static Delay</span>
+                <span class="stats-value">${stats.clockSync.staticDelayMs}ms</span>
+            </div>
+        </div>
+
+        <!-- Throughput Section -->
+        <div class="stats-section">
+            <div class="stats-section-header">Throughput</div>
+            <div class="stats-row">
+                <span class="stats-label">Samples Written</span>
+                <span class="stats-value">${formatSampleCount(stats.throughput.samplesWritten)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Samples Read</span>
+                <span class="stats-value">${formatSampleCount(stats.throughput.samplesRead)}</span>
+            </div>
+        </div>
+
+        <!-- Resampler Section -->
+        <div class="stats-section">
+            <div class="stats-section-header">Resampler</div>
+            <div class="stats-row">
+                <span class="stats-label">Conversion</span>
+                <span class="stats-value info">${formatSampleRate(stats.resampler.inputRate)} → ${formatSampleRate(stats.resampler.outputRate)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Quality</span>
+                <span class="stats-value">${escapeHtml(stats.resampler.quality)}</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Effective Ratio</span>
+                <span class="stats-value">${stats.resampler.effectiveRatio.toFixed(6)}</span>
+            </div>
+        </div>
+    `;
+}
+
+// Stats helper functions
+function formatMs(ms) {
+    if (Math.abs(ms) < 0.01) return '0.00ms';
+    return (ms >= 0 ? '+' : '') + ms.toFixed(2) + 'ms';
+}
+
+function formatCount(count) {
+    return count.toLocaleString();
+}
+
+function formatSampleCount(count) {
+    if (count >= 1e9) return (count / 1e9).toFixed(2) + 'B';
+    if (count >= 1e6) return (count / 1e6).toFixed(2) + 'M';
+    if (count >= 1e3) return (count / 1e3).toFixed(1) + 'K';
+    return count.toString();
+}
+
+function getSyncErrorClass(errorMs) {
+    const absError = Math.abs(errorMs);
+    if (absError < 5) return 'good';
+    if (absError < 20) return 'warning';
+    return 'bad';
+}
+
+function getCorrectionModeClass(mode) {
+    switch (mode) {
+        case 'None': return '';
+        case 'Resampling': return 'info';
+        case 'Dropping': return 'warning';
+        case 'Inserting': return 'warning';
+        default: return '';
+    }
+}
+
+function getPlaybackRateClass(rate) {
+    if (rate === 1.0) return '';
+    if (rate > 1.0) return 'info';  // speeding up
+    return 'info';  // slowing down
 }

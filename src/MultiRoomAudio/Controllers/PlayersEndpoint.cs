@@ -52,6 +52,19 @@ public static class PlayersEndpoint
         .WithName("GetPlayer")
         .WithDescription("Get details of a specific player");
 
+        // GET /api/players/{name}/stats - Get real-time player stats (Stats for Nerds)
+        group.MapGet("/{name}/stats", (string name, PlayerManagerService manager, ILogger<PlayerManagerService> logger) =>
+        {
+            logger.LogDebug("API: GET /api/players/{PlayerName}/stats", name);
+            var stats = manager.GetPlayerStats(name);
+            if (stats == null)
+                return PlayerNotFoundResult(name, logger, "stats");
+
+            return Results.Ok(stats);
+        })
+        .WithName("GetPlayerStats")
+        .WithDescription("Get real-time audio diagnostics and sync metrics (Stats for Nerds)");
+
         // POST /api/players - Create new player
         group.MapPost("/", async (
             PlayerCreateRequest request,

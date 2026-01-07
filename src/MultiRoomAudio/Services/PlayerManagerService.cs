@@ -449,26 +449,16 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 sourceFactory: (buffer, timeFunc) =>
                 {
                     IAudioSampleSource source = new BufferedAudioSampleSource(buffer, timeFunc);
+                    var targetRate = outputFormat?.SampleRate ?? buffer.Format.SampleRate;
 
-                    // Insert sample rate converter if output rate differs from source rate
-                    // Source is typically 48kHz from Sendspin, output may be up to 192kHz
-                    if (outputFormat != null && outputFormat.SampleRate != buffer.Format.SampleRate)
-                    {
-                        _logger.LogInformation(
-                            "Inserting sample rate converter: {SourceRate}Hz -> {OutputRate}Hz",
-                            buffer.Format.SampleRate, outputFormat.SampleRate);
-                        source = new SampleRateConverter(
-                            source,
-                            buffer.Format.SampleRate,
-                            outputFormat.SampleRate,
-                            _loggerFactory.CreateLogger<SampleRateConverter>());
-                    }
-
-                    // Wrap with resampling for smooth playback rate adjustment (±4%)
-                    return new ResamplingAudioSampleSource(
+                    // Unified polyphase resampler handles both rate conversion and sync adjustment
+                    // in a single high-quality pass, eliminating warbling artifacts
+                    return new UnifiedPolyphaseResampler(
                         source,
+                        buffer.Format.SampleRate,
+                        targetRate,
                         buffer,
-                        _loggerFactory.CreateLogger<ResamplingAudioSampleSource>());
+                        _loggerFactory.CreateLogger<UnifiedPolyphaseResampler>());
                 },
                 waitForConvergence: true,      // Wait for minimal sync (2 measurements) before playback
                 convergenceTimeoutMs: 1000);   // 1 second timeout (SDK 3.0 uses HasMinimalSync for fast start)
@@ -1128,6 +1118,101 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             ) : null,
             OutputFormat: context.Config.OutputFormat,
             DeviceCapabilities: context.DeviceCapabilities
+        );
+    }
+
+    /// <summary>
+    /// Gets real-time stats for a player (Stats for Nerds).
+    /// </summary>
+    /// <param name="name">Player name.</param>
+    /// <returns>Stats response or null if player not found.</returns>
+    public PlayerStatsResponse? GetPlayerStats(string name)
+    {
+        if (!_players.TryGetValue(name, out var context))
+            return null;
+
+        var bufferStats = context.Pipeline.BufferStats;
+        var clockStatus = context.ClockSync.GetStatus();
+        var inputFormat = context.Pipeline.CurrentFormat;
+        // Use SDK's OutputFormat if available (3.3.1+), fall back to config
+        var pipelineOutputFormat = context.Pipeline.OutputFormat;
+        var configOutputFormat = context.Config.OutputFormat;
+
+        // Audio Format Stats
+        var audioFormat = new AudioFormatStats(
+            InputFormat: inputFormat != null
+                ? $"{inputFormat.Codec.ToUpperInvariant()} {inputFormat.SampleRate}Hz {inputFormat.Channels}ch"
+                : "--",
+            InputSampleRate: inputFormat?.SampleRate ?? 0,
+            InputChannels: inputFormat?.Channels ?? 0,
+            InputBitrate: inputFormat?.Bitrate > 0 ? $"{inputFormat.Bitrate}kbps" : null,
+            OutputFormat: pipelineOutputFormat != null
+                ? $"PCM {pipelineOutputFormat.SampleRate}Hz {pipelineOutputFormat.Channels}ch {pipelineOutputFormat.BitDepth}-bit"
+                : (configOutputFormat != null
+                    ? $"PCM {configOutputFormat.SampleRate}Hz {configOutputFormat.Channels}ch {configOutputFormat.BitDepth}-bit"
+                    : "--"),
+            OutputSampleRate: pipelineOutputFormat?.SampleRate ?? configOutputFormat?.SampleRate ?? 0,
+            OutputChannels: pipelineOutputFormat?.Channels ?? configOutputFormat?.Channels ?? 2,
+            OutputBitDepth: pipelineOutputFormat?.BitDepth ?? configOutputFormat?.BitDepth ?? 32
+        );
+
+        // Sync Stats
+        var sync = new SyncStats(
+            SyncErrorMs: bufferStats?.SyncErrorMs ?? 0,
+            CorrectionMode: bufferStats?.CurrentCorrectionMode.ToString() ?? "None",
+            PlaybackRate: bufferStats?.TargetPlaybackRate ?? 1.0,
+            IsPlaybackActive: bufferStats?.IsPlaybackActive ?? false
+        );
+
+        // Buffer Stats
+        var buffer = new BufferStatsInfo(
+            BufferedMs: (int)(bufferStats?.BufferedMs ?? 0),
+            TargetMs: (int)(bufferStats?.TargetMs ?? 0),
+            Underruns: bufferStats?.UnderrunCount ?? 0,
+            Overruns: bufferStats?.OverrunCount ?? 0
+        );
+
+        // Clock Sync Stats
+        var clockSync = new ClockSyncStats(
+            IsSynchronized: clockStatus.IsConverged,
+            ClockOffsetMs: clockStatus.OffsetMilliseconds,
+            UncertaintyMs: clockStatus.OffsetUncertaintyMicroseconds / 1000.0,
+            DriftRatePpm: clockStatus.DriftMicrosecondsPerSecond,
+            IsDriftReliable: clockStatus.IsDriftReliable,
+            MeasurementCount: clockStatus.MeasurementCount,
+            OutputLatencyMs: context.Pipeline.DetectedOutputLatencyMs,
+            StaticDelayMs: (int)context.ClockSync.StaticDelayMs
+        );
+
+        // Throughput Stats
+        var throughput = new ThroughputStats(
+            SamplesWritten: bufferStats?.TotalSamplesWritten ?? 0,
+            SamplesRead: bufferStats?.TotalSamplesRead ?? 0,
+            SamplesDroppedSync: bufferStats?.SamplesDroppedForSync ?? 0,
+            SamplesInsertedSync: bufferStats?.SamplesInsertedForSync ?? 0,
+            SamplesDroppedOverflow: bufferStats?.DroppedSamples ?? 0
+        );
+
+        // Resampler Stats (use SDK OutputFormat if available, fall back to config)
+        var inputRate = inputFormat?.SampleRate ?? 48000;
+        var outputRate = pipelineOutputFormat?.SampleRate ?? configOutputFormat?.SampleRate ?? inputRate;
+        var effectiveRatio = outputRate / (double)inputRate * (bufferStats?.TargetPlaybackRate ?? 1.0);
+
+        var resampler = new ResamplerStats(
+            InputRate: inputRate,
+            OutputRate: outputRate,
+            Quality: "MediumQuality", // Default quality preset
+            EffectiveRatio: effectiveRatio
+        );
+
+        return new PlayerStatsResponse(
+            PlayerName: name,
+            AudioFormat: audioFormat,
+            Sync: sync,
+            Buffer: buffer,
+            ClockSync: clockSync,
+            Throughput: throughput,
+            Resampler: resampler
         );
     }
 
