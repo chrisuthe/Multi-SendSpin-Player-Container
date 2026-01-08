@@ -172,6 +172,22 @@ if [ -f /proc/asound/cards ]; then
     cat /proc/asound/cards
     echo ""
 
+    # Verify /dev/snd is mounted with actual device files
+    if [ ! -d /dev/snd ]; then
+        echo "  WARNING: /dev/snd directory not found!"
+        echo "  Cards are listed in /proc/asound but device files are missing."
+        echo "  Add to docker run: --device /dev/snd"
+        echo ""
+    elif [ -z "$(ls -A /dev/snd 2>/dev/null)" ]; then
+        echo "  WARNING: /dev/snd is empty!"
+        echo "  Cards are listed in /proc/asound but no device files present."
+        echo ""
+    else
+        echo "  Device files in /dev/snd:"
+        ls -la /dev/snd/ 2>/dev/null | grep -E '(control|pcm)' | head -10
+        echo ""
+    fi
+
     # Parse card numbers from /proc/asound/cards
     # Format: " 0 [USB            ]: USB-Audio - USB Audio Device"
     grep -E '^ *[0-9]+' /proc/asound/cards | while read -r line; do
@@ -182,11 +198,13 @@ if [ -f /proc/asound/cards ]; then
 
         # Load the card into PulseAudio
         # tsched=0 for better compatibility with USB devices
-        if pactl load-module module-alsa-card device=hw:$card_num tsched=0 >/dev/null 2>&1; then
-            echo "    -> Loaded into PulseAudio"
+        load_output=$(pactl load-module module-alsa-card device=hw:$card_num tsched=0 2>&1)
+        load_exit=$?
+        if [ $load_exit -eq 0 ]; then
+            echo "    -> Loaded into PulseAudio (module $load_output)"
             CARDS_LOADED=$((CARDS_LOADED + 1))
         else
-            echo "    -> Failed to load (may not support playback)"
+            echo "    -> Failed to load: $load_output"
         fi
     done
 elif [ -d /dev/snd ]; then
@@ -207,18 +225,22 @@ elif [ -d /dev/snd ]; then
             # Try to load at higher sample rates for better quality
             # Try 192kHz first, then 96kHz, then 48kHz
             LOADED=0
+            last_error=""
             for rate in 192000 96000 48000; do
                 if [ $LOADED -eq 0 ]; then
-                    if pactl load-module module-alsa-sink device=hw:$card_num,$dev_num sink_name="$sink_name" rate=$rate tsched=0 >/dev/null 2>&1; then
-                        echo "    -> Loaded as $sink_name @ ${rate}Hz"
+                    load_output=$(pactl load-module module-alsa-sink device=hw:$card_num,$dev_num sink_name="$sink_name" rate=$rate tsched=0 2>&1)
+                    if [ $? -eq 0 ]; then
+                        echo "    -> Loaded as $sink_name @ ${rate}Hz (module $load_output)"
                         CARDS_LOADED=$((CARDS_LOADED + 1))
                         LOADED=1
+                    else
+                        last_error="$load_output"
                     fi
                 fi
             done
 
             if [ $LOADED -eq 0 ]; then
-                echo "    -> Failed to load (device may be in use or unsupported)"
+                echo "    -> Failed to load: $last_error"
             fi
         fi
     done
