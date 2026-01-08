@@ -1195,9 +1195,23 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // Sync Correction Stats (frame drop/insert based on 5ms threshold)
         var framesDropped = bufferStats?.SamplesDroppedForSync ?? 0;
         var framesInserted = bufferStats?.SamplesInsertedForSync ?? 0;
-        var correctionMode = framesDropped > 0 || framesInserted > 0
-            ? (framesDropped > framesInserted ? "Dropping" : "Inserting")
-            : "None";
+
+        // Determine correction mode based on CURRENT sync error, not cumulative totals
+        // Positive sync error = behind schedule (need to drop frames to catch up)
+        // Negative sync error = ahead of schedule (need to insert frames to slow down)
+        string correctionMode;
+        if (Math.Abs(syncErrorMs) <= SyncToleranceMs)
+        {
+            correctionMode = "None";
+        }
+        else if (syncErrorMs > 0)
+        {
+            correctionMode = "Dropping";
+        }
+        else
+        {
+            correctionMode = "Inserting";
+        }
 
         var correction = new SyncCorrectionStats(
             Mode: correctionMode,
