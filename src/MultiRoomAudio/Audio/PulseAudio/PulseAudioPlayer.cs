@@ -31,19 +31,29 @@ public class PulseAudioPlayer : IAudioPlayer
     private StreamRequestCallback? _writeCallback;
     private StreamNotifyCallback? _underflowCallback;
 
-    private IAudioSampleSource? _sampleSource;
+    // THREAD SAFETY: These fields are accessed from both the main thread (via public API)
+    // and PulseAudio's internal mainloop thread (via write callback). Using volatile ensures
+    // visibility of writes across threads. The write callback runs on PA's thread which already
+    // holds the mainloop lock, so we cannot take _lock there - volatile is our synchronization.
+    private volatile IAudioSampleSource? _sampleSource;
     private AudioFormat? _currentFormat;
     private string? _sinkName;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     private volatile bool _isPlaying;
     private volatile bool _isPaused;
     private volatile bool _contextReady;
     private volatile bool _streamReady;
 
-    // Pre-allocated buffers for the write callback
-    private float[]? _sampleBuffer;
-    private byte[]? _byteBuffer;
+    // Pre-allocated buffers for the write callback.
+    // These are set once during initialization and read from the callback thread.
+    // Volatile ensures the callback sees the initialized values.
+    private volatile float[]? _sampleBuffer;
+    private volatile byte[]? _byteBuffer;
+
+    // Pre-allocated silence buffer to avoid GC allocations in the write callback.
+    // Resized as needed but typically stays at the initial size.
+    private byte[] _silenceBuffer = new byte[8192];
 
     /// <summary>
     /// Target buffer size in milliseconds. PulseAudio will request ~this much audio.
@@ -70,8 +80,21 @@ public class PulseAudioPlayer : IAudioPlayer
     /// </summary>
     private const int UnderflowWarningThreshold = 5;
 
+    /// <summary>
+    /// How often to log diagnostic info (in callbacks).
+    /// At ~10ms per callback, 100 = log every ~1 second.
+    /// </summary>
+    private const int DiagnosticLogInterval = 100;
+
     private int _underflowCount;
     private ulong _lastMeasuredLatencyUs;
+
+    // Diagnostic counters for monitoring callback behavior
+    private long _callbackCount;
+    private long _silenceWriteCount;
+    private long _zeroReadCount;
+    private DateTime _playbackStartTime;
+    private bool _hasLoggedFirstAudio;
 
     public AudioPlayerState State { get; private set; } = AudioPlayerState.Uninitialized;
 
@@ -222,19 +245,38 @@ public class PulseAudioPlayer : IAudioPlayer
                     StreamSetWriteCallback(_stream, _writeCallback, IntPtr.Zero);
                     StreamSetUnderflowCallback(_stream, _underflowCallback, IntPtr.Zero);
 
-                    // Configure buffer attributes
+                    // Configure buffer attributes for low-latency playback.
+                    // Per PulseAudio docs: set fields to uint.MaxValue (-1) to let PA choose defaults,
+                    // except for the fields we want to control.
                     var targetLatencyBytes = BytesForMs(ref sampleSpec, BufferMs);
+                    var minReqBytes = BytesForMs(ref sampleSpec, 10); // Request callbacks every ~10ms
                     var bufferAttr = new BufferAttr
                     {
+                        // MaxLength: Maximum buffer size. Let PA choose.
                         MaxLength = uint.MaxValue,
+                        // TLength: Target buffer length (our latency target of 50ms).
                         TLength = targetLatencyBytes,
-                        PreBuf = targetLatencyBytes / 2,
-                        MinReq = uint.MaxValue,
+                        // PreBuf: Prebuffering amount before playback starts.
+                        // Set to 0 to start immediately when uncorked - we handle underflows gracefully.
+                        // Previously was targetLatencyBytes/2 which delayed startup by ~25ms.
+                        PreBuf = 0,
+                        // MinReq: Minimum request size for write callbacks.
+                        // Smaller = more frequent callbacks = better responsiveness to timing changes.
+                        // ~10ms gives good balance between responsiveness and CPU overhead.
+                        MinReq = minReqBytes,
+                        // FragSize: Fragment size (recording only, not relevant for playback).
                         FragSize = uint.MaxValue
                     };
 
-                    // Connect stream for playback with timing flags
-                    var flags = StreamFlags.InterpolateTiming |
+                    // Connect stream for playback with timing flags.
+                    // StartCorked: Stream starts paused - audio won't flow until explicitly uncorked
+                    // in Play(). This prevents audio playing before sample source is ready and ensures
+                    // timing info is available before playback begins.
+                    // InterpolateTiming + AutoTimingUpdate: Enable latency interpolation with automatic
+                    // timing updates every 100ms, allowing accurate pa_stream_get_latency() calls.
+                    // AdjustLatency: Tell PA to reconfigure hardware buffers to meet our target latency.
+                    var flags = StreamFlags.StartCorked |
+                                StreamFlags.InterpolateTiming |
                                 StreamFlags.AutoTimingUpdate |
                                 StreamFlags.AdjustLatency;
 
@@ -260,6 +302,12 @@ public class PulseAudioPlayer : IAudioPlayer
 
                         ThreadedMainloopWait(_mainloop);
                     }
+
+                    // Request initial timing info update.
+                    // pa_stream_get_latency() returns PA_ERR_NODATA until timing info is available.
+                    // With AUTO_TIMING_UPDATE, PA updates timing every ~100ms, but we request
+                    // an immediate update so latency is available when Play() is called.
+                    StreamUpdateTimingInfo(_stream, IntPtr.Zero, IntPtr.Zero);
                 }
                 finally
                 {
@@ -297,11 +345,10 @@ public class PulseAudioPlayer : IAudioPlayer
 
     public void SetSampleSource(IAudioSampleSource source)
     {
-        lock (_lock)
-        {
-            _sampleSource = source;
-            _logger.LogDebug("Sample source set");
-        }
+        // No lock needed - _sampleSource is volatile for cross-thread visibility.
+        // The write callback will see this value on its next iteration.
+        _sampleSource = source;
+        _logger.LogDebug("Sample source set");
     }
 
     public void Play()
@@ -321,29 +368,31 @@ public class PulseAudioPlayer : IAudioPlayer
             }
 
             _isPlaying = true;
+            _isPaused = false;
 
-            if (_isPaused)
+            // Reset diagnostic counters for fresh monitoring
+            _callbackCount = 0;
+            _silenceWriteCount = 0;
+            _zeroReadCount = 0;
+            _underflowCount = 0;
+            _hasLoggedFirstAudio = false;
+            _playbackStartTime = DateTime.UtcNow;
+
+            // Uncork the stream to start/resume playback.
+            // Stream is connected with StartCorked flag, so we must uncork to begin.
+            // This also handles resume from pause (re-uncorking is safe).
+            ThreadedMainloopLock(_mainloop);
+            try
             {
-                // Uncork the stream to resume
-                _isPaused = false;
-                ThreadedMainloopLock(_mainloop);
-                try
-                {
-                    StreamCork(_stream, 0, IntPtr.Zero, IntPtr.Zero);
-                }
-                finally
-                {
-                    ThreadedMainloopUnlock(_mainloop);
-                }
-                SetState(AudioPlayerState.Playing);
-                _logger.LogInformation("Playback resumed");
-                return;
+                StreamCork(_stream, 0, IntPtr.Zero, IntPtr.Zero);
+            }
+            finally
+            {
+                ThreadedMainloopUnlock(_mainloop);
             }
 
-            // Stream is already connected and write callback will be called
-            // Just mark as playing
             SetState(AudioPlayerState.Playing);
-            _logger.LogInformation("Playback started");
+            _logger.LogInformation("Playback started (stream uncorked). Monitoring callbacks...");
         }
     }
 
@@ -487,24 +536,43 @@ public class PulseAudioPlayer : IAudioPlayer
 
     /// <summary>
     /// Called by PulseAudio when it needs more audio data.
-    /// This is where we query the REAL latency and provide samples.
     /// </summary>
+    /// <remarks>
+    /// THREADING: This callback runs on PulseAudio's internal mainloop thread, which already
+    /// holds the mainloop lock. Do NOT call ThreadedMainloopLock() here - it would deadlock.
+    /// All shared state accessed here must be volatile or otherwise thread-safe.
+    ///
+    /// PERFORMANCE: This callback must complete quickly. Blocking or slow operations will
+    /// cause audio underflows. The sample source Read() should be fast and non-blocking.
+    ///
+    /// LATENCY: We query pa_stream_get_latency() here to get accurate real-time latency
+    /// measurements. This is the key benefit of using pa_stream over pa_simple.
+    /// </remarks>
     private void OnWriteCallback(IntPtr stream, UIntPtr nbytes, IntPtr userdata)
     {
+        // Track callback for diagnostics
+        _callbackCount++;
+
+        // Early exit if not in playing state. Stream starts corked, so this handles
+        // callbacks that might occur during initialization before Play() is called.
         if (!_isPlaying || _isPaused || _disposed)
         {
-            // Write silence if not playing
             WriteSilence(stream, nbytes);
+            _silenceWriteCount++;
             return;
         }
 
-        // Query the REAL latency - this is the key benefit of the async API
+        // Query real-time latency from PulseAudio.
+        // Returns 0 on success, negative on error (e.g., PA_ERR_NODATA if timing not ready).
+        // The 'negative' out param indicates if latency is negative (stream ahead of playback).
+        // With INTERPOLATE_TIMING + AUTO_TIMING_UPDATE flags, this gives accurate values
+        // interpolated between the ~100ms server updates.
         if (StreamGetLatency(stream, out var latencyUs, out var negative) == 0 && negative == 0)
         {
             _lastMeasuredLatencyUs = latencyUs;
             var newLatencyMs = (int)(latencyUs / 1000);
 
-            // Update OutputLatencyMs if significantly different (avoid jitter)
+            // Hysteresis: Only update if change exceeds 5ms to avoid jitter in reported latency
             if (Math.Abs(newLatencyMs - OutputLatencyMs) > 5)
             {
                 OutputLatencyMs = newLatencyMs;
@@ -512,13 +580,25 @@ public class PulseAudioPlayer : IAudioPlayer
             }
         }
 
+        // Read volatile fields into locals for consistent access within this callback.
+        // The volatile keyword ensures we see the latest values written by other threads.
         var source = _sampleSource;
         var sampleBuffer = _sampleBuffer;
         var byteBuffer = _byteBuffer;
 
         if (source == null || sampleBuffer == null || byteBuffer == null)
         {
+            // Sample source not set yet - write silence to keep stream happy
             WriteSilence(stream, nbytes);
+            _silenceWriteCount++;
+
+            // Log periodically during startup when source isn't ready
+            if (_callbackCount % DiagnosticLogInterval == 0)
+            {
+                _logger.LogDebug(
+                    "Waiting for sample source: callbacks={Callbacks}, silence={Silence}",
+                    _callbackCount, _silenceWriteCount);
+            }
             return;
         }
 
@@ -526,32 +606,58 @@ public class PulseAudioPlayer : IAudioPlayer
         var bytesPerSample = sizeof(float);
         var samplesRequested = bytesRequested / bytesPerSample;
 
-        // Ensure we don't exceed buffer size
+        // Cap request to our pre-allocated buffer size
         if (samplesRequested > sampleBuffer.Length)
         {
             samplesRequested = sampleBuffer.Length;
         }
 
-        // Read samples from the source
+        // Read from the sample source (BufferedAudioSampleSource).
+        // This may return 0 if the SDK's scheduled start time hasn't been reached yet,
+        // or if the buffer is empty. In either case, we write silence.
         var samplesRead = source.Read(sampleBuffer, 0, samplesRequested);
 
         if (samplesRead == 0)
         {
             WriteSilence(stream, nbytes);
+            _silenceWriteCount++;
+            _zeroReadCount++;
+
+            // Log periodically when Read() returns 0 - indicates SDK hasn't started releasing samples
+            if (_callbackCount % DiagnosticLogInterval == 0)
+            {
+                var elapsed = (DateTime.UtcNow - _playbackStartTime).TotalMilliseconds;
+                _logger.LogDebug(
+                    "Read returned 0: elapsed={Elapsed:F0}ms, callbacks={Callbacks}, zeroReads={ZeroReads}, latency={Latency}ms",
+                    elapsed, _callbackCount, _zeroReadCount, OutputLatencyMs);
+            }
             return;
         }
 
-        // Apply volume and mute
+        // Log first successful audio read - important milestone for debugging startup
+        if (!_hasLoggedFirstAudio)
+        {
+            _hasLoggedFirstAudio = true;
+            var elapsed = (DateTime.UtcNow - _playbackStartTime).TotalMilliseconds;
+            _logger.LogInformation(
+                "First audio samples received: elapsed={Elapsed:F0}ms, callbacks={Callbacks}, " +
+                "silenceWrites={Silence}, zeroReads={ZeroReads}, latency={Latency}ms",
+                elapsed, _callbackCount, _silenceWriteCount, _zeroReadCount, OutputLatencyMs);
+        }
+
+        // Apply software volume and mute
         var vol = IsMuted ? 0f : Volume;
         for (int i = 0; i < samplesRead; i++)
         {
             sampleBuffer[i] *= vol;
         }
 
-        // Convert to bytes
+        // Convert float samples to bytes for pa_stream_write
         Buffer.BlockCopy(sampleBuffer, 0, byteBuffer, 0, samplesRead * bytesPerSample);
 
-        // Write to stream
+        // Write audio data to PulseAudio stream.
+        // SeekMode.Relative: append to current write position (normal streaming mode).
+        // freeCallback=null: we manage our own buffer, PA should not free it.
         unsafe
         {
             fixed (byte* ptr = byteBuffer)
@@ -560,8 +666,8 @@ public class PulseAudioPlayer : IAudioPlayer
                     stream,
                     (IntPtr)ptr,
                     (UIntPtr)(samplesRead * bytesPerSample),
-                    IntPtr.Zero,
-                    0,
+                    IntPtr.Zero,  // freeCallback - null, we manage buffer
+                    0,            // offset - 0 for relative seek
                     SeekMode.Relative);
 
                 if (result < 0)
@@ -579,11 +685,21 @@ public class PulseAudioPlayer : IAudioPlayer
     {
         _underflowCount++;
 
-        if (_underflowCount == UnderflowWarningThreshold)
+        // First few underflows at startup are expected while SDK buffers fill
+        if (_underflowCount == 1)
         {
+            var elapsed = (DateTime.UtcNow - _playbackStartTime).TotalMilliseconds;
+            _logger.LogDebug(
+                "First underflow at {Elapsed:F0}ms after play. callbacks={Callbacks}, zeroReads={ZeroReads}",
+                elapsed, _callbackCount, _zeroReadCount);
+        }
+        else if (_underflowCount == UnderflowWarningThreshold)
+        {
+            var elapsed = (DateTime.UtcNow - _playbackStartTime).TotalMilliseconds;
             _logger.LogWarning(
-                "Audio underflow detected ({Count} times). Consider increasing buffer size.",
-                _underflowCount);
+                "Audio underflow detected ({Count} times at {Elapsed:F0}ms). " +
+                "callbacks={Callbacks}, zeroReads={ZeroReads}, latency={Latency}ms",
+                _underflowCount, elapsed, _callbackCount, _zeroReadCount, OutputLatencyMs);
         }
         else if (_underflowCount % 100 == 0)
         {
@@ -593,15 +709,22 @@ public class PulseAudioPlayer : IAudioPlayer
 
     /// <summary>
     /// Write silence to the stream.
+    /// Uses pre-allocated buffer to avoid GC pressure in the audio callback.
     /// </summary>
     private void WriteSilence(IntPtr stream, UIntPtr nbytes)
     {
         var bytesRequested = (int)(ulong)nbytes;
-        var silenceBuffer = new byte[bytesRequested];
 
+        // Resize silence buffer if needed (rare - only if PA requests more than expected)
+        if (_silenceBuffer.Length < bytesRequested)
+        {
+            _silenceBuffer = new byte[bytesRequested];
+        }
+
+        // Buffer is already zeroed (silence) - just write it
         unsafe
         {
-            fixed (byte* ptr = silenceBuffer)
+            fixed (byte* ptr = _silenceBuffer)
             {
                 StreamWrite(stream, (IntPtr)ptr, nbytes, IntPtr.Zero, 0, SeekMode.Relative);
             }

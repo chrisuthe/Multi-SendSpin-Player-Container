@@ -1130,8 +1130,11 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         var bufferStats = context.Pipeline.BufferStats;
         var clockStatus = context.ClockSync.GetStatus();
         var inputFormat = context.Pipeline.CurrentFormat;
-        // Use SDK's OutputFormat (always float32, PulseAudio handles device conversion)
-        var outputFormat = context.Pipeline.OutputFormat;
+
+        // Output format: Use SDK's OutputFormat if available, otherwise fall back to input format.
+        // We always output float32 at the input sample rate (no resampling).
+        // PulseAudio handles final conversion to device format.
+        var outputFormat = context.Pipeline.OutputFormat ?? inputFormat;
 
         // Audio Format Stats
         var audioFormat = new AudioFormatStats(
@@ -1167,6 +1170,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         );
 
         // Clock Sync Stats
+        // Note: Use Player.OutputLatencyMs directly instead of Pipeline.DetectedOutputLatencyMs
+        // because the pipeline's value may not reflect real-time measurements from pa_stream_get_latency()
         var clockSync = new ClockSyncStats(
             IsSynchronized: clockStatus.IsConverged,
             ClockOffsetMs: clockStatus.OffsetMilliseconds,
@@ -1174,7 +1179,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             DriftRatePpm: clockStatus.DriftMicrosecondsPerSecond,
             IsDriftReliable: clockStatus.IsDriftReliable,
             MeasurementCount: clockStatus.MeasurementCount,
-            OutputLatencyMs: context.Pipeline.DetectedOutputLatencyMs,
+            OutputLatencyMs: context.Player.OutputLatencyMs,
             StaticDelayMs: (int)context.ClockSync.StaticDelayMs
         );
 
