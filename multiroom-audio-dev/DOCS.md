@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-1583880
+## Development Build: sha-619d0a8
 
 **Current Dev Build Changes** (recent)
 
+- Fix bug in stats for nerds display
 - Testing gracewindow changes to see if audio syncs more naturally.
 - Fix a couple styling issues, card playing status and apply offset after being changed.
 - fix _disposed handling and checkbox rendering
@@ -14,7 +15,6 @@
 - read vs readraw
 - Add sink creation, attempt bugfix of playback.
 - shift to SDK 5.0.0- correction in app vs in SDK, drop/insert only.
-- Shifted from PA_SimpleAudio to PA_stream.
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
