@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-b61a64d
+## Development Build: sha-bbed2a8
 
 **Current Dev Build Changes** (recent)
 
+- fix _disposed handling and checkbox rendering
 - Update to Bootstrap latest, use their dark mode
 - Additional logging enhancements and sink creation improvements
 - pulseplayer updates and stats for nerds fix
@@ -14,7 +15,6 @@
 - Shifted from PA_SimpleAudio to PA_stream.
 - try to have the right amount of latency.
 - Add 20ms additional latency I guess. Plus console cleanup.
-- clear out the console on start
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
