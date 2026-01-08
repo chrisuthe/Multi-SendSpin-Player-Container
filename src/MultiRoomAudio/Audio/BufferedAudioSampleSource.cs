@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.Extensions.Logging;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
@@ -7,7 +8,7 @@ namespace MultiRoomAudio.Audio;
 /// <summary>
 /// Bridges <see cref="ITimedAudioBuffer"/> to <see cref="IAudioSampleSource"/>.
 /// Provides current local time to the buffer for timed sample release and
-/// implements player-controlled sync correction via frame drop/insert.
+/// implements player-controlled sync correction via frame drop/insert with interpolation.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -20,6 +21,12 @@ namespace MultiRoomAudio.Audio;
 /// - Within 5ms: no correction (acceptable tolerance)
 /// - Beyond 5ms behind (positive error): drop frames to catch up
 /// - Beyond 5ms ahead (negative error): insert frames to slow down
+/// Correction rate is proportional to error magnitude for smooth convergence.
+/// </para>
+/// <para>
+/// Drop/insert uses linear interpolation to minimize audible artifacts:
+/// - Drop: blend two frames into one ((A + B) / 2)
+/// - Insert: interpolate between last output and next input ((last + next) / 2)
 /// </para>
 /// </remarks>
 public sealed class BufferedAudioSampleSource : IAudioSampleSource
@@ -27,21 +34,19 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     private readonly ITimedAudioBuffer _buffer;
     private readonly Func<long> _getCurrentTimeMicroseconds;
     private readonly ILogger<BufferedAudioSampleSource>? _logger;
+    private readonly int _channels;
+    private readonly int _sampleRate;
 
     // Correction threshold - within 5ms is acceptable, beyond that we correct
     private const long CorrectionThresholdMicroseconds = 5_000;  // 5ms deadband
 
-    // Apply correction every N frames to spread out the corrections
-    private const int CorrectionIntervalFrames = 100;
+    // Correction rate limits (frames between corrections)
+    private const int MinCorrectionInterval = 10;   // Most aggressive: correct every 10 frames
+    private const int MaxCorrectionInterval = 500;  // Most gentle: correct every 500 frames
 
     // Frame tracking for corrections
-    private int _frameCounter;
-    private readonly float[] _lastFrame;
-    private readonly float[] _dropBuffer;
-    private readonly int _channels;
-
-    // Pending insertion - set when we need to insert on next read
-    private bool _pendingInsertion;
+    private int _framesSinceLastCorrection;
+    private float[]? _lastOutputFrame;
 
     // Debug logging rate limiter
     private long _lastDebugLogTime;
@@ -54,6 +59,10 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     private long _firstReadTime;
     private long _lastSuccessfulReadTime;
     private bool _hasEverReceivedSamples;
+
+    // Correction tracking for stats
+    private long _totalDropped;
+    private long _totalInserted;
 
     // Overrun tracking - detect when SDK starts dropping samples
     private long _lastKnownDroppedSamples;
@@ -83,6 +92,10 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     public bool HasEverReceivedSamples => _hasEverReceivedSamples;
     /// <summary>Function to get current time in microseconds.</summary>
     public long CurrentTimeMicroseconds => _getCurrentTimeMicroseconds();
+    /// <summary>Total samples dropped for sync correction.</summary>
+    public long TotalDropped => _totalDropped;
+    /// <summary>Total samples inserted for sync correction.</summary>
+    public long TotalInserted => _totalInserted;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BufferedAudioSampleSource"/> class.
@@ -102,18 +115,20 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         _getCurrentTimeMicroseconds = getCurrentTimeMicroseconds;
         _logger = logger;
         _channels = buffer.Format.Channels;
+        _sampleRate = buffer.Format.SampleRate;
 
         if (_channels <= 0)
         {
             throw new ArgumentException("Audio format must have at least one channel.", nameof(buffer));
         }
-
-        // Pre-allocate buffers to avoid GC pressure on audio thread
-        _lastFrame = new float[_channels];
-        _dropBuffer = new float[_channels];
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Uses <see cref="ArrayPool{T}.Shared"/> to avoid allocating temporary buffers on every
+    /// audio callback. Audio threads are real-time sensitive, and GC pauses from frequent
+    /// allocations can cause audible glitches.
+    /// </remarks>
     public int Read(float[] buffer, int offset, int count)
     {
         var currentTime = _getCurrentTimeMicroseconds();
@@ -125,114 +140,65 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
             _firstReadTime = currentTime;
         }
 
-        // Handle pending frame insertion from previous correction decision
-        int insertedSamples = 0;
-        if (_pendingInsertion && count >= _channels)
+        // Initialize last output frame if needed
+        _lastOutputFrame ??= new float[_channels];
+
+        // Rent a buffer from the pool to avoid GC allocations in the audio thread
+        var tempBuffer = ArrayPool<float>.Shared.Rent(count);
+        try
         {
-            // Insert the saved frame at the start of the buffer
-            Array.Copy(_lastFrame, 0, buffer, offset, _channels);
-            insertedSamples = _channels;
-            _pendingInsertion = false;
+            // Read raw samples from the timed buffer (no SDK correction)
+            var rawRead = _buffer.ReadRaw(tempBuffer.AsSpan(0, count), currentTime);
 
-            // Notify SDK that we inserted samples (output without consuming)
-            _buffer.NotifyExternalCorrection(0, _channels);
-        }
-
-        // Read remaining samples from the timed buffer using ReadRaw()
-        // This gives us raw samples without SDK correction - we handle correction ourselves
-        var remainingCount = count - insertedSamples;
-        var span = buffer.AsSpan(offset + insertedSamples, remainingCount);
-        var read = _buffer.ReadRaw(span, currentTime);
-
-        // Apply our own frame drop/insert correction based on sync error
-        if (read > 0)
-        {
-            ApplyFrameCorrection(buffer, offset + insertedSamples, read);
-        }
-
-        if (read > 0)
-        {
-            _successfulReads++;
-            _lastSuccessfulReadTime = currentTime;
-
-            // Log first successful read - important milestone
-            if (!_hasEverReceivedSamples)
+            if (rawRead > 0)
             {
-                _hasEverReceivedSamples = true;
-                var elapsedMs = (currentTime - _firstReadTime) / 1000.0;
-                _logger?.LogInformation(
-                    "First samples received from buffer: elapsedMs={ElapsedMs:F1}, " +
-                    "totalReads={TotalReads}, zeroReads={ZeroReads}",
-                    elapsedMs, _totalReads, _zeroReads);
+                _successfulReads++;
+                _lastSuccessfulReadTime = currentTime;
+
+                // Log first successful read - important milestone
+                if (!_hasEverReceivedSamples)
+                {
+                    _hasEverReceivedSamples = true;
+                    var elapsedMs = (currentTime - _firstReadTime) / 1000.0;
+                    _logger?.LogInformation(
+                        "First samples received from buffer: elapsedMs={ElapsedMs:F1}, " +
+                        "totalReads={TotalReads}, zeroReads={ZeroReads}",
+                        elapsedMs, _totalReads, _zeroReads);
+                }
+
+                // Apply correction and copy to output
+                var (outputCount, dropped, inserted) = ApplyCorrectionWithInterpolation(
+                    tempBuffer, rawRead, buffer.AsSpan(offset, count));
+
+                // Notify SDK of corrections for accurate sync tracking
+                if (dropped > 0 || inserted > 0)
+                {
+                    _buffer.NotifyExternalCorrection(dropped, inserted);
+                    _totalDropped += dropped;
+                    _totalInserted += inserted;
+                }
+
+                // Fill remainder with silence if needed
+                if (outputCount < count)
+                {
+                    buffer.AsSpan(offset + outputCount, count - outputCount).Fill(0f);
+                }
+            }
+            else
+            {
+                _zeroReads++;
+                LogZeroRead(currentTime);
+
+                // Fill with silence
+                buffer.AsSpan(offset, count).Fill(0f);
             }
         }
-        else
+        finally
         {
-            _zeroReads++;
-
-            // Debug: Log when Read returns 0 (rate limited)
-            if (_logger != null && currentTime - _lastDebugLogTime >= DebugLogIntervalMicroseconds)
-            {
-                _lastDebugLogTime = currentTime;
-                var stats = _buffer.GetStats();
-                var elapsedSinceFirstMs = (currentTime - _firstReadTime) / 1000.0;
-                var elapsedSinceLastSuccessMs = _lastSuccessfulReadTime > 0
-                    ? (currentTime - _lastSuccessfulReadTime) / 1000.0
-                    : -1;
-
-                // Determine the likely reason for zero read
-                string reason;
-                if (!stats.IsPlaybackActive && stats.BufferedMs > 0)
-                {
-                    reason = "SDK scheduled start not reached";
-                }
-                else if (stats.BufferedMs == 0)
-                {
-                    reason = "Buffer empty";
-                }
-                else
-                {
-                    reason = "Unknown";
-                }
-
-                _logger.LogWarning(
-                    "Read returned 0 [{Reason}]: currentTime={CurrentTime}μs, bufferedMs={BufferedMs:F0}, " +
-                    "targetMs={TargetMs:F0}, isPlaybackActive={IsPlaybackActive}, syncError={SyncError:F1}ms, " +
-                    "elapsedMs={ElapsedMs:F0}, sinceLastSuccessMs={SinceLastSuccess:F0}, " +
-                    "zeroReads={ZeroReads}/{TotalReads}, overruns={Overruns}, underruns={Underruns}",
-                    reason,
-                    currentTime,
-                    stats.BufferedMs,
-                    stats.TargetMs,
-                    stats.IsPlaybackActive,
-                    stats.SyncErrorMicroseconds / 1000.0,
-                    elapsedSinceFirstMs,
-                    elapsedSinceLastSuccessMs,
-                    _zeroReads, _totalReads,
-                    stats.OverrunCount,
-                    stats.UnderrunCount);
-
-                // Additional detailed log for buffer state
-                _logger.LogWarning(
-                    "Buffer state: samplesWritten={Written}, samplesRead={Read}, " +
-                    "droppedOverflow={DroppedOverflow}, droppedSync={DroppedSync}, insertedSync={InsertedSync}",
-                    stats.TotalSamplesWritten,
-                    stats.TotalSamplesRead,
-                    stats.DroppedSamples,
-                    stats.SamplesDroppedForSync,
-                    stats.SamplesInsertedForSync);
-            }
-        }
-
-        // Fill remainder with silence if underrun
-        var totalSamples = insertedSamples + read;
-        if (totalSamples < count)
-        {
-            buffer.AsSpan(offset + totalSamples, count - totalSamples).Fill(0f);
+            ArrayPool<float>.Shared.Return(tempBuffer, clearArray: false);
         }
 
         // Check for overruns (SDK dropping samples due to buffer full)
-        // This happens when Read() isn't consuming samples fast enough (or at all)
         CheckForOverruns();
 
         // Always return requested count to keep audio output happy
@@ -240,8 +206,215 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     }
 
     /// <summary>
+    /// Calculates the correction interval based on sync error magnitude.
+    /// Larger errors result in more frequent corrections.
+    /// </summary>
+    /// <param name="absErrorMicroseconds">Absolute sync error in microseconds.</param>
+    /// <returns>Number of frames between corrections.</returns>
+    private static int CalculateCorrectionInterval(long absErrorMicroseconds)
+    {
+        // Formula: interval = 500000 / absError
+        // At 10ms (10000μs): 500000/10000 = 50 frames
+        // At 50ms (50000μs): 500000/50000 = 10 frames
+        // At 5ms (5000μs): 500000/5000 = 100 frames
+        if (absErrorMicroseconds <= 0)
+        {
+            return MaxCorrectionInterval;
+        }
+
+        var interval = (int)(500_000 / absErrorMicroseconds);
+        return Math.Clamp(interval, MinCorrectionInterval, MaxCorrectionInterval);
+    }
+
+    /// <summary>
+    /// Applies sync correction with linear interpolation to minimize audible artifacts.
+    /// </summary>
+    /// <returns>Tuple of (output sample count, samples dropped, samples inserted).</returns>
+    private (int OutputCount, int SamplesDropped, int SamplesInserted) ApplyCorrectionWithInterpolation(
+        float[] input, int inputCount, Span<float> output)
+    {
+        var syncError = _buffer.SmoothedSyncErrorMicroseconds;
+        var absError = Math.Abs((long)syncError);
+
+        // No correction needed if within deadband
+        if (absError < CorrectionThresholdMicroseconds)
+        {
+            // Just copy input to output
+            var toCopy = Math.Min(inputCount, output.Length);
+            input.AsSpan(0, toCopy).CopyTo(output);
+
+            // Save last frame for potential future corrections
+            if (toCopy >= _channels)
+            {
+                input.AsSpan(toCopy - _channels, _channels).CopyTo(_lastOutputFrame);
+            }
+
+            return (toCopy, 0, 0);
+        }
+
+        // Calculate correction rate based on error magnitude
+        var correctionInterval = CalculateCorrectionInterval(absError);
+        var shouldDrop = syncError > 0;  // Positive = behind, need to drop
+        var shouldInsert = syncError < 0; // Negative = ahead, need to insert
+
+        // Process frame by frame
+        var inputPos = 0;
+        var outputPos = 0;
+        var samplesDropped = 0;
+        var samplesInserted = 0;
+
+        while (outputPos < output.Length)
+        {
+            var remainingInput = inputCount - inputPos;
+            _framesSinceLastCorrection++;
+
+            // Check if we should DROP a frame (read two, output one interpolated)
+            if (shouldDrop && _framesSinceLastCorrection >= correctionInterval)
+            {
+                _framesSinceLastCorrection = 0;
+
+                if (remainingInput >= _channels * 2)
+                {
+                    // Read both frames, output interpolated blend
+                    var frameAStart = inputPos;
+                    var frameBStart = inputPos + _channels;
+                    var outputSpan = output.Slice(outputPos, _channels);
+
+                    // Linear interpolation: (A + B) / 2
+                    for (int i = 0; i < _channels; i++)
+                    {
+                        outputSpan[i] = (input[frameAStart + i] + input[frameBStart + i]) * 0.5f;
+                    }
+
+                    // Consume both input frames
+                    inputPos += _channels * 2;
+
+                    // Save as last output frame
+                    outputSpan.CopyTo(_lastOutputFrame);
+
+                    outputPos += _channels;
+                    samplesDropped += _channels;
+                    continue;
+                }
+            }
+
+            // Check if we should INSERT a frame (output interpolated without consuming)
+            if (shouldInsert && _framesSinceLastCorrection >= correctionInterval)
+            {
+                _framesSinceLastCorrection = 0;
+
+                if (output.Length - outputPos >= _channels)
+                {
+                    var outputSpan = output.Slice(outputPos, _channels);
+
+                    // Interpolate with next input frame if available
+                    if (remainingInput >= _channels)
+                    {
+                        // Linear interpolation: (last + next) / 2
+                        for (int i = 0; i < _channels; i++)
+                        {
+                            outputSpan[i] = (_lastOutputFrame![i] + input[inputPos + i]) * 0.5f;
+                        }
+
+                        // Save interpolated frame
+                        outputSpan.CopyTo(_lastOutputFrame);
+                    }
+                    else
+                    {
+                        // Fallback: duplicate last frame
+                        _lastOutputFrame.AsSpan().CopyTo(outputSpan);
+                    }
+
+                    outputPos += _channels;
+                    samplesInserted += _channels;
+                    continue;
+                }
+            }
+
+            // Normal frame: copy from input to output
+            if (remainingInput < _channels)
+            {
+                break; // No more input
+            }
+
+            if (output.Length - outputPos < _channels)
+            {
+                break; // No more output space
+            }
+
+            var frameSpan = output.Slice(outputPos, _channels);
+            input.AsSpan(inputPos, _channels).CopyTo(frameSpan);
+            inputPos += _channels;
+
+            // Save as last output frame
+            frameSpan.CopyTo(_lastOutputFrame);
+            outputPos += _channels;
+        }
+
+        return (outputPos, samplesDropped, samplesInserted);
+    }
+
+    /// <summary>
+    /// Logs diagnostic information when Read returns 0 samples.
+    /// </summary>
+    private void LogZeroRead(long currentTime)
+    {
+        if (_logger == null || currentTime - _lastDebugLogTime < DebugLogIntervalMicroseconds)
+        {
+            return;
+        }
+
+        _lastDebugLogTime = currentTime;
+        var stats = _buffer.GetStats();
+        var elapsedSinceFirstMs = (currentTime - _firstReadTime) / 1000.0;
+        var elapsedSinceLastSuccessMs = _lastSuccessfulReadTime > 0
+            ? (currentTime - _lastSuccessfulReadTime) / 1000.0
+            : -1;
+
+        // Determine the likely reason for zero read
+        string reason;
+        if (!stats.IsPlaybackActive && stats.BufferedMs > 0)
+        {
+            reason = "SDK scheduled start not reached";
+        }
+        else if (stats.BufferedMs == 0)
+        {
+            reason = "Buffer empty";
+        }
+        else
+        {
+            reason = "Unknown";
+        }
+
+        _logger.LogWarning(
+            "Read returned 0 [{Reason}]: currentTime={CurrentTime}μs, bufferedMs={BufferedMs:F0}, " +
+            "targetMs={TargetMs:F0}, isPlaybackActive={IsPlaybackActive}, syncError={SyncError:F1}ms, " +
+            "elapsedMs={ElapsedMs:F0}, sinceLastSuccessMs={SinceLastSuccess:F0}, " +
+            "zeroReads={ZeroReads}/{TotalReads}, overruns={Overruns}, underruns={Underruns}",
+            reason,
+            currentTime,
+            stats.BufferedMs,
+            stats.TargetMs,
+            stats.IsPlaybackActive,
+            stats.SyncErrorMicroseconds / 1000.0,
+            elapsedSinceFirstMs,
+            elapsedSinceLastSuccessMs,
+            _zeroReads, _totalReads,
+            stats.OverrunCount,
+            stats.UnderrunCount);
+
+        _logger.LogWarning(
+            "Buffer state: samplesWritten={Written}, samplesRead={Read}, " +
+            "droppedOverflow={DroppedOverflow}, droppedSync={DroppedSync}, insertedSync={InsertedSync}",
+            stats.TotalSamplesWritten,
+            stats.TotalSamplesRead,
+            stats.DroppedSamples,
+            stats.SamplesDroppedForSync,
+            stats.SamplesInsertedForSync);
+    }
+
+    /// <summary>
     /// Checks if the SDK has started dropping samples due to buffer overflow.
-    /// Logs a warning when overruns are first detected and periodically thereafter.
     /// </summary>
     private void CheckForOverruns()
     {
@@ -251,13 +424,11 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         var currentDropped = stats.DroppedSamples;
         var currentOverruns = stats.OverrunCount;
 
-        // Detect new overruns
         if (currentDropped > _lastKnownDroppedSamples || currentOverruns > _lastKnownOverrunCount)
         {
             var newDrops = currentDropped - _lastKnownDroppedSamples;
             var newOverruns = currentOverruns - _lastKnownOverrunCount;
 
-            // Log first occurrence with full context
             if (!_hasLoggedOverrunStart)
             {
                 _hasLoggedOverrunStart = true;
@@ -274,7 +445,6 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
             }
             else if (newDrops > 10000 || newOverruns > 0)
             {
-                // Log periodic updates when drops are significant
                 _logger.LogWarning(
                     "Buffer overflow continues: +{NewDrops} samples dropped, total={Dropped}, overruns={Overruns}, " +
                     "bufferedMs={BufferedMs:F0}, isPlaybackActive={IsPlaybackActive}",
@@ -287,87 +457,13 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     }
 
     /// <summary>
-    /// Applies frame drop/insert correction based on current sync error.
+    /// Resets correction state. Call when buffer is cleared or playback restarts.
     /// </summary>
-    private void ApplyFrameCorrection(float[] buffer, int offset, int sampleCount)
+    public void Reset()
     {
-        // Get current sync error (smoothed for stable decisions)
-        var syncError = _buffer.SmoothedSyncErrorMicroseconds;
-        var absError = Math.Abs(syncError);
-
-        // Save the last frame for potential insertion
-        SaveLastFrame(buffer, offset, sampleCount);
-
-        // No correction needed if within 5ms deadband
-        if (absError < CorrectionThresholdMicroseconds)
-        {
-            return;
-        }
-
-        // Increment frame counter
-        _frameCounter++;
-
-        // Apply correction periodically (not every frame - spread them out)
-        if (_frameCounter < CorrectionIntervalFrames)
-        {
-            return;
-        }
-        _frameCounter = 0;
-
-        if (syncError > 0)
-        {
-            // Behind schedule (positive error) - DROP a frame to catch up
-            // We'll read and discard an extra frame's worth of samples
-            DropFrame();
-        }
-        else
-        {
-            // Ahead of schedule (negative error) - INSERT a frame to slow down
-            // Schedule insertion for next read (deferred because we already read this buffer)
-            InsertFrame();
-        }
-    }
-
-    /// <summary>
-    /// Saves the last frame for potential insertion.
-    /// </summary>
-    private void SaveLastFrame(float[] buffer, int offset, int sampleCount)
-    {
-        if (sampleCount < _channels)
-        {
-            return;
-        }
-
-        // Save the last frame (last _channels samples)
-        var lastFrameStart = offset + sampleCount - _channels;
-        Array.Copy(buffer, lastFrameStart, _lastFrame, 0, _channels);
-    }
-
-    /// <summary>
-    /// Drops a frame by reading and discarding samples from the buffer.
-    /// </summary>
-    private void DropFrame()
-    {
-        // Read an extra frame's worth into pre-allocated buffer and discard it
-        // This advances the buffer cursor, making us catch up
-        var currentTime = _getCurrentTimeMicroseconds();
-        var dropped = _buffer.ReadRaw(_dropBuffer.AsSpan(), currentTime);
-
-        if (dropped > 0)
-        {
-            // Notify the buffer that we dropped samples
-            _buffer.NotifyExternalCorrection(dropped, 0);
-        }
-    }
-
-    /// <summary>
-    /// Schedules a frame insertion for the next read.
-    /// The insertion is deferred because we've already read this buffer's samples.
-    /// </summary>
-    private void InsertFrame()
-    {
-        // Set flag - next Read() will insert the saved frame before reading
-        // This causes us to output more samples than we consume, slowing playback
-        _pendingInsertion = true;
+        _framesSinceLastCorrection = 0;
+        _lastOutputFrame = null;
+        _totalDropped = 0;
+        _totalInserted = 0;
     }
 }
