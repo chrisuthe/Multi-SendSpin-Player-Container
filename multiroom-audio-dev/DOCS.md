@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-bbed2a8
+## Development Build: sha-6b8085c
 
 **Current Dev Build Changes** (recent)
 
+- Fix a couple styling issues, card playing status and apply offset after being changed.
 - fix _disposed handling and checkbox rendering
 - Update to Bootstrap latest, use their dark mode
 - Additional logging enhancements and sink creation improvements
@@ -14,7 +15,6 @@
 - shift to SDK 5.0.0- correction in app vs in SDK, drop/insert only.
 - Shifted from PA_SimpleAudio to PA_stream.
 - try to have the right amount of latency.
-- Add 20ms additional latency I guess. Plus console cleanup.
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
