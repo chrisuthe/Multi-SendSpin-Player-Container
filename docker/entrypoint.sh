@@ -157,7 +157,8 @@ echo "PulseAudio is ready!"
 echo ""
 
 # In Docker, udev doesn't work so module-udev-detect won't find devices.
-# Manually detect ALSA cards and load them into PulseAudio.
+# We use module-alsa-sink with direct PCM device detection, which works reliably
+# in all Docker configurations (privileged or not, with or without /proc/asound).
 echo "Detecting ALSA audio devices..."
 
 # Debug: show what's available
@@ -167,48 +168,17 @@ echo ""
 
 CARDS_LOADED=0
 
+# Show card info from /proc/asound/cards if available (diagnostic only)
 if [ -f /proc/asound/cards ]; then
-    echo "  Reading from /proc/asound/cards:"
+    echo "  Available ALSA cards (/proc/asound/cards):"
     cat /proc/asound/cards
     echo ""
+fi
 
-    # Verify /dev/snd is mounted with actual device files
-    if [ ! -d /dev/snd ]; then
-        echo "  WARNING: /dev/snd directory not found!"
-        echo "  Cards are listed in /proc/asound but device files are missing."
-        echo "  Add to docker run: --device /dev/snd"
-        echo ""
-    elif [ -z "$(ls -A /dev/snd 2>/dev/null)" ]; then
-        echo "  WARNING: /dev/snd is empty!"
-        echo "  Cards are listed in /proc/asound but no device files present."
-        echo ""
-    else
-        echo "  Device files in /dev/snd:"
-        ls -la /dev/snd/ 2>/dev/null | grep -E '(control|pcm)' | head -10
-        echo ""
-    fi
-
-    # Parse card numbers from /proc/asound/cards
-    # Format: " 0 [USB            ]: USB-Audio - USB Audio Device"
-    grep -E '^ *[0-9]+' /proc/asound/cards | while read -r line; do
-        card_num=$(echo "$line" | awk '{print $1}')
-        card_name=$(echo "$line" | sed 's/.*\]: //')
-
-        echo "  Loading ALSA card $card_num: $card_name"
-
-        # Load the card into PulseAudio
-        # tsched=0 for better compatibility with USB devices
-        # Note: || true prevents set -e from exiting on failure
-        if load_output=$(pactl load-module module-alsa-card device=hw:$card_num tsched=0 2>&1); then
-            echo "    -> Loaded into PulseAudio (module $load_output)"
-            CARDS_LOADED=$((CARDS_LOADED + 1))
-        else
-            echo "    -> Failed to load: $load_output"
-        fi
-    done
-elif [ -d /dev/snd ]; then
-    # Fallback: detect playback devices from /dev/snd/pcmC*D*p (p = playback)
-    echo "  /proc/asound/cards not found, detecting PCM playback devices..."
+# Always use PCM device detection with module-alsa-sink
+# This method works reliably in Docker (module-alsa-card does not)
+if [ -d /dev/snd ]; then
+    echo "  Loading PCM playback devices via module-alsa-sink..."
     for pcm in /dev/snd/pcmC*D*p; do
         if [ -e "$pcm" ]; then
             # Extract card and device from pcmC0D3p -> 0,3
@@ -218,7 +188,7 @@ elif [ -d /dev/snd ]; then
 
             echo "  Found PCM playback: hw:$card_num,$dev_num ($pcm_name)"
 
-            # Use module-alsa-sink for direct device access (doesn't need /proc/asound)
+            # Use module-alsa-sink for direct device access
             sink_name="alsa_output_hw_${card_num}_${dev_num}"
 
             # Try to load at higher sample rates for better quality
@@ -247,12 +217,10 @@ else
     echo "  ERROR: /dev/snd not mounted!"
     echo ""
     echo "  To use audio devices, run Docker with:"
-    echo "    docker run --device /dev/snd -v /proc/asound:/proc/asound:ro ..."
+    echo "    docker run --device /dev/snd ..."
     echo "  Or in docker-compose.yml:"
     echo "    devices:"
     echo "      - /dev/snd:/dev/snd"
-    echo "    volumes:"
-    echo "      - /proc/asound:/proc/asound:ro"
 fi
 echo ""
 
