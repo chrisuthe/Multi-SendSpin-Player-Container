@@ -103,24 +103,27 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         }
 
         // Read remaining samples from the timed buffer
+        // Using Read() instead of ReadRaw() - Read() applies internal sync correction
+        // and has the same scheduled start logic but is proven to work on the Windows client.
+        // ReadRaw() was causing playback to never start for unknown reasons.
         var remainingCount = count - insertedSamples;
         var span = buffer.AsSpan(offset + insertedSamples, remainingCount);
-        var read = _buffer.ReadRaw(span, currentTime);
+#pragma warning disable CS0618 // Type or member is obsolete
+        var read = _buffer.Read(span, currentTime);
+#pragma warning restore CS0618
 
-        // Apply our own frame-based correction if we got samples
-        if (read > 0)
+        // Note: We're NOT applying our own frame correction since Read() handles it internally
+        // ApplyFrameCorrection is only for ReadRaw() with external correction
+
+        if (read == 0 && _logger != null)
         {
-            ApplyFrameCorrection(buffer, offset + insertedSamples, read);
-        }
-        else if (_logger != null)
-        {
-            // Debug: Log when ReadRaw returns 0 (rate limited)
+            // Debug: Log when Read returns 0 (rate limited)
             if (currentTime - _lastDebugLogTime >= DebugLogIntervalMicroseconds)
             {
                 _lastDebugLogTime = currentTime;
                 var stats = _buffer.GetStats();
                 _logger.LogWarning(
-                    "ReadRaw returned 0: currentTime={CurrentTime}μs, bufferedMs={BufferedMs:F0}, " +
+                    "Read returned 0: currentTime={CurrentTime}μs, bufferedMs={BufferedMs:F0}, " +
                     "isPlaybackActive={IsPlaybackActive}, syncError={SyncError:F0}μs",
                     currentTime,
                     stats.BufferedMs,
