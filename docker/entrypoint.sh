@@ -198,9 +198,8 @@ if [ -f /proc/asound/cards ]; then
 
         # Load the card into PulseAudio
         # tsched=0 for better compatibility with USB devices
-        load_output=$(pactl load-module module-alsa-card device=hw:$card_num tsched=0 2>&1)
-        load_exit=$?
-        if [ $load_exit -eq 0 ]; then
+        # Note: || true prevents set -e from exiting on failure
+        if load_output=$(pactl load-module module-alsa-card device=hw:$card_num tsched=0 2>&1); then
             echo "    -> Loaded into PulseAudio (module $load_output)"
             CARDS_LOADED=$((CARDS_LOADED + 1))
         else
@@ -228,8 +227,8 @@ elif [ -d /dev/snd ]; then
             last_error=""
             for rate in 192000 96000 48000; do
                 if [ $LOADED -eq 0 ]; then
-                    load_output=$(pactl load-module module-alsa-sink device=hw:$card_num,$dev_num sink_name="$sink_name" rate=$rate tsched=0 2>&1)
-                    if [ $? -eq 0 ]; then
+                    # Use if with command substitution to avoid set -e exit on failure
+                    if load_output=$(pactl load-module module-alsa-sink device=hw:$card_num,$dev_num sink_name="$sink_name" rate=$rate tsched=0 2>&1); then
                         echo "    -> Loaded as $sink_name @ ${rate}Hz (module $load_output)"
                         CARDS_LOADED=$((CARDS_LOADED + 1))
                         LOADED=1
