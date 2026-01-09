@@ -32,6 +32,10 @@
                             <i class="fas fa-cog"></i>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#" onclick="openSoundCardsModal(); return false;">
+                                <i class="fas fa-sd-card me-2"></i>Sound Cards
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="#" onclick="runSetupWizard(); return false;">
                                 <i class="fas fa-magic me-2"></i>Run Setup Wizard
                             </a></li>
@@ -356,6 +360,40 @@
                     <button type="button" id="wizardNext" class="btn btn-primary">
                         Continue<i class="fas fa-arrow-right ms-1"></i>
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sound Cards Modal -->
+    <div class="modal fade" id="soundCardsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-sd-card me-2"></i>Sound Card Configuration</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted">
+                        Configure audio profiles for your sound cards. Profile changes affect which audio outputs are available.
+                    </p>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Tip:</strong> Built-in sound cards often support 5.1 or 7.1 surround profiles that expose
+                        multiple outputs. Multi-channel USB interfaces can also use surround profiles to access individual
+                        channel pairs as separate stereo outputs.
+                    </div>
+                    <div id="soundCardsContainer">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Loading sound cards...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>

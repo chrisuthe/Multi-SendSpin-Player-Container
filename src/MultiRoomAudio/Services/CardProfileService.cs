@@ -47,6 +47,29 @@ public class CardProfileService : IHostedService
     {
         _logger.LogInformation("CardProfileService starting...");
 
+        // Always enumerate cards to log what's available
+        var cards = PulseAudioCardEnumerator.GetCards().ToList();
+
+        if (cards.Count == 0)
+        {
+            _logger.LogInformation("No sound cards detected");
+        }
+        else
+        {
+            _logger.LogInformation("Found {Count} sound card(s):", cards.Count);
+            foreach (var card in cards)
+            {
+                var availableProfiles = card.Profiles.Count(p => p.IsAvailable);
+                _logger.LogInformation(
+                    "  [{Index}] {Description} ({Name}) - {ProfileCount} profiles available, active: {ActiveProfile}",
+                    card.Index,
+                    card.Description ?? card.Name,
+                    card.Name,
+                    availableProfiles,
+                    card.ActiveProfile);
+            }
+        }
+
         var savedProfiles = LoadConfigurations();
 
         if (savedProfiles.Count == 0)
@@ -54,8 +77,6 @@ public class CardProfileService : IHostedService
             _logger.LogInformation("No saved card profiles to restore");
             return Task.CompletedTask;
         }
-
-        var cards = PulseAudioCardEnumerator.GetCards().ToList();
         var restoredCount = 0;
         var failedCount = 0;
 

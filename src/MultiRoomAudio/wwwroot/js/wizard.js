@@ -55,13 +55,16 @@ const Wizard = {
     currentStep: 0,
     devices: [],
     deviceState: {},  // deviceId -> { alias, hidden: bool }
+    cards: [],        // Sound cards with profiles
     customSinks: [],
     playersToCreate: [],
     modal: null,
 
     // Step definitions
+    // Note: 'cards' step is conditionally shown only if there are cards with multiple profiles
     STEPS: [
         { id: 'welcome', title: 'Welcome' },
+        { id: 'cards', title: 'Cards' },
         { id: 'identify', title: 'Identify' },
         { id: 'sinks', title: 'Sinks' },
         { id: 'players', title: 'Players' },
@@ -98,8 +101,12 @@ const Wizard = {
         this.currentStep = 0;
         this.devices = [];
         this.deviceState = {};
+        this.cards = [];
         this.customSinks = [];
         this.playersToCreate = [];
+
+        // Load cards first so progress indicator shows Cards step if needed
+        await this.loadCards();
 
         this.renderProgress();
         this.renderStep();
@@ -126,6 +133,10 @@ const Wizard = {
     prevStep() {
         if (this.currentStep > 0) {
             this.currentStep--;
+            // Skip cards step if no multi-profile cards (when going back)
+            if (this.STEPS[this.currentStep].id === 'cards' && !this.hasMultiProfileCards()) {
+                this.currentStep--;
+            }
             this.renderProgress();
             this.renderStep();
         }
@@ -152,6 +163,10 @@ const Wizard = {
         const step = this.STEPS[this.currentStep];
 
         switch (step.id) {
+            case 'cards':
+                // Clear devices cache when leaving cards step so they reload with new profiles
+                this.devices = [];
+                return true;
             case 'identify':
                 // Save aliases when leaving identify step
                 await this.saveAliases();
@@ -168,15 +183,24 @@ const Wizard = {
     // Render progress indicator
     renderProgress() {
         const container = document.getElementById('wizardProgress');
-        container.innerHTML = this.STEPS.map((step, index) => {
+        const showCards = this.hasMultiProfileCards();
+
+        // Filter steps - hide cards step if no multi-profile cards
+        const visibleSteps = this.STEPS.filter(step =>
+            step.id !== 'cards' || showCards
+        );
+
+        container.innerHTML = visibleSteps.map((step, displayIndex) => {
+            // Find actual index in STEPS array to compare with currentStep
+            const actualIndex = this.STEPS.findIndex(s => s.id === step.id);
             let stateClass = '';
-            if (index < this.currentStep) stateClass = 'completed';
-            else if (index === this.currentStep) stateClass = 'active';
+            if (actualIndex < this.currentStep) stateClass = 'completed';
+            else if (actualIndex === this.currentStep) stateClass = 'active';
 
             return `
                 <div class="wizard-step ${stateClass}">
                     <div class="wizard-step-indicator">
-                        ${index < this.currentStep ? '<i class="fas fa-check"></i>' : index + 1}
+                        ${actualIndex < this.currentStep ? '<i class="fas fa-check"></i>' : displayIndex + 1}
                     </div>
                     <div class="wizard-step-label">${step.title}</div>
                 </div>
@@ -209,6 +233,20 @@ const Wizard = {
         switch (step.id) {
             case 'welcome':
                 content.innerHTML = this.renderWelcome();
+                break;
+            case 'cards':
+                // Load cards if not already loaded
+                if (this.cards.length === 0) {
+                    await this.loadCards();
+                }
+                // Skip cards step if no multi-profile cards
+                if (!this.hasMultiProfileCards()) {
+                    this.currentStep++;
+                    this.renderProgress();
+                    await this.renderStep();
+                    return;
+                }
+                content.innerHTML = this.renderCards();
                 break;
             case 'identify':
                 content.innerHTML = this.renderIdentify();
@@ -247,7 +285,170 @@ const Wizard = {
         `;
     },
 
-    // Step 2: Identify Devices (combines discovery and naming)
+    // Check if there are cards with multiple available profiles
+    hasMultiProfileCards() {
+        return this.cards.some(card => {
+            const availableProfiles = card.profiles.filter(p => p.isAvailable);
+            return availableProfiles.length > 1;
+        });
+    },
+
+    // Load sound cards from API
+    async loadCards() {
+        try {
+            const response = await fetch('./api/cards');
+            if (!response.ok) {
+                console.warn('Failed to load cards:', response.status);
+                this.cards = [];
+                return;
+            }
+            const data = await response.json();
+            this.cards = data.cards || [];
+        } catch (error) {
+            console.error('Failed to load cards:', error);
+            this.cards = [];
+        }
+    },
+
+    // Step 2: Sound Card Profiles (only shown if multi-profile cards exist)
+    renderCards() {
+        // Filter to cards with multiple available profiles
+        const multiProfileCards = this.cards.filter(card => {
+            const availableProfiles = card.profiles.filter(p => p.isAvailable);
+            return availableProfiles.length > 1;
+        });
+
+        const cardHtml = multiProfileCards.map(card => {
+            const availableProfiles = card.profiles.filter(p => p.isAvailable);
+
+            const profileOptions = availableProfiles.map(profile => {
+                const isActive = profile.name === card.activeProfile;
+                // Create a friendly description
+                let label = profile.description || profile.name;
+                if (profile.sinks > 0 || profile.sources > 0) {
+                    const parts = [];
+                    if (profile.sinks > 0) parts.push(`${profile.sinks} output${profile.sinks > 1 ? 's' : ''}`);
+                    if (profile.sources > 0) parts.push(`${profile.sources} input${profile.sources > 1 ? 's' : ''}`);
+                    label += ` (${parts.join(', ')})`;
+                }
+                return `<option value="${escapeHtml(profile.name)}" ${isActive ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            }).join('');
+
+            // Find active profile description
+            const activeProfile = availableProfiles.find(p => p.name === card.activeProfile);
+            const activeDesc = activeProfile?.description || card.activeProfile;
+
+            return `
+                <div class="card mb-3" id="card-${card.index}">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <h6 class="mb-1">
+                                    <i class="fas fa-sd-card text-primary me-2"></i>
+                                    ${escapeHtml(card.description || card.name)}
+                                </h6>
+                                <small class="text-muted">${escapeHtml(card.driver)}</small>
+                            </div>
+                            <span class="badge bg-secondary" id="card-status-${card.index}">
+                                ${escapeHtml(activeDesc)}
+                            </span>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">Audio Profile</label>
+                            <select class="form-select"
+                                    id="profile-select-${card.index}"
+                                    onchange="Wizard.setCardProfile('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                ${profileOptions}
+                            </select>
+                        </div>
+
+                        <div id="card-message-${card.index}" class="small"></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div>
+                <h4><i class="fas fa-sd-card me-2"></i>Sound Card Configuration</h4>
+                <p class="text-muted">
+                    Some of your sound cards support multiple output modes. Choose the profile that matches
+                    how you want to use each card (e.g., stereo, surround, or multi-channel output).
+                </p>
+
+                <div class="alert alert-info mb-3">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Tip:</strong> Built-in sound cards often support 5.1 or 7.1 surround profiles that expose
+                    multiple outputs. Multi-channel USB interfaces can also use surround profiles to access individual
+                    channel pairs as separate stereo outputs.
+                </div>
+
+                <div id="wizardCardsList">
+                    ${cardHtml}
+                </div>
+            </div>
+        `;
+    },
+
+    // Set a card's profile
+    async setCardProfile(cardName, profileName, cardIndex) {
+        const select = document.getElementById(`profile-select-${cardIndex}`);
+        const statusBadge = document.getElementById(`card-status-${cardIndex}`);
+        const messageDiv = document.getElementById(`card-message-${cardIndex}`);
+
+        if (select) select.disabled = true;
+        if (messageDiv) {
+            messageDiv.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Changing profile...';
+            messageDiv.className = 'small text-muted';
+        }
+
+        try {
+            const response = await fetch(`./api/cards/${encodeURIComponent(cardName)}/profile`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile: profileName })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.message || 'Failed to change profile');
+            }
+
+            // Update local state
+            const card = this.cards.find(c => c.name === cardName);
+            if (card) {
+                card.activeProfile = profileName;
+                const profile = card.profiles.find(p => p.name === profileName);
+                if (statusBadge && profile) {
+                    statusBadge.textContent = profile.description || profileName;
+                }
+            }
+
+            if (messageDiv) {
+                messageDiv.innerHTML = '<i class="fas fa-check text-success me-1"></i>Profile changed successfully';
+                messageDiv.className = 'small text-success';
+                setTimeout(() => { messageDiv.innerHTML = ''; }, 3000);
+            }
+
+        } catch (error) {
+            console.error('Failed to set card profile:', error);
+            if (messageDiv) {
+                messageDiv.innerHTML = `<i class="fas fa-exclamation-triangle me-1"></i>${escapeHtml(error.message)}`;
+                messageDiv.className = 'small text-danger';
+            }
+            // Revert select to previous value
+            const card = this.cards.find(c => c.name === cardName);
+            if (select && card) {
+                select.value = card.activeProfile;
+            }
+        } finally {
+            if (select) select.disabled = false;
+        }
+    },
+
+    // Step 3: Identify Devices (combines discovery and naming)
     renderIdentify() {
         // Show loading state if devices not loaded yet
         if (this.devices.length === 0) {
