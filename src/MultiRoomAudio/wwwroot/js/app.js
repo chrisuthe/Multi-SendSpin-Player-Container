@@ -1368,3 +1368,186 @@ async function importSelectedSinks() {
         showAlert(error.message, 'danger');
     }
 }
+
+// ============================================
+// SOUND CARDS CONFIGURATION
+// ============================================
+
+let soundCardsModal = null;
+let soundCards = [];
+
+// Open the sound cards configuration modal
+async function openSoundCardsModal() {
+    if (!soundCardsModal) {
+        soundCardsModal = new bootstrap.Modal(document.getElementById('soundCardsModal'));
+    }
+
+    soundCardsModal.show();
+    await loadSoundCards();
+}
+
+// Load sound cards from API
+async function loadSoundCards() {
+    const container = document.getElementById('soundCardsContainer');
+    container.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Loading sound cards...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('./api/cards');
+        if (!response.ok) {
+            throw new Error('Failed to load sound cards');
+        }
+
+        const data = await response.json();
+        soundCards = data.cards || [];
+
+        renderSoundCards();
+    } catch (error) {
+        console.error('Error loading sound cards:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Failed to load sound cards: ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
+
+// Render sound cards list
+function renderSoundCards() {
+    const container = document.getElementById('soundCardsContainer');
+
+    if (soundCards.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4 text-muted">
+                <i class="fas fa-sd-card fa-3x mb-3 opacity-50"></i>
+                <p class="mb-0">No sound cards detected</p>
+            </div>
+        `;
+        return;
+    }
+
+    const cardsHtml = soundCards.map(card => {
+        const availableProfiles = card.profiles.filter(p => p.isAvailable);
+        const hasMultipleProfiles = availableProfiles.length > 1;
+
+        const profileOptions = availableProfiles.map(profile => {
+            const isActive = profile.name === card.activeProfile;
+            let label = profile.description || profile.name;
+            if (profile.sinks > 0 || profile.sources > 0) {
+                const parts = [];
+                if (profile.sinks > 0) parts.push(`${profile.sinks} output${profile.sinks > 1 ? 's' : ''}`);
+                if (profile.sources > 0) parts.push(`${profile.sources} input${profile.sources > 1 ? 's' : ''}`);
+                label += ` (${parts.join(', ')})`;
+            }
+            return `<option value="${escapeHtml(profile.name)}" ${isActive ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+        }).join('');
+
+        const activeProfile = availableProfiles.find(p => p.name === card.activeProfile);
+        const activeDesc = activeProfile?.description || card.activeProfile;
+
+        return `
+            <div class="card mb-3" id="settings-card-${card.index}">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h6 class="mb-1">
+                                <i class="fas fa-sd-card text-primary me-2"></i>
+                                ${escapeHtml(card.description || card.name)}
+                            </h6>
+                            <small class="text-muted">${escapeHtml(card.driver)}</small>
+                        </div>
+                        <span class="badge bg-secondary" id="settings-card-status-${card.index}">
+                            ${escapeHtml(activeDesc)}
+                        </span>
+                    </div>
+
+                    ${hasMultipleProfiles ? `
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">Audio Profile</label>
+                            <select class="form-select"
+                                    id="settings-profile-select-${card.index}"
+                                    onchange="setSoundCardProfile('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                ${profileOptions}
+                            </select>
+                        </div>
+                        <div id="settings-card-message-${card.index}" class="small"></div>
+                    ` : `
+                        <div class="text-muted small">
+                            <i class="fas fa-check-circle text-success me-1"></i>
+                            Single profile available: ${escapeHtml(activeDesc)}
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.innerHTML = cardsHtml;
+}
+
+// Set a sound card's profile
+async function setSoundCardProfile(cardName, profileName, cardIndex) {
+    const select = document.getElementById(`settings-profile-select-${cardIndex}`);
+    const statusBadge = document.getElementById(`settings-card-status-${cardIndex}`);
+    const messageDiv = document.getElementById(`settings-card-message-${cardIndex}`);
+
+    if (select) select.disabled = true;
+    if (messageDiv) {
+        messageDiv.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Changing profile...';
+        messageDiv.className = 'small text-muted';
+    }
+
+    try {
+        const response = await fetch(`./api/cards/${encodeURIComponent(cardName)}/profile`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile: profileName })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to change profile');
+        }
+
+        // Update local state
+        const card = soundCards.find(c => c.name === cardName);
+        if (card) {
+            card.activeProfile = profileName;
+            const profile = card.profiles.find(p => p.name === profileName);
+            if (statusBadge && profile) {
+                statusBadge.textContent = profile.description || profileName;
+            }
+        }
+
+        if (messageDiv) {
+            messageDiv.innerHTML = '<i class="fas fa-check text-success me-1"></i>Profile changed successfully';
+            messageDiv.className = 'small text-success';
+            setTimeout(() => { messageDiv.innerHTML = ''; }, 3000);
+        }
+
+        // Refresh devices since profile change may affect available outputs
+        await refreshDevices();
+
+    } catch (error) {
+        console.error('Failed to set card profile:', error);
+        if (messageDiv) {
+            messageDiv.innerHTML = `<i class="fas fa-exclamation-triangle me-1"></i>${escapeHtml(error.message)}`;
+            messageDiv.className = 'small text-danger';
+        }
+        // Revert select to previous value
+        const card = soundCards.find(c => c.name === cardName);
+        if (select && card) {
+            select.value = card.activeProfile;
+        }
+    } finally {
+        if (select) select.disabled = false;
+    }
+}
