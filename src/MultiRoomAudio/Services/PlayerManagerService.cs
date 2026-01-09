@@ -204,6 +204,29 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         return normalized * normalized;
     }
 
+    /// <summary>
+    /// Pushes the current configured volume to the server.
+    /// Called on connection and when playback starts to ensure server has correct volume.
+    /// This addresses the issue where the SDK sends volume:100 in the initial hello,
+    /// overriding the user's configured volume.
+    /// </summary>
+    private async Task PushVolumeToServerAsync(string name, PlayerContext context)
+    {
+        if (!IsPlayerInActiveState(context.State))
+            return;
+
+        try
+        {
+            await context.Client.SetVolumeAsync(context.Config.Volume);
+            _logger.LogDebug("Pushed volume {Volume} to server for player '{Name}'",
+                context.Config.Volume, name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to push volume to server for player '{Name}'", name);
+        }
+    }
+
     #endregion
 
     /// <summary>
@@ -975,16 +998,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
             _logger.LogInformation("Player '{Name}' connected to server", name);
 
-            // Push our configured volume to the server (overrides server's stored value)
-            try
-            {
-                await context.Client.SetVolumeAsync(context.Config.Volume);
-                _logger.LogDebug("Player '{Name}' pushed volume {Volume} to server", name, context.Config.Volume);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to push initial volume for player '{Name}'", name);
-            }
+            // Push our configured volume to the server (overrides SDK's default volume:100)
+            await PushVolumeToServerAsync(name, context);
         }
         catch (OperationCanceledException)
         {
@@ -1026,6 +1041,13 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 context.State = PlayerState.Buffering;
             else if (state == AudioPipelineState.Idle)
                 context.State = PlayerState.Connected;
+
+            // Push volume to server when playback starts to ensure correct level
+            // This handles the case where SDK sends volume:100 in initial hello
+            if (state == AudioPipelineState.Playing || state == AudioPipelineState.Buffering)
+            {
+                _ = PushVolumeToServerAsync(name, context);
+            }
 
             // Broadcast status update on pipeline state change
             _ = BroadcastStatusAsync();
