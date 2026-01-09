@@ -193,18 +193,6 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
-    /// Converts user-facing volume percentage to hardware volume with squared scaling.
-    /// This provides perceptually linear volume control (50% sounds like half volume).
-    /// </summary>
-    /// <param name="volumePercent">Volume as integer percentage (0-100).</param>
-    /// <returns>Hardware volume percentage with squared scaling applied.</returns>
-    private static int ToHardwareVolume(int volumePercent)
-    {
-        volumePercent = Math.Clamp(volumePercent, 0, 100);
-        return (int)Math.Round(volumePercent * volumePercent / 100.0);
-    }
-
-    /// <summary>
     /// Pushes the current configured volume to the server.
     /// Called on connection and when playback starts to ensure server has correct volume.
     /// This addresses the issue where the SDK sends volume:100 in the initial hello,
@@ -221,8 +209,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
         try
         {
-            _logger.LogInformation("Pushing volume {Volume}% to server for player '{Name}'",
-                context.Config.Volume, name);
+            _logger.LogInformation("VOLUME [PushToServer] Player '{Name}': {Volume}%",
+                name, context.Config.Volume);
             await context.Client.SetVolumeAsync(context.Config.Volume);
         }
         catch (Exception ex)
@@ -500,9 +488,11 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
             // 11. Apply initial volume via hardware (software volume bypassed)
             player.Volume = 1.0f;  // Hardware handles volume via pactl
+            _logger.LogInformation("VOLUME [Create] Player '{Name}': {Volume}% (Device: {Device})",
+                request.Name, request.Volume, request.Device ?? "(default)");
             if (!string.IsNullOrEmpty(request.Device))
             {
-                _ = _backendFactory.SetVolumeAsync(request.Device, ToHardwareVolume(request.Volume), default);
+                _ = _backendFactory.SetVolumeAsync(request.Device, request.Volume, default);
             }
 
             // 12. Apply delay offset from user configuration
@@ -611,7 +601,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             return false;
 
         volume = Math.Clamp(volume, 0, 100);
-        _logger.LogDebug("Setting volume for '{Name}' to {Volume}", name, volume);
+        _logger.LogInformation("VOLUME [Set] Player '{Name}': {Volume}% (Device: {Device})",
+            name, volume, context.Config.DeviceId ?? "(default)");
 
         // 1. Update local config (always)
         context.Config.Volume = volume;
@@ -633,12 +624,12 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             }
         }
 
-        // 4. Set hardware/OS volume via PulseAudio pactl (squared for perceptual scaling)
+        // 4. Set hardware/OS volume via PulseAudio pactl
         // Only if we have a specific device (not default)
         // Fire-and-forget with error handling via ContinueWith
         if (!string.IsNullOrEmpty(context.Config.DeviceId))
         {
-            _ = _backendFactory.SetVolumeAsync(context.Config.DeviceId, ToHardwareVolume(volume), ct)
+            _ = _backendFactory.SetVolumeAsync(context.Config.DeviceId, volume, ct)
                 .ContinueWith(t =>
                 {
                     if (t.IsFaulted && t.Exception != null)
@@ -1097,7 +1088,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             // Update volume if changed
             if (serverVolume != context.Config.Volume)
             {
-                _logger.LogDebug("Player '{Name}' volume changed by server: {OldVol} -> {NewVol}",
+                _logger.LogInformation("VOLUME [ServerSync] Player '{Name}': {OldVol}% → {NewVol}%",
                     name, context.Config.Volume, serverVolume);
 
                 context.Config.Volume = serverVolume;
@@ -1110,12 +1101,12 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                         // Bypass software volume (hardware handles it)
                         context.Player.Volume = 1.0f;
 
-                        // Sync hardware volume with server (squared for perceptual scaling)
+                        // Sync hardware volume with server
                         if (!string.IsNullOrEmpty(context.Config.DeviceId))
                         {
                             _ = _backendFactory.SetVolumeAsync(
                                 context.Config.DeviceId,
-                                ToHardwareVolume(serverVolume),
+                                serverVolume,
                                 default);
                         }
                     }

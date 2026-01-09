@@ -238,7 +238,7 @@ public static class PlayersEndpoint
             ILogger<PlayerManagerService> logger,
             CancellationToken ct) =>
         {
-            logger.LogDebug("API: PUT /api/players/{PlayerName}/volume to {Volume}", name, request.Volume);
+            logger.LogInformation("VOLUME [API] PUT /api/players/{Name}/volume: {Volume}%", name, request.Volume);
             try
             {
                 var success = await manager.SetVolumeAsync(name, request.Volume, ct);

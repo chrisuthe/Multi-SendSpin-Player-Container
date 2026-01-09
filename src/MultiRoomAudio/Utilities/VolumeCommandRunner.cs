@@ -93,7 +93,9 @@ public partial class VolumeCommandRunner
             var match = Regex.Match(result.Output, @"(\d+)%");
             if (match.Success)
             {
-                return int.Parse(match.Groups[1].Value);
+                var volumePercent = int.Parse(match.Groups[1].Value);
+                _logger.LogDebug("VOLUME [Hardware] Sink '{Sink}' current volume: {Volume}%", sinkArg, volumePercent);
+                return volumePercent;
             }
 
             return null;
@@ -121,6 +123,7 @@ public partial class VolumeCommandRunner
         try
         {
             var sinkArg = string.IsNullOrEmpty(sink) ? "@DEFAULT_SINK@" : sink;
+            _logger.LogInformation("VOLUME [Hardware] Setting sink '{Sink}' to {Volume}%", sinkArg, volume);
             var result = await RunCommandAsync(
                 "pactl",
                 ["set-sink-volume", sinkArg, $"{volume}%"],
