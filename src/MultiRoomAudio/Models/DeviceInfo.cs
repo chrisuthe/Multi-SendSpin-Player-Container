@@ -16,6 +16,18 @@ namespace MultiRoomAudio.Models;
 // =============================================================================
 
 /// <summary>
+/// Stable device identifiers extracted from PulseAudio properties.
+/// Used for re-matching devices across reboots when sink names change.
+/// </summary>
+public record DeviceIdentifiers(
+    string? Serial,           // device.serial - most stable if device supports it
+    string? BusPath,          // device.bus_path - stable per USB port
+    string? VendorId,         // device.vendor.id
+    string? ProductId,        // device.product.id
+    string? AlsaLongCardName  // alsa.long_card_name - includes USB path info
+);
+
+/// <summary>
 /// Detailed device capabilities including supported sample rates and bit depths.
 /// </summary>
 public record DeviceCapabilities(
@@ -63,7 +75,10 @@ public record AudioDevice(
     int DefaultLowLatencyMs,
     int DefaultHighLatencyMs,
     bool IsDefault,
-    DeviceCapabilities? Capabilities = null
+    DeviceCapabilities? Capabilities = null,
+    DeviceIdentifiers? Identifiers = null,
+    string? Alias = null,
+    bool Hidden = false
 );
 
 /// <summary>

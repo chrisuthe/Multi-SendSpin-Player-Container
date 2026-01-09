@@ -4,6 +4,7 @@
 let players = {};
 let devices = [];
 let connection = null;
+let showHiddenDevices = false;  // Whether to show hidden devices in dropdowns
 
 // XSS protection
 function escapeHtml(text) {
@@ -37,11 +38,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    // Set up device dropdown change handler for "Show hidden outputs"
+    const deviceSelect = document.getElementById('audioDevice');
+    if (deviceSelect) {
+        deviceSelect.addEventListener('change', () => handleDeviceDropdownChange(deviceSelect));
+    }
+
     // Set up SignalR connection
     setupSignalR();
 
     // Poll for status updates as fallback
     setInterval(refreshStatus, 5000);
+
+    // Check if onboarding wizard should be shown
+    checkOnboarding();
 });
 
 // SignalR setup
@@ -128,20 +138,65 @@ async function refreshDevices() {
         devices = data.devices || [];
 
         // Update device selects
-        const selects = document.querySelectorAll('#audioDevice, #editAudioDevice');
-        selects.forEach(select => {
-            const currentValue = select.value;
-            select.innerHTML = '<option value="">Default Device</option>';
-            devices.forEach(device => {
-                const option = document.createElement('option');
-                option.value = device.id;
-                option.textContent = `${device.name}${device.isDefault ? ' (default)' : ''}`;
-                select.appendChild(option);
-            });
-            if (currentValue) select.value = currentValue;
-        });
+        populateDeviceDropdowns();
     } catch (error) {
         console.error('Error refreshing devices:', error);
+    }
+}
+
+// Populate device dropdowns with optional hidden device filtering
+function populateDeviceDropdowns() {
+    const selects = document.querySelectorAll('#audioDevice, #editAudioDevice');
+
+    // Separate visible and hidden devices
+    const visibleDevices = devices.filter(d => !d.hidden);
+    const hiddenDevices = devices.filter(d => d.hidden);
+    const hasHiddenDevices = hiddenDevices.length > 0;
+
+    selects.forEach(select => {
+        const currentValue = select.value;
+        select.innerHTML = '<option value="">Default Device</option>';
+
+        // Add visible devices (or all if showHiddenDevices is true)
+        const devicesToShow = showHiddenDevices ? devices : visibleDevices;
+        devicesToShow.forEach(device => {
+            const option = document.createElement('option');
+            option.value = device.id;
+            let label = device.alias || device.name;
+            if (device.isDefault) label += ' (default)';
+            if (device.hidden) label += ' [hidden]';
+            option.textContent = label;
+            select.appendChild(option);
+        });
+
+        // Add "Show hidden outputs" option if there are hidden devices and we're not showing them
+        if (hasHiddenDevices && !showHiddenDevices) {
+            const separator = document.createElement('option');
+            separator.disabled = true;
+            separator.textContent = '───────────────';
+            select.appendChild(separator);
+
+            const showHiddenOption = document.createElement('option');
+            showHiddenOption.value = '__show_hidden__';
+            showHiddenOption.textContent = `Show hidden outputs (${hiddenDevices.length})`;
+            showHiddenOption.className = 'text-muted';
+            select.appendChild(showHiddenOption);
+        }
+
+        // Restore selection if it exists
+        if (currentValue && currentValue !== '__show_hidden__') {
+            select.value = currentValue;
+        }
+    });
+}
+
+// Handle device dropdown change to detect "Show hidden outputs" selection
+function handleDeviceDropdownChange(select) {
+    if (select.value === '__show_hidden__') {
+        showHiddenDevices = true;
+        populateDeviceDropdowns();
+        // Reset to default since the special option was selected
+        select.value = '';
     }
 }
 
@@ -151,6 +206,9 @@ function openAddPlayerModal() {
     document.getElementById('playerForm').reset();
     document.getElementById('editingPlayerName').value = '';
     document.getElementById('initialVolumeValue').textContent = '75%';
+
+    // Reset hidden devices state
+    showHiddenDevices = false;
 
     // Set modal to Add mode
     document.getElementById('playerModalIcon').className = 'fas fa-plus-circle me-2';
@@ -186,8 +244,12 @@ async function openEditPlayerModal(playerName) {
         document.getElementById('initialVolume').value = player.volume;
         document.getElementById('initialVolumeValue').textContent = player.volume + '%';
 
-        // Set device dropdown
+        // Check if player's device is hidden - if so, show hidden devices
         await refreshDevices();
+        const playerDevice = devices.find(d => d.id === player.device);
+        showHiddenDevices = playerDevice?.hidden || false;
+        populateDeviceDropdowns();
+
         if (player.device) {
             document.getElementById('audioDevice').value = player.device;
         }
@@ -1365,6 +1427,62 @@ async function importSelectedSinks() {
         await refreshSinks();
         await refreshDevices();
     } catch (error) {
+        showAlert(error.message, 'danger');
+    }
+}
+
+// ============================================
+// ONBOARDING / SETUP WIZARD
+// ============================================
+
+// Check onboarding status and show wizard if needed
+async function checkOnboarding() {
+    try {
+        const response = await fetch('./api/onboarding/status');
+        if (!response.ok) {
+            console.warn('Failed to check onboarding status');
+            return;
+        }
+
+        const status = await response.json();
+        if (status.shouldShow) {
+            // Start the wizard
+            if (typeof OnboardingWizard !== 'undefined') {
+                OnboardingWizard.start();
+            }
+        }
+    } catch (error) {
+        console.error('Error checking onboarding status:', error);
+    }
+}
+
+// Manually run the setup wizard from settings menu
+function runSetupWizard() {
+    if (typeof OnboardingWizard !== 'undefined') {
+        OnboardingWizard.start();
+    } else {
+        showAlert('Setup wizard is not available', 'warning');
+    }
+}
+
+// Reset first-run state to allow wizard to show again
+async function resetOnboarding() {
+    if (!confirm('Reset first-run state? The setup wizard will appear on the next page load.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('./api/onboarding/reset', {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to reset onboarding state');
+        }
+
+        showAlert('First-run state reset. Refresh the page to see the wizard.', 'success');
+    } catch (error) {
+        console.error('Error resetting onboarding:', error);
         showAlert(error.message, 'danger');
     }
 }

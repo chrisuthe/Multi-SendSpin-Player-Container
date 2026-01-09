@@ -91,6 +91,11 @@ builder.Services.AddSingleton<EnvironmentService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<VolumeCommandRunner>();
 builder.Services.AddSingleton<BackendFactory>();
+builder.Services.AddSingleton<DeviceMatchingService>();
+
+// Onboarding services
+builder.Services.AddSingleton<ToneGeneratorService>();
+builder.Services.AddSingleton<OnboardingService>();
 
 // Add PlayerManagerService as singleton and hosted service
 builder.Services.AddSingleton<PlayerManagerService>();
@@ -190,6 +195,7 @@ app.MapPlayersEndpoints();
 app.MapDevicesEndpoints();
 app.MapProvidersEndpoints();
 app.MapSinksEndpoints();
+app.MapOnboardingEndpoints();
 
 // Root endpoint redirects to index.html or shows API info
 app.MapGet("/api", () => Results.Ok(new

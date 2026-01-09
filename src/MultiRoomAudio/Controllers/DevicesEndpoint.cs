@@ -1,5 +1,6 @@
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Models;
+using MultiRoomAudio.Services;
 
 namespace MultiRoomAudio.Controllers;
 
@@ -15,15 +16,19 @@ public static class DevicesEndpoint
             .WithTags("Devices")
             .WithOpenApi();
 
-        // GET /api/devices - List all output devices
-        group.MapGet("/", (BackendFactory backendFactory, ILoggerFactory loggerFactory) =>
+        // GET /api/devices - List all output devices (enriched with aliases)
+        group.MapGet("/", (
+            BackendFactory backendFactory,
+            DeviceMatchingService matchingService,
+            ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("DevicesEndpoint");
             logger.LogDebug("API: GET /api/devices - Enumerating audio devices via {Backend} backend",
                 backendFactory.BackendName);
             try
             {
-                var devices = backendFactory.GetOutputDevices().ToList();
+                // Get devices enriched with aliases
+                var devices = matchingService.GetEnrichedDevices().ToList();
                 logger.LogInformation("Audio device enumeration found {DeviceCount} output devices", devices.Count);
 
                 if (devices.Count == 0)
@@ -56,7 +61,7 @@ public static class DevicesEndpoint
             }
         })
         .WithName("ListDevices")
-        .WithDescription("List all available audio output devices");
+        .WithDescription("List all available audio output devices with aliases");
 
         // GET /api/devices/default - Get default device
         // NOTE: This route must be registered BEFORE /{id} to prevent the parameterized route from intercepting it
@@ -159,7 +164,10 @@ public static class DevicesEndpoint
         .WithDescription("Get audio format capabilities of a specific device (sample rates, bit depths)");
 
         // POST /api/devices/refresh - Refresh device list
-        group.MapPost("/refresh", (BackendFactory backendFactory, ILoggerFactory loggerFactory) =>
+        group.MapPost("/refresh", (
+            BackendFactory backendFactory,
+            DeviceMatchingService matchingService,
+            ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("DevicesEndpoint");
             logger.LogDebug("API: POST /api/devices/refresh");
@@ -168,7 +176,7 @@ public static class DevicesEndpoint
                 logger.LogInformation("Refreshing audio device list via {Backend} backend...",
                     backendFactory.BackendName);
                 backendFactory.RefreshDevices();
-                var devices = backendFactory.GetOutputDevices().ToList();
+                var devices = matchingService.GetEnrichedDevices().ToList();
 
                 logger.LogInformation("Audio device refresh complete. Found {DeviceCount} devices", devices.Count);
 
@@ -199,5 +207,161 @@ public static class DevicesEndpoint
         })
         .WithName("RefreshDevices")
         .WithDescription("Re-enumerate audio devices (detect newly connected USB devices)");
+
+        // GET /api/devices/aliases - Get all device aliases
+        group.MapGet("/aliases", (ConfigurationService config, ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("DevicesEndpoint");
+            logger.LogDebug("API: GET /api/devices/aliases");
+
+            var aliases = config.GetAllDeviceAliases();
+            return Results.Ok(new
+            {
+                aliases,
+                count = aliases.Count
+            });
+        })
+        .WithName("GetAllAliases")
+        .WithDescription("Get all device aliases");
+
+        // POST /api/devices/rematch - Force device re-matching
+        group.MapPost("/rematch", (
+            DeviceMatchingService matchingService,
+            ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("DevicesEndpoint");
+            logger.LogDebug("API: POST /api/devices/rematch");
+            try
+            {
+                var results = matchingService.MatchAllDevices();
+                var updatedPlayers = matchingService.UpdatePlayerDevices();
+
+                return Results.Ok(new
+                {
+                    message = "Device re-matching complete",
+                    matchResults = results,
+                    updatedPlayers,
+                    devicesMatched = results.Count(r => r.CurrentSinkName != null),
+                    devicesUnmatched = results.Count(r => r.CurrentSinkName == null),
+                    playersUpdated = updatedPlayers.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to re-match devices");
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to re-match devices");
+            }
+        })
+        .WithName("RematchDevices")
+        .WithDescription("Re-match persisted device configurations with current sinks and update player configs");
+
+        // PUT /api/devices/{id}/alias - Set device alias
+        group.MapPut("/{id}/alias", (
+            string id,
+            DeviceAliasRequest request,
+            BackendFactory backendFactory,
+            ConfigurationService config,
+            ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("DevicesEndpoint");
+            logger.LogDebug("API: PUT /api/devices/{DeviceId}/alias", id);
+            try
+            {
+                // Find the device
+                var device = backendFactory.GetDevice(id);
+                if (device == null)
+                {
+                    return Results.NotFound(new ErrorResponse(false, $"Device '{id}' not found"));
+                }
+
+                // Generate stable key and set alias
+                var deviceKey = ConfigurationService.GenerateDeviceKey(device);
+                config.SetDeviceAlias(deviceKey, request.Alias, device);
+
+                logger.LogInformation("Set alias for device {DeviceId}: '{Alias}'", id, request.Alias ?? "(cleared)");
+
+                return Results.Ok(new
+                {
+                    success = true,
+                    deviceId = id,
+                    deviceKey,
+                    alias = request.Alias,
+                    message = request.Alias != null
+                        ? $"Alias set to '{request.Alias}'"
+                        : "Alias cleared"
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to set alias for device {DeviceId}", id);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to set device alias");
+            }
+        })
+        .WithName("SetDeviceAlias")
+        .WithDescription("Set a user-friendly alias for a device");
+
+        // PUT /api/devices/{id}/hidden - Set device hidden status
+        group.MapPut("/{id}/hidden", (
+            string id,
+            DeviceHiddenRequest request,
+            BackendFactory backendFactory,
+            ConfigurationService config,
+            ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("DevicesEndpoint");
+            logger.LogDebug("API: PUT /api/devices/{DeviceId}/hidden", id);
+            try
+            {
+                // Find the device
+                var device = backendFactory.GetDevice(id);
+                if (device == null)
+                {
+                    return Results.NotFound(new ErrorResponse(false, $"Device '{id}' not found"));
+                }
+
+                // Generate stable key and set hidden status
+                var deviceKey = ConfigurationService.GenerateDeviceKey(device);
+                config.SetDeviceHidden(deviceKey, request.Hidden, device);
+
+                logger.LogInformation("Set hidden status for device {DeviceId}: {Hidden}", id, request.Hidden);
+
+                return Results.Ok(new
+                {
+                    success = true,
+                    deviceId = id,
+                    deviceKey,
+                    hidden = request.Hidden,
+                    message = request.Hidden
+                        ? "Device hidden from player creation"
+                        : "Device unhidden"
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to set hidden status for device {DeviceId}", id);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to set device hidden status");
+            }
+        })
+        .WithName("SetDeviceHidden")
+        .WithDescription("Set whether a device is hidden from player creation");
     }
 }
+
+/// <summary>
+/// Request to set a device alias.
+/// </summary>
+public record DeviceAliasRequest(string? Alias);
+
+/// <summary>
+/// Request to set device hidden status.
+/// </summary>
+public record DeviceHiddenRequest(bool Hidden);

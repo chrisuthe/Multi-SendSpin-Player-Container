@@ -80,6 +80,16 @@ public class EnvironmentService
     public string PlayersConfigPath => Path.Combine(_configPath, "players.yaml");
 
     /// <summary>
+    /// Full path to devices.yaml configuration file (device aliases and stable identifiers).
+    /// </summary>
+    public string DevicesConfigPath => Path.Combine(_configPath, "devices.yaml");
+
+    /// <summary>
+    /// Full path to onboarding.yaml configuration file (wizard state).
+    /// </summary>
+    public string OnboardingConfigPath => Path.Combine(_configPath, "onboarding.yaml");
+
+    /// <summary>
     /// Path to log directory.
     /// </summary>
     public string LogPath => _logPath;

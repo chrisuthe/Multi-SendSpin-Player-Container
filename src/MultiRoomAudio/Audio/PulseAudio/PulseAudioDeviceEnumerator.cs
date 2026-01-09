@@ -193,6 +193,9 @@ public static partial class PulseAudioDeviceEnumerator
             }
         }
 
+        // Extract stable device identifiers from Properties section
+        var identifiers = ParseDeviceIdentifiers(block);
+
         var isDefault = sinkName.Equals(defaultSink, StringComparison.OrdinalIgnoreCase);
 
         return new AudioDevice(
@@ -203,7 +206,36 @@ public static partial class PulseAudioDeviceEnumerator
             DefaultSampleRate: sampleRate,
             DefaultLowLatencyMs: 50,   // Reasonable default for PulseAudio
             DefaultHighLatencyMs: 200, // Reasonable default for PulseAudio
-            IsDefault: isDefault
+            IsDefault: isDefault,
+            Identifiers: identifiers
+        );
+    }
+
+    /// <summary>
+    /// Extracts stable device identifiers from the Properties section of a pactl sink block.
+    /// These identifiers persist across reboots and can be used to re-match devices.
+    /// </summary>
+    private static DeviceIdentifiers? ParseDeviceIdentifiers(string block)
+    {
+        var serialMatch = DeviceSerialRegex().Match(block);
+        var busPathMatch = DeviceBusPathRegex().Match(block);
+        var vendorIdMatch = DeviceVendorIdRegex().Match(block);
+        var productIdMatch = DeviceProductIdRegex().Match(block);
+        var alsaLongCardNameMatch = AlsaLongCardNameRegex().Match(block);
+
+        // Only create identifiers if we found at least one useful property
+        if (!serialMatch.Success && !busPathMatch.Success && !vendorIdMatch.Success &&
+            !productIdMatch.Success && !alsaLongCardNameMatch.Success)
+        {
+            return null;
+        }
+
+        return new DeviceIdentifiers(
+            Serial: serialMatch.Success ? serialMatch.Groups[1].Value : null,
+            BusPath: busPathMatch.Success ? busPathMatch.Groups[1].Value : null,
+            VendorId: vendorIdMatch.Success ? vendorIdMatch.Groups[1].Value : null,
+            ProductId: productIdMatch.Success ? productIdMatch.Groups[1].Value : null,
+            AlsaLongCardName: alsaLongCardNameMatch.Success ? alsaLongCardNameMatch.Groups[1].Value : null
         );
     }
 
@@ -314,4 +346,20 @@ public static partial class PulseAudioDeviceEnumerator
 
     [GeneratedRegex(@"Default Sink:\s*(.+)$", RegexOptions.Multiline)]
     private static partial Regex DefaultSinkRegex();
+
+    // Regex patterns for stable device identifiers (from Properties section)
+    [GeneratedRegex(@"device\.serial\s*=\s*""([^""]+)""", RegexOptions.Multiline)]
+    private static partial Regex DeviceSerialRegex();
+
+    [GeneratedRegex(@"device\.bus_path\s*=\s*""([^""]+)""", RegexOptions.Multiline)]
+    private static partial Regex DeviceBusPathRegex();
+
+    [GeneratedRegex(@"device\.vendor\.id\s*=\s*""([^""]+)""", RegexOptions.Multiline)]
+    private static partial Regex DeviceVendorIdRegex();
+
+    [GeneratedRegex(@"device\.product\.id\s*=\s*""([^""]+)""", RegexOptions.Multiline)]
+    private static partial Regex DeviceProductIdRegex();
+
+    [GeneratedRegex(@"alsa\.long_card_name\s*=\s*""([^""]+)""", RegexOptions.Multiline)]
+    private static partial Regex AlsaLongCardNameRegex();
 }
