@@ -4,7 +4,6 @@
 let players = {};
 let devices = [];
 let connection = null;
-let showHiddenDevices = false;  // Whether to show hidden devices in dropdowns
 
 // XSS protection
 function escapeHtml(text) {
@@ -38,20 +37,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Set up device dropdown change handler for "Show hidden outputs"
-    const deviceSelect = document.getElementById('audioDevice');
-    if (deviceSelect) {
-        deviceSelect.addEventListener('change', () => handleDeviceDropdownChange(deviceSelect));
-    }
-
     // Set up SignalR connection
     setupSignalR();
 
     // Poll for status updates as fallback
     setInterval(refreshStatus, 5000);
-
-    // Check if onboarding wizard should be shown
-    checkOnboarding();
 });
 
 // SignalR setup
@@ -138,65 +128,20 @@ async function refreshDevices() {
         devices = data.devices || [];
 
         // Update device selects
-        populateDeviceDropdowns();
+        const selects = document.querySelectorAll('#audioDevice, #editAudioDevice');
+        selects.forEach(select => {
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">Default Device</option>';
+            devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.id;
+                option.textContent = `${device.name}${device.isDefault ? ' (default)' : ''}`;
+                select.appendChild(option);
+            });
+            if (currentValue) select.value = currentValue;
+        });
     } catch (error) {
         console.error('Error refreshing devices:', error);
-    }
-}
-
-// Populate device dropdowns with optional hidden device filtering
-function populateDeviceDropdowns() {
-    const selects = document.querySelectorAll('#audioDevice, #editAudioDevice');
-
-    // Separate visible and hidden devices
-    const visibleDevices = devices.filter(d => !d.hidden);
-    const hiddenDevices = devices.filter(d => d.hidden);
-    const hasHiddenDevices = hiddenDevices.length > 0;
-
-    selects.forEach(select => {
-        const currentValue = select.value;
-        select.innerHTML = '<option value="">Default Device</option>';
-
-        // Add visible devices (or all if showHiddenDevices is true)
-        const devicesToShow = showHiddenDevices ? devices : visibleDevices;
-        devicesToShow.forEach(device => {
-            const option = document.createElement('option');
-            option.value = device.id;
-            let label = device.alias || device.name;
-            if (device.isDefault) label += ' (default)';
-            if (device.hidden) label += ' [hidden]';
-            option.textContent = label;
-            select.appendChild(option);
-        });
-
-        // Add "Show hidden outputs" option if there are hidden devices and we're not showing them
-        if (hasHiddenDevices && !showHiddenDevices) {
-            const separator = document.createElement('option');
-            separator.disabled = true;
-            separator.textContent = '───────────────';
-            select.appendChild(separator);
-
-            const showHiddenOption = document.createElement('option');
-            showHiddenOption.value = '__show_hidden__';
-            showHiddenOption.textContent = `Show hidden outputs (${hiddenDevices.length})`;
-            showHiddenOption.className = 'text-muted';
-            select.appendChild(showHiddenOption);
-        }
-
-        // Restore selection if it exists
-        if (currentValue && currentValue !== '__show_hidden__') {
-            select.value = currentValue;
-        }
-    });
-}
-
-// Handle device dropdown change to detect "Show hidden outputs" selection
-function handleDeviceDropdownChange(select) {
-    if (select.value === '__show_hidden__') {
-        showHiddenDevices = true;
-        populateDeviceDropdowns();
-        // Reset to default since the special option was selected
-        select.value = '';
     }
 }
 
@@ -206,9 +151,6 @@ function openAddPlayerModal() {
     document.getElementById('playerForm').reset();
     document.getElementById('editingPlayerName').value = '';
     document.getElementById('initialVolumeValue').textContent = '75%';
-
-    // Reset hidden devices state
-    showHiddenDevices = false;
 
     // Set modal to Add mode
     document.getElementById('playerModalIcon').className = 'fas fa-plus-circle me-2';
@@ -244,12 +186,8 @@ async function openEditPlayerModal(playerName) {
         document.getElementById('initialVolume').value = player.volume;
         document.getElementById('initialVolumeValue').textContent = player.volume + '%';
 
-        // Check if player's device is hidden - if so, show hidden devices
+        // Set device dropdown
         await refreshDevices();
-        const playerDevice = devices.find(d => d.id === player.device);
-        showHiddenDevices = playerDevice?.hidden || false;
-        populateDeviceDropdowns();
-
         if (player.device) {
             document.getElementById('audioDevice').value = player.device;
         }
@@ -1432,62 +1370,6 @@ async function importSelectedSinks() {
 }
 
 // ============================================
-// ONBOARDING / SETUP WIZARD
-// ============================================
-
-// Check onboarding status and show wizard if needed
-async function checkOnboarding() {
-    try {
-        const response = await fetch('./api/onboarding/status');
-        if (!response.ok) {
-            console.warn('Failed to check onboarding status');
-            return;
-        }
-
-        const status = await response.json();
-        if (status.shouldShow) {
-            // Start the wizard
-            if (typeof OnboardingWizard !== 'undefined') {
-                OnboardingWizard.start();
-            }
-        }
-    } catch (error) {
-        console.error('Error checking onboarding status:', error);
-    }
-}
-
-// Manually run the setup wizard from settings menu
-function runSetupWizard() {
-    if (typeof OnboardingWizard !== 'undefined') {
-        OnboardingWizard.start();
-    } else {
-        showAlert('Setup wizard is not available', 'warning');
-    }
-}
-
-// Reset first-run state to allow wizard to show again
-async function resetOnboarding() {
-    if (!confirm('Reset first-run state? The setup wizard will appear on the next page load.')) {
-        return;
-    }
-
-    try {
-        const response = await fetch('./api/onboarding/reset', {
-            method: 'POST'
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to reset onboarding state');
-        }
-
-        showAlert('First-run state reset. Refresh the page to see the wizard.', 'success');
-    } catch (error) {
-        console.error('Error resetting onboarding:', error);
-        showAlert(error.message, 'danger');
-    }
-}
-
-// ============================================
 // SOUND CARDS CONFIGURATION
 // ============================================
 
@@ -1669,3 +1551,322 @@ async function setSoundCardProfile(cardName, profileName, cardIndex) {
         if (select) select.disabled = false;
     }
 }
+
+// ============================================
+// LOGS VIEWER
+// ============================================
+
+let logsData = [];
+let logsSkip = 0;
+const logsPageSize = 100;
+let logsConnection = null;
+let logsAutoScroll = true;
+let logsLiveStream = true;
+let logSearchTimeout = null;
+
+// Switch to logs view
+function showLogsView() {
+    document.getElementById('playersView').classList.add('d-none');
+    document.getElementById('logsView').classList.remove('d-none');
+
+    // Initialize logs
+    logsData = [];
+    logsSkip = 0;
+    refreshLogs();
+    setupLogsSignalR();
+}
+
+// Switch back to players view
+function showPlayersView() {
+    document.getElementById('logsView').classList.add('d-none');
+    document.getElementById('playersView').classList.remove('d-none');
+
+    // Cleanup SignalR connection
+    if (logsConnection) {
+        logsConnection.stop();
+        logsConnection = null;
+    }
+}
+
+// Setup SignalR for log streaming
+function setupLogsSignalR() {
+    if (typeof signalR === 'undefined' || logsConnection) return;
+
+    logsConnection = new signalR.HubConnectionBuilder()
+        .withUrl('./hubs/logs')
+        .withAutomaticReconnect()
+        .build();
+
+    logsConnection.on('LogEntry', (entry) => {
+        if (!logsLiveStream) return;
+
+        // Check filters
+        const levelFilter = document.getElementById('logLevelFilter').value;
+        const categoryFilter = document.getElementById('logCategoryFilter').value;
+        const searchFilter = document.getElementById('logSearchInput').value.toLowerCase();
+
+        if (levelFilter && entry.level.toLowerCase() !== levelFilter) return;
+        if (categoryFilter && entry.category !== categoryFilter) return;
+        if (searchFilter && !entry.message.toLowerCase().includes(searchFilter)) return;
+
+        // Add to top of list (newest first)
+        logsData.unshift(entry);
+        prependLogEntry(entry);
+        updateLogsCount();
+
+        // Auto-scroll to top if enabled
+        if (logsAutoScroll) {
+            document.getElementById('logsContainer').scrollTop = 0;
+        }
+    });
+
+    logsConnection.on('InitialLogs', (entries) => {
+        // Initial logs are sent on connection, but we already load via API
+        // This is just for quick population if needed
+    });
+
+    logsConnection.start().catch(err => {
+        console.log('Logs SignalR connection failed:', err);
+    });
+}
+
+// Debounced search
+function debouncedLogSearch() {
+    if (logSearchTimeout) {
+        clearTimeout(logSearchTimeout);
+    }
+    logSearchTimeout = setTimeout(refreshLogs, 300);
+}
+
+// Refresh logs (reset and reload)
+async function refreshLogs() {
+    logsSkip = 0;
+    logsData = [];
+
+    const container = document.getElementById('logsContainer');
+    container.innerHTML = `
+        <div class="text-center py-5 text-muted">
+            <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+            <p>Loading logs...</p>
+        </div>
+    `;
+
+    await loadLogs();
+}
+
+// Load logs from API
+async function loadLogs() {
+    const level = document.getElementById('logLevelFilter').value;
+    const category = document.getElementById('logCategoryFilter').value;
+    const search = document.getElementById('logSearchInput').value;
+
+    const params = new URLSearchParams({
+        skip: logsSkip,
+        take: logsPageSize,
+        newestFirst: true
+    });
+
+    if (level) params.append('level', level);
+    if (category) params.append('category', category);
+    if (search) params.append('search', search);
+
+    try {
+        const response = await fetch(`./api/logs?${params}`);
+        if (!response.ok) throw new Error('Failed to fetch logs');
+
+        const data = await response.json();
+
+        if (logsSkip === 0) {
+            logsData = data.entries;
+            renderLogs();
+        } else {
+            logsData = [...logsData, ...data.entries];
+            appendLogEntries(data.entries);
+        }
+
+        // Show/hide load more button
+        const loadMore = document.getElementById('logsLoadMore');
+        if (logsData.length < data.totalCount) {
+            loadMore.classList.remove('d-none');
+        } else {
+            loadMore.classList.add('d-none');
+        }
+
+        updateLogsCount(data.totalCount);
+
+    } catch (error) {
+        console.error('Error loading logs:', error);
+        const container = document.getElementById('logsContainer');
+        container.innerHTML = `
+            <div class="text-center py-5 text-danger">
+                <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                <p>Failed to load logs</p>
+            </div>
+        `;
+    }
+}
+
+// Load more logs (pagination)
+function loadMoreLogs() {
+    logsSkip += logsPageSize;
+    loadLogs();
+}
+
+// Render all logs
+function renderLogs() {
+    const container = document.getElementById('logsContainer');
+
+    if (logsData.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-5 text-muted empty-state">
+                <i class="fas fa-scroll fa-3x mb-3 opacity-50"></i>
+                <h5>No logs found</h5>
+                <p>Logs will appear here as the application runs.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = logsData.map(entry => createLogEntryHtml(entry)).join('');
+}
+
+// Create HTML for a single log entry
+function createLogEntryHtml(entry, isNew = false) {
+    const time = new Date(entry.timestamp).toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+
+    const levelClass = entry.level.toLowerCase();
+
+    return `
+        <div class="log-entry${isNew ? ' new' : ''}">
+            <span class="log-timestamp">${escapeHtml(time)}</span>
+            <span class="log-level ${levelClass}">${escapeHtml(entry.level)}</span>
+            <span class="log-category">${escapeHtml(entry.category)}</span>
+            <div class="log-message">
+                ${escapeHtml(entry.message)}
+                ${entry.exception ? `<div class="log-exception">${escapeHtml(entry.exception)}</div>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+// Prepend a single log entry (for live streaming)
+function prependLogEntry(entry) {
+    const container = document.getElementById('logsContainer');
+    const emptyState = container.querySelector('.empty-state');
+    if (emptyState) {
+        container.innerHTML = '';
+    }
+
+    const html = createLogEntryHtml(entry, true);
+    container.insertAdjacentHTML('afterbegin', html);
+
+    // Limit displayed entries for performance
+    const entries = container.querySelectorAll('.log-entry');
+    if (entries.length > 500) {
+        entries[entries.length - 1].remove();
+    }
+}
+
+// Append log entries (for pagination)
+function appendLogEntries(entries) {
+    const container = document.getElementById('logsContainer');
+    const html = entries.map(e => createLogEntryHtml(e)).join('');
+    container.insertAdjacentHTML('beforeend', html);
+}
+
+// Update the logs count badge
+function updateLogsCount(total) {
+    const countBadge = document.getElementById('logsCount');
+    countBadge.textContent = (total !== undefined ? total : logsData.length).toLocaleString();
+}
+
+// Clear all logs
+async function clearLogs() {
+    if (!confirm('Clear all logs? This cannot be undone.')) return;
+
+    try {
+        const response = await fetch('./api/logs', { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to clear logs');
+
+        logsData = [];
+        logsSkip = 0;
+        renderLogs();
+        updateLogsCount(0);
+        showAlert('Logs cleared', 'success');
+    } catch (error) {
+        showAlert('Failed to clear logs', 'danger');
+    }
+}
+
+// Download logs as text file
+function downloadLogs() {
+    const content = logsData.map(e =>
+        `${e.timestamp}|${e.level}|${e.category}|${e.message}${e.exception ? '|' + e.exception : ''}`
+    ).join('\n');
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `multiroom-audio-logs-${new Date().toISOString().slice(0,10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ============================================
+// ONBOARDING WIZARD INTEGRATION
+// ============================================
+
+// Run the setup wizard manually
+function runSetupWizard() {
+    if (typeof OnboardingWizard !== 'undefined') {
+        OnboardingWizard.start();
+    } else {
+        showAlert('Setup wizard is not available', 'warning');
+    }
+}
+
+// Reset first-run state to allow wizard to show again
+async function resetOnboarding() {
+    if (!confirm('Reset first-run state? The setup wizard will appear on the next page load.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('./api/onboarding/reset', {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to reset onboarding state');
+        }
+
+        showAlert('First-run state reset. Refresh the page to see the wizard.', 'success');
+    } catch (error) {
+        console.error('Error resetting onboarding:', error);
+        showAlert(error.message, 'danger');
+    }
+}
+
+// Toggle handlers for switches
+document.addEventListener('DOMContentLoaded', () => {
+    const autoScrollSwitch = document.getElementById('logAutoScroll');
+    const liveStreamSwitch = document.getElementById('logLiveStream');
+
+    if (autoScrollSwitch) {
+        autoScrollSwitch.addEventListener('change', (e) => {
+            logsAutoScroll = e.target.checked;
+        });
+    }
+
+    if (liveStreamSwitch) {
+        liveStreamSwitch.addEventListener('change', (e) => {
+            logsLiveStream = e.target.checked;
+        });
+    }
+});

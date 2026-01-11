@@ -21,17 +21,27 @@
                     <p class="mb-0 opacity-75">Sendspin-powered multi-room audio controller</p>
                 </div>
                 <div class="col-auto">
-                    <a href="./docs" class="btn btn-outline-light me-2" target="_blank" title="API Documentation">
-                        <i class="fas fa-code me-2"></i>API Docs
-                    </a>
-                    <button class="btn btn-outline-light me-2" onclick="toggleSinksSection()" title="Custom Sinks">
-                        <i class="fas fa-layer-group me-2"></i>Custom Sinks
-                    </button>
                     <div class="dropdown d-inline-block me-2">
-                        <button class="btn btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fas fa-cog"></i>
+                        <button class="btn btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Documentation">
+                            <i class="fas fa-info-circle me-1"></i>Documentation
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="./docs" target="_blank">
+                                <i class="fas fa-code me-2"></i>API Docs
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="showLogsView(); return false;">
+                                <i class="fas fa-scroll me-2"></i>Logs
+                            </a></li>
+                        </ul>
+                    </div>
+                    <div class="dropdown d-inline-block me-2">
+                        <button class="btn btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Settings">
+                            <i class="fas fa-cog me-1"></i>Settings
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#" onclick="toggleSinksSection(); return false;">
+                                <i class="fas fa-layer-group me-2"></i>Custom Sinks
+                            </a></li>
                             <li><a class="dropdown-item" href="#" onclick="openSoundCardsModal(); return false;">
                                 <i class="fas fa-sd-card me-2"></i>Sound Cards
                             </a></li>
@@ -53,7 +63,8 @@
         </div>
     </div>
 
-    <div class="container">
+    <!-- Players View (default view) -->
+    <div id="playersView" class="container">
         <div id="alert-container"></div>
 
         <!-- Custom Sinks Section (hidden by default) -->
@@ -104,6 +115,101 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Logs View (hidden by default) -->
+    <div id="logsView" class="d-none">
+        <!-- Logs Header -->
+        <div class="logs-header bg-body-tertiary border-bottom">
+            <div class="container-fluid py-3">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-outline-secondary me-3" onclick="showPlayersView()">
+                            <i class="fas fa-arrow-left me-2"></i>Back
+                        </button>
+                        <h4 class="mb-0">
+                            <i class="fas fa-scroll me-2"></i>Application Logs
+                            <span id="logsCount" class="badge bg-secondary ms-2">0</span>
+                        </h4>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-outline-danger btn-sm" onclick="clearLogs()">
+                            <i class="fas fa-trash me-1"></i>Clear
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="downloadLogs()">
+                            <i class="fas fa-download me-1"></i>Download
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Toolbar -->
+        <div class="logs-toolbar bg-body border-bottom sticky-top">
+            <div class="container-fluid py-2">
+                <div class="row g-2 align-items-center">
+                    <div class="col-auto">
+                        <select class="form-select form-select-sm" id="logLevelFilter" onchange="refreshLogs()">
+                            <option value="">All Levels</option>
+                            <option value="debug">Debug</option>
+                            <option value="information">Info</option>
+                            <option value="warning">Warning</option>
+                            <option value="error">Error</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <select class="form-select form-select-sm" id="logCategoryFilter" onchange="refreshLogs()">
+                            <option value="">All Categories</option>
+                            <option value="System">System</option>
+                            <option value="Player">Player</option>
+                            <option value="Audio">Audio</option>
+                            <option value="API">API</option>
+                            <option value="Config">Config</option>
+                            <option value="SDK">SDK</option>
+                        </select>
+                    </div>
+                    <div class="col">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" class="form-control" id="logSearchInput"
+                                   placeholder="Search logs..." oninput="debouncedLogSearch()">
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="logAutoScroll" checked>
+                            <label class="form-check-label small" for="logAutoScroll">Auto-scroll</label>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="logLiveStream" checked>
+                            <label class="form-check-label small" for="logLiveStream">Live</label>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshLogs()">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Container -->
+        <div id="logsContainer" class="logs-container font-monospace">
+            <div class="text-center py-5 text-muted">
+                <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                <p>Loading logs...</p>
+            </div>
+        </div>
+
+        <!-- Load More Footer -->
+        <div id="logsLoadMore" class="text-center py-3 border-top d-none">
+            <button class="btn btn-sm btn-outline-primary" onclick="loadMoreLogs()">
+                <i class="fas fa-chevron-down me-1"></i>Load More
+            </button>
         </div>
     </div>
 

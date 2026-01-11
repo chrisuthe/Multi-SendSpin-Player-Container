@@ -1,7 +1,10 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.SignalR;
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Controllers;
 using MultiRoomAudio.Hubs;
+using MultiRoomAudio.Logging;
+using MultiRoomAudio.Models;
 using MultiRoomAudio.Services;
 using MultiRoomAudio.Utilities;
 
@@ -88,6 +91,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 // Core services (singletons for shared state)
 builder.Services.AddSingleton<EnvironmentService>();
+builder.Services.AddSingleton<LoggingService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<VolumeCommandRunner>();
 builder.Services.AddSingleton<BackendFactory>();
@@ -190,8 +194,9 @@ app.UseSwaggerUI(c =>
 // Map health check endpoints
 app.MapHealthChecks("/healthz");
 
-// Map SignalR hub
+// Map SignalR hubs
 app.MapHub<PlayerStatusHub>("/hubs/status");
+app.MapHub<LogStreamHub>("/hubs/logs");
 
 // Map API endpoints
 app.MapHealthEndpoints();
@@ -201,6 +206,7 @@ app.MapProvidersEndpoints();
 app.MapSinksEndpoints();
 app.MapOnboardingEndpoints();
 app.MapCardsEndpoints();
+app.MapLogsEndpoints();
 
 // Root endpoint redirects to index.html or shows API info
 app.MapGet("/api", () => Results.Ok(new
@@ -217,6 +223,7 @@ app.MapGet("/api", () => Results.Ok(new
         providers = "/api/providers",
         sinks = "/api/sinks",
         cards = "/api/cards",
+        logs = "/api/logs",
         swagger = "/docs"
     }
 }))
@@ -225,6 +232,25 @@ app.MapGet("/api", () => Results.Ok(new
 
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var environmentService = app.Services.GetRequiredService<EnvironmentService>();
+
+// Set up custom logging provider for web-visible logs
+var loggingService = app.Services.GetRequiredService<LoggingService>();
+var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+loggerFactory.AddProvider(new WebLoggingProvider(loggingService, logLevel));
+
+// Wire up log streaming via SignalR
+var logHubContext = app.Services.GetRequiredService<IHubContext<LogStreamHub>>();
+loggingService.LogEntryAdded += async (sender, entry) =>
+{
+    try
+    {
+        await logHubContext.BroadcastLogEntryAsync(entry.ToDto());
+    }
+    catch
+    {
+        // Don't let log streaming failures crash the app
+    }
+};
 
 // Startup banner - visible in HAOS supervisor logs
 logger.LogInformation("========================================");
