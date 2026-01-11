@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-afa15c1
+## Development Build: sha-1757dce
 
 **Current Dev Build Changes** (recent)
 
+- Restructure Menus
 - Add Logging and Testing
 - stop touching the volume, MA does that. Set hardware to 80% and passthrough what we get from MA to the player (we dont' control any volume)
 - Volume logging and get rid of adjustments before applying
@@ -14,7 +15,6 @@
 - attempt to fix volume issue
 - Add startup logging for discovered sound cards
 - support loading by card
-- Add card profile support via API
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
