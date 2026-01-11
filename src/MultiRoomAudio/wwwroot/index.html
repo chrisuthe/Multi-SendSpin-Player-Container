@@ -21,20 +21,27 @@
                     <p class="mb-0 opacity-75">Sendspin-powered multi-room audio controller</p>
                 </div>
                 <div class="col-auto">
-                    <a href="./docs" class="btn btn-outline-light me-2" target="_blank" title="API Documentation">
-                        <i class="fas fa-code me-2"></i>API Docs
-                    </a>
-                    <button class="btn btn-outline-light me-2" onclick="toggleSinksSection()" title="Custom Sinks">
-                        <i class="fas fa-layer-group me-2"></i>Custom Sinks
-                    </button>
-                    <button class="btn btn-outline-light me-2" onclick="showLogsView()" title="Application Logs">
-                        <i class="fas fa-scroll me-2"></i>Logs
-                    </button>
                     <div class="dropdown d-inline-block me-2">
-                        <button class="btn btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Settings">
-                            <i class="fas fa-cog"></i>
+                        <button class="btn btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Documentation">
+                            <i class="fas fa-info-circle me-1"></i>Documentation
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="./docs" target="_blank">
+                                <i class="fas fa-code me-2"></i>API Docs
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="showLogsView(); return false;">
+                                <i class="fas fa-scroll me-2"></i>Logs
+                            </a></li>
+                        </ul>
+                    </div>
+                    <div class="dropdown d-inline-block me-2">
+                        <button class="btn btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Settings">
+                            <i class="fas fa-cog me-1"></i>Settings
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#" onclick="toggleSinksSection(); return false;">
+                                <i class="fas fa-layer-group me-2"></i>Custom Sinks
+                            </a></li>
                             <li><a class="dropdown-item" href="#" onclick="openSoundCardsModal(); return false;">
                                 <i class="fas fa-sd-card me-2"></i>Sound Cards
                             </a></li>
