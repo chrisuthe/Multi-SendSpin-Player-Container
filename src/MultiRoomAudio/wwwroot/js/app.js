@@ -1082,6 +1082,11 @@ function getSinkStateBadgeClass(state) {
 
 // Open Combine Sink Modal
 function openCombineSinkModal() {
+    // Hide parent modal to avoid stacking issues
+    if (customSinksModal) {
+        customSinksModal.hide();
+    }
+
     // Reset form
     document.getElementById('combineSinkName').value = '';
     document.getElementById('combineSinkDesc').value = '';
@@ -1102,11 +1107,24 @@ function openCombineSinkModal() {
         `).join('');
     }
 
-    new bootstrap.Modal(document.getElementById('combineSinkModal')).show();
+    const combineModal = new bootstrap.Modal(document.getElementById('combineSinkModal'));
+    // Reopen parent modal when this one closes
+    document.getElementById('combineSinkModal').addEventListener('hidden.bs.modal', function handler() {
+        document.getElementById('combineSinkModal').removeEventListener('hidden.bs.modal', handler);
+        if (customSinksModal) {
+            customSinksModal.show();
+        }
+    });
+    combineModal.show();
 }
 
 // Open Remap Sink Modal
 function openRemapSinkModal() {
+    // Hide parent modal to avoid stacking issues
+    if (customSinksModal) {
+        customSinksModal.hide();
+    }
+
     // Reset form
     document.getElementById('remapSinkName').value = '';
     document.getElementById('remapSinkDesc').value = '';
@@ -1118,7 +1136,15 @@ function openRemapSinkModal() {
 
     updateChannelPicker();
 
-    new bootstrap.Modal(document.getElementById('remapSinkModal')).show();
+    const remapModal = new bootstrap.Modal(document.getElementById('remapSinkModal'));
+    // Reopen parent modal when this one closes
+    document.getElementById('remapSinkModal').addEventListener('hidden.bs.modal', function handler() {
+        document.getElementById('remapSinkModal').removeEventListener('hidden.bs.modal', handler);
+        if (customSinksModal) {
+            customSinksModal.show();
+        }
+    });
+    remapModal.show();
 }
 
 // Update channel picker based on selected master device

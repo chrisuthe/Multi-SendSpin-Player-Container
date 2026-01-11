@@ -51,21 +51,40 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     #region Constants
 
     /// <summary>
-    /// Audio buffer capacity in bytes (32MB).
+    /// Buffer capacity announced to the Sendspin server (in bytes).
+    ///
+    /// Per protocol spec: "buffer_capacity: max size in bytes of compressed audio
+    /// messages in the buffer that are yet to be played"
+    ///
+    /// The server sends audio chunks as far ahead as this capacity allows.
+    /// At typical Opus bitrates (~128kbps), 32MB = many minutes of audio.
+    /// This large value ensures the server always has audio ready to send.
     /// </summary>
-    private const int AudioBufferCapacityBytes = 32_000_000;
+    private const int ServerAnnouncedBufferCapacityBytes = 32_000_000;
 
     /// <summary>
-    /// Audio buffer capacity in milliseconds for timed audio buffer.
+    /// Local circular buffer capacity for decompressed PCM audio (in milliseconds).
+    ///
+    /// This is the TimedAudioBuffer size - how much decoded audio we can hold locally.
+    /// Must be large enough to handle network jitter and decode timing variations.
+    ///
+    /// Note: This is DIFFERENT from ServerAnnouncedBufferCapacityBytes which controls
+    /// how far ahead the server sends compressed audio.
     /// </summary>
-    private const int AudioBufferCapacityMs = 8000;
+    private const int LocalBufferCapacityMs = 8000;
 
     /// <summary>
-    /// Target buffer level in milliseconds for faster startup.
-    /// Lower values = faster start but more sensitive to jitter.
-    /// With SDK 3.0's HasMinimalSync, typical startup is 300-500ms.
+    /// Target buffer level for playback readiness (in milliseconds).
+    ///
+    /// Playback starts when the local buffer reaches 80% of this value (200ms).
+    /// Lower values = faster playback start but more sensitive to jitter.
+    ///
+    /// This is NOT a buffer capacity - it's a threshold for when to START playing.
+    /// The actual buffer can hold much more (see LocalBufferCapacityMs).
+    ///
+    /// With SDK's HasMinimalSync (2 clock measurements), typical startup is 300-500ms.
     /// </summary>
-    private const int TargetBufferMs = 250;
+    private const int PlaybackStartThresholdMs = 250;
 
     /// <summary>
     /// Sync correction options tuned for PulseAudio's timing characteristics.
@@ -541,7 +560,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 ClientName = request.Name,
                 Roles = new List<string> { "player@v1" },
                 AudioFormats = GetDefaultFormats(),
-                BufferCapacity = AudioBufferCapacityBytes
+                BufferCapacity = ServerAnnouncedBufferCapacityBytes
             };
 
             // 2. Create clock synchronizer
@@ -564,9 +583,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                     var buffer = new TimedAudioBuffer(
                         format,
                         sync,
-                        bufferCapacityMs: AudioBufferCapacityMs,
+                        bufferCapacityMs: LocalBufferCapacityMs,
                         syncOptions: PulseAudioSyncOptions);
-                    buffer.TargetBufferMilliseconds = TargetBufferMs;  // Faster startup (250ms vs default 500ms)
+                    buffer.TargetBufferMilliseconds = PlaybackStartThresholdMs;  // Playback starts at 80% of this (200ms)
                     return buffer;
                 },
                 playerFactory: () => player,
