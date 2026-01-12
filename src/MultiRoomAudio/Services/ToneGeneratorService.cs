@@ -210,7 +210,8 @@ public class ToneGeneratorService
             };
 
             using var process = Process.Start(psi);
-            if (process == null) return false;
+            if (process == null)
+                return false;
 
             await process.WaitForExitAsync();
             return process.ExitCode == 0;

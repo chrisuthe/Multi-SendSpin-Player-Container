@@ -1801,7 +1801,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// </summary>
     private void QueueForReconnection(PlayerConfiguration config, bool isInitialFailure = false)
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
 
         var state = _pendingReconnections.GetOrAdd(config.Name, _ => new ReconnectionState(config));
 

@@ -47,9 +47,12 @@ public static class LogsEndpoint
             }
 
             // Ensure reasonable defaults
-            if (take <= 0) take = 100;
-            if (take > 500) take = 500;
-            if (skip < 0) skip = 0;
+            if (take <= 0)
+                take = 100;
+            if (take > 500)
+                take = 500;
+            if (skip < 0)
+                skip = 0;
 
             var options = new LogQueryOptions(
                 MinLevel: minLevel,

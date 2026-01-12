@@ -58,7 +58,8 @@ public class DeviceIdentifiersConfig
     /// </summary>
     public static DeviceIdentifiersConfig? FromModel(DeviceIdentifiers? identifiers)
     {
-        if (identifiers == null) return null;
+        if (identifiers == null)
+            return null;
         return new DeviceIdentifiersConfig
         {
             Serial = identifiers.Serial,

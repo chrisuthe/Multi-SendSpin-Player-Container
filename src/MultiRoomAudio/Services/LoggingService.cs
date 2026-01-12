@@ -100,7 +100,8 @@ public class LoggingService : IDisposable
     /// </summary>
     public void AddEntry(LogEntry entry)
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
 
         // Add to in-memory buffer
         lock (_bufferLock)
@@ -294,7 +295,8 @@ public class LoggingService : IDisposable
     {
         lock (_fileLock)
         {
-            if (_fileWriter == null || _currentLogFilePath == null) return;
+            if (_fileWriter == null || _currentLogFilePath == null)
+                return;
 
             try
             {
@@ -334,10 +336,12 @@ public class LoggingService : IDisposable
 
     private void RotateLogFileIfNeeded()
     {
-        if (_currentLogFilePath == null || !File.Exists(_currentLogFilePath)) return;
+        if (_currentLogFilePath == null || !File.Exists(_currentLogFilePath))
+            return;
 
         var fileInfo = new FileInfo(_currentLogFilePath);
-        if (fileInfo.Length < MaxLogFileSizeBytes) return;
+        if (fileInfo.Length < MaxLogFileSizeBytes)
+            return;
 
         try
         {
@@ -409,7 +413,8 @@ public class LoggingService : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
         _disposed = true;
 
         lock (_fileLock)

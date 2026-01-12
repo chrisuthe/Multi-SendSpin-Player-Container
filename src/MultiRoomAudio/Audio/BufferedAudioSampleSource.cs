@@ -418,7 +418,8 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     /// </summary>
     private void CheckForOverruns()
     {
-        if (_logger == null) return;
+        if (_logger == null)
+            return;
 
         var stats = _buffer.GetStats();
         var currentDropped = stats.DroppedSamples;
