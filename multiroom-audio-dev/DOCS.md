@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-5666e03
+## Development Build: sha-84f3685
 
 **Current Dev Build Changes** (recent)
 
+- Fix Onboarding Wizard not launching on Fresh Install
+- Fix players where the hardware has changed/is not available to not lock and be uneditable.
 - Fix Linter Errors
 - Merge pull request #41 from chrisuthe/onboarding
 - Merge origin/dev into onboarding
@@ -13,8 +15,6 @@
 - Upgrade SDK to 5.1.0 and improve error handling
 - Clarify buffer constant naming and fix modal stacking
 - Add automatic player reconnection on server unavailability
-- pull back dev changes (logging, tests)
-- Restructure Menus
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
