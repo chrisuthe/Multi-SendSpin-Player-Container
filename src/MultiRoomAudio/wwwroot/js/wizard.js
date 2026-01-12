@@ -621,7 +621,6 @@ const Wizard = {
                                     <div class="mb-3">
                                         <label class="form-label">Sink Name <span class="text-danger">*</span></label>
                                         <input type="text" class="form-control" id="wizardCombineName"
-                                               pattern="[-a-zA-Z0-9_]+"
                                                placeholder="kitchen_dining">
                                         <small class="text-muted">Letters, numbers, underscores, hyphens only</small>
                                     </div>
@@ -680,7 +679,6 @@ const Wizard = {
                                         <div class="mb-3">
                                             <label class="form-label">Sink Name <span class="text-danger">*</span></label>
                                             <input type="text" class="form-control" id="wizardRemapName"
-                                                   pattern="[-a-zA-Z0-9_]+"
                                                    placeholder="surround_rear">
                                             <small class="text-muted">Letters, numbers, underscores, hyphens only</small>
                                         </div>
