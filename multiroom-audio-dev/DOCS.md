@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-83f150f
+## Development Build: sha-bc93967
 
 **Current Dev Build Changes** (recent)
 
+- load things in the right order.
 - Sinks should error out when they can't be created. Don't try to use MDNS more than once at a time.
 - Fix linter formatting errors
 - Fix Player not started during onboarding
@@ -14,7 +15,6 @@
 - Fix Linter Errors
 - Merge pull request #41 from chrisuthe/onboarding
 - Merge origin/dev into onboarding
-- Remove HTML pattern attributes to fix Chrome v flag regex errors
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
