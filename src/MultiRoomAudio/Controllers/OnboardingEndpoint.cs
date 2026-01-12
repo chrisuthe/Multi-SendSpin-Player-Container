@@ -217,7 +217,8 @@ public static class OnboardingEndpoint
                 try
                 {
                     var playerConfig = config.GetPlayer(playerName);
-                    if (playerConfig == null) continue;
+                    if (playerConfig == null)
+                        continue;
 
                     var createRequest = new PlayerCreateRequest
                     {
