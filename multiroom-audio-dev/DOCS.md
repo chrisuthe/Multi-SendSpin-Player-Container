@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-bc93967
+## Development Build: sha-1c66f39
 
 **Current Dev Build Changes** (recent)
 
+- Fix Auto-Naming Problems
 - load things in the right order.
 - Sinks should error out when they can't be created. Don't try to use MDNS more than once at a time.
 - Fix linter formatting errors
@@ -14,7 +15,6 @@
 - Fix players where the hardware has changed/is not available to not lock and be uneditable.
 - Fix Linter Errors
 - Merge pull request #41 from chrisuthe/onboarding
-- Merge origin/dev into onboarding
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
