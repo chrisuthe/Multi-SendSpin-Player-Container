@@ -78,19 +78,32 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
             .OrderBy(c => c.Type == CustomSinkType.Combine ? 0 : 1)
             .ToList();
 
+        var loadedCount = 0;
+        var failedCount = 0;
+
         foreach (var config in sorted)
         {
             try
             {
                 await LoadSinkAsync(config, cancellationToken);
+                loadedCount++;
             }
             catch (Exception ex)
             {
+                failedCount++;
                 _logger.LogError(ex, "Failed to load sink '{Name}' on startup", config.Name);
             }
         }
 
-        _logger.LogInformation("CustomSinksService started with {Count} sinks", _sinks.Count);
+        if (failedCount > 0)
+        {
+            _logger.LogWarning("CustomSinksService started: {Loaded} sinks loaded, {Failed} failed",
+                loadedCount, failedCount);
+        }
+        else
+        {
+            _logger.LogInformation("CustomSinksService started with {Count} sinks loaded", loadedCount);
+        }
     }
 
     /// <summary>
@@ -488,8 +501,10 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
             }
             else
             {
+                // Module failed to load - set error state and throw so caller knows
                 context.State = CustomSinkState.Error;
-                context.ErrorMessage = "Failed to load module";
+                context.ErrorMessage = "Failed to load module in PulseAudio";
+                throw new InvalidOperationException($"Failed to load {config.Type}-sink '{config.Name}' in PulseAudio");
             }
         }
         catch (Exception ex)

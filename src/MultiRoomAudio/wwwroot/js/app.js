@@ -1046,6 +1046,8 @@ function renderSinks() {
                                         <i class="fas fa-ellipsis-v"></i>
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item" href="#" onclick="editSink('${escapeHtml(name)}'); return false;">
+                                            <i class="fas fa-edit me-2"></i>Edit</a></li>
                                         <li><a class="dropdown-item" href="#" onclick="reloadSink('${escapeHtml(name)}'); return false;">
                                             <i class="fas fa-sync me-2"></i>Reload</a></li>
                                         <li><hr class="dropdown-divider"></li>
@@ -1098,25 +1100,52 @@ function getSinkStateBadgeClass(state) {
     return stateMap[state] || 'secondary';
 }
 
-// Open Combine Sink Modal
-function openCombineSinkModal() {
+// Track if we're editing an existing sink
+let editingCombineSink = null;
+let editingRemapSink = null;
+
+// Cached modal instances to avoid creating duplicates
+let combineSinkModalInstance = null;
+let remapSinkModalInstance = null;
+
+// Open Combine Sink Modal (editData is optional - if provided, we're editing)
+function openCombineSinkModal(editData = null) {
     // Hide parent modal to avoid stacking issues
     if (customSinksModal) {
         customSinksModal.hide();
     }
 
-    // Reset form
-    document.getElementById('combineSinkName').value = '';
-    document.getElementById('combineSinkDesc').value = '';
+    // Track if editing
+    editingCombineSink = editData;
+
+    // Update modal title based on mode
+    const modalTitle = document.querySelector('#combineSinkModal .modal-title');
+    if (modalTitle) {
+        modalTitle.textContent = editData ? 'Edit Combine Sink' : 'Create Combine Sink';
+    }
+
+    // Update button text
+    const createBtn = document.querySelector('#combineSinkModal .btn-primary');
+    if (createBtn) {
+        createBtn.textContent = editData ? 'Save Changes' : 'Create Sink';
+    }
+
+    // Fill form with existing data or reset
+    const nameInput = document.getElementById('combineSinkName');
+    nameInput.value = editData ? editData.name : '';
+    nameInput.disabled = !!editData; // Disable name field when editing, enable for create
+    document.getElementById('combineSinkDesc').value = editData?.description || '';
 
     // Populate device list
     const deviceList = document.getElementById('combineDeviceList');
     if (devices.length === 0) {
         deviceList.innerHTML = '<div class="text-center py-2 text-muted">No devices available</div>';
     } else {
+        const selectedSlaves = editData?.slaves || [];
         deviceList.innerHTML = devices.map(d => `
             <div class="form-check device-checkbox-item">
-                <input class="form-check-input" type="checkbox" value="${escapeHtml(d.id)}" id="combine-${escapeHtml(d.id)}">
+                <input class="form-check-input" type="checkbox" value="${escapeHtml(d.id)}" id="combine-${escapeHtml(d.id)}"
+                    ${selectedSlaves.includes(d.id) ? 'checked' : ''}>
                 <label class="form-check-label" for="combine-${escapeHtml(d.id)}">
                     ${escapeHtml(d.name)}
                     ${d.isDefault ? '<span class="badge bg-primary ms-1">default</span>' : ''}
@@ -1125,44 +1154,86 @@ function openCombineSinkModal() {
         `).join('');
     }
 
-    const combineModal = new bootstrap.Modal(document.getElementById('combineSinkModal'));
-    // Reopen parent modal when this one closes
-    document.getElementById('combineSinkModal').addEventListener('hidden.bs.modal', function handler() {
-        document.getElementById('combineSinkModal').removeEventListener('hidden.bs.modal', handler);
-        if (customSinksModal) {
-            customSinksModal.show();
-        }
-    });
-    combineModal.show();
+    // Get or create modal instance (avoid creating duplicates)
+    const modalEl = document.getElementById('combineSinkModal');
+    if (!combineSinkModalInstance) {
+        combineSinkModalInstance = new bootstrap.Modal(modalEl);
+        // Set up the hidden event handler once
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            editingCombineSink = null; // Clear edit state
+            if (customSinksModal) {
+                customSinksModal.show();
+            }
+        });
+    }
+    combineSinkModalInstance.show();
 }
 
-// Open Remap Sink Modal
-function openRemapSinkModal() {
+// Open Remap Sink Modal (editData is optional - if provided, we're editing)
+function openRemapSinkModal(editData = null) {
     // Hide parent modal to avoid stacking issues
     if (customSinksModal) {
         customSinksModal.hide();
     }
 
-    // Reset form
-    document.getElementById('remapSinkName').value = '';
-    document.getElementById('remapSinkDesc').value = '';
+    // Track if editing
+    editingRemapSink = editData;
+
+    // Update modal title based on mode
+    const modalTitle = document.querySelector('#remapSinkModal .modal-title');
+    if (modalTitle) {
+        modalTitle.textContent = editData ? 'Edit Remap Sink' : 'Create Remap Sink';
+    }
+
+    // Update button text
+    const createBtn = document.querySelector('#remapSinkModal .btn-primary');
+    if (createBtn) {
+        createBtn.textContent = editData ? 'Save Changes' : 'Create Sink';
+    }
+
+    // Fill form with existing data or reset
+    const nameInput = document.getElementById('remapSinkName');
+    nameInput.value = editData ? editData.name : '';
+    nameInput.disabled = !!editData; // Disable name field when editing, enable for create
+    document.getElementById('remapSinkDesc').value = editData?.description || '';
 
     // Populate master device dropdown
     const masterSelect = document.getElementById('remapMasterDevice');
     masterSelect.innerHTML = '<option value="">Select a device...</option>' +
         devices.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)} (${d.maxChannels}ch)</option>`).join('');
 
+    // Set master device if editing
+    if (editData?.masterSink) {
+        masterSelect.value = editData.masterSink;
+    }
+
     updateChannelPicker();
 
-    const remapModal = new bootstrap.Modal(document.getElementById('remapSinkModal'));
-    // Reopen parent modal when this one closes
-    document.getElementById('remapSinkModal').addEventListener('hidden.bs.modal', function handler() {
-        document.getElementById('remapSinkModal').removeEventListener('hidden.bs.modal', handler);
-        if (customSinksModal) {
-            customSinksModal.show();
+    // Set channel mappings if editing
+    if (editData?.channelMappings && editData.channelMappings.length >= 2) {
+        const leftMapping = editData.channelMappings.find(m => m.outputChannel === 'front-left');
+        const rightMapping = editData.channelMappings.find(m => m.outputChannel === 'front-right');
+        if (leftMapping) {
+            document.getElementById('leftChannel').value = leftMapping.masterChannel;
         }
-    });
-    remapModal.show();
+        if (rightMapping) {
+            document.getElementById('rightChannel').value = rightMapping.masterChannel;
+        }
+    }
+
+    // Get or create modal instance (avoid creating duplicates)
+    const modalEl = document.getElementById('remapSinkModal');
+    if (!remapSinkModalInstance) {
+        remapSinkModalInstance = new bootstrap.Modal(modalEl);
+        // Set up the hidden event handler once
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            editingRemapSink = null; // Clear edit state
+            if (customSinksModal) {
+                customSinksModal.show();
+            }
+        });
+    }
+    remapSinkModalInstance.show();
 }
 
 // Update channel picker based on selected master device
@@ -1216,12 +1287,13 @@ function updateChannelPicker() {
     rightChannel.value = 'front-right';
 }
 
-// Create combine sink
+// Create or update combine sink
 async function createCombineSink() {
     const name = document.getElementById('combineSinkName').value.trim();
     const description = document.getElementById('combineSinkDesc').value.trim();
     const checkboxes = document.querySelectorAll('#combineDeviceList input:checked');
     const slaves = Array.from(checkboxes).map(cb => cb.value);
+    const isEditing = !!editingCombineSink;
 
     if (!name) {
         showAlert('Please enter a sink name', 'warning');
@@ -1234,6 +1306,18 @@ async function createCombineSink() {
     }
 
     try {
+        // If editing, delete the old sink first
+        if (isEditing) {
+            const deleteResponse = await fetch(`./api/sinks/${encodeURIComponent(name)}`, {
+                method: 'DELETE'
+            });
+            if (!deleteResponse.ok) {
+                const error = await deleteResponse.json();
+                throw new Error(error.message || 'Failed to delete existing sink');
+            }
+        }
+
+        // Create the sink (new or recreated with updates)
         const response = await fetch('./api/sinks/combine', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1245,22 +1329,25 @@ async function createCombineSink() {
             throw new Error(error.message || 'Failed to create sink');
         }
 
-        bootstrap.Modal.getInstance(document.getElementById('combineSinkModal')).hide();
+        if (combineSinkModalInstance) {
+            combineSinkModalInstance.hide();
+        }
         await refreshSinks();
         await refreshDevices(); // Custom sink should now appear in device list
-        showAlert(`Combine sink "${name}" created successfully`, 'success');
+        showAlert(`Combine sink "${name}" ${isEditing ? 'updated' : 'created'} successfully`, 'success');
     } catch (error) {
         showAlert(error.message, 'danger');
     }
 }
 
-// Create remap sink
+// Create or update remap sink
 async function createRemapSink() {
     const name = document.getElementById('remapSinkName').value.trim();
     const description = document.getElementById('remapSinkDesc').value.trim();
     const masterSink = document.getElementById('remapMasterDevice').value;
     const leftChannel = document.getElementById('leftChannel').value;
     const rightChannel = document.getElementById('rightChannel').value;
+    const isEditing = !!editingRemapSink;
 
     if (!name) {
         showAlert('Please enter a sink name', 'warning');
@@ -1278,6 +1365,18 @@ async function createRemapSink() {
     ];
 
     try {
+        // If editing, delete the old sink first
+        if (isEditing) {
+            const deleteResponse = await fetch(`./api/sinks/${encodeURIComponent(name)}`, {
+                method: 'DELETE'
+            });
+            if (!deleteResponse.ok) {
+                const error = await deleteResponse.json();
+                throw new Error(error.message || 'Failed to delete existing sink');
+            }
+        }
+
+        // Create the sink (new or recreated with updates)
         const response = await fetch('./api/sinks/remap', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1296,10 +1395,12 @@ async function createRemapSink() {
             throw new Error(error.message || 'Failed to create sink');
         }
 
-        bootstrap.Modal.getInstance(document.getElementById('remapSinkModal')).hide();
+        if (remapSinkModalInstance) {
+            remapSinkModalInstance.hide();
+        }
         await refreshSinks();
         await refreshDevices(); // Custom sink should now appear in device list
-        showAlert(`Remap sink "${name}" created successfully`, 'success');
+        showAlert(`Remap sink "${name}" ${isEditing ? 'updated' : 'created'} successfully`, 'success');
     } catch (error) {
         showAlert(error.message, 'danger');
     }
@@ -1343,6 +1444,23 @@ async function reloadSink(name) {
         showAlert(`Sink "${name}" reloaded`, 'success');
     } catch (error) {
         showAlert(error.message, 'danger');
+    }
+}
+
+// Edit sink - opens the appropriate modal pre-filled with existing values
+function editSink(name) {
+    const sink = customSinks[name];
+    if (!sink) {
+        showAlert(`Sink "${name}" not found`, 'warning');
+        return;
+    }
+
+    if (sink.type === 'Combine') {
+        openCombineSinkModal(sink);
+    } else if (sink.type === 'Remap') {
+        openRemapSinkModal(sink);
+    } else {
+        showAlert(`Unknown sink type: ${sink.type}`, 'warning');
     }
 }
 
