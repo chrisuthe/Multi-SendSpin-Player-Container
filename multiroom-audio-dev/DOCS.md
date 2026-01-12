@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-7426e21
+## Development Build: sha-c656518
 
 **Current Dev Build Changes** (recent)
 
+- Fix linter formatting errors
 - Fix Player not started during onboarding
 - Add SOund Generation/Test Tone to sink creation page
 - Fix Onboarding Wizard not launching on Fresh Install
@@ -14,7 +15,6 @@
 - Merge origin/dev into onboarding
 - Remove HTML pattern attributes to fix Chrome v flag regex errors
 - Fix HTML pattern regex for modern browser Unicode v flag
-- Upgrade SDK to 5.1.0 and improve error handling
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
