@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-44d2adb
+## Development Build: sha-b4c0f7e
 
 **Current Dev Build Changes** (recent)
 
+- Sprint 3: Per-player hardware volume and sink card UI improvements
 - Sprint 2: Player rename hint, card profile unmute, consistent device names
 - Fix Sprint 1 issues: wizard filtering, modal stacking, validation
 - Proper Sink Error handling + sink edit screen
@@ -14,7 +15,6 @@
 - Fix linter formatting errors
 - Fix Player not started during onboarding
 - Add SOund Generation/Test Tone to sink creation page
-- Fix Onboarding Wizard not launching on Fresh Install
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
