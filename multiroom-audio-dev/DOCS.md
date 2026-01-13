@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-b7dc4a3
+## Development Build: sha-28196e5
 
 **Current Dev Build Changes** (recent)
 
+- Add controller and metadata roles to player registration
 - Update .gitignore
 - Persist hardware volume limit and use custom sink names for display
 - docs: Update wiki documentation for 4.0.0 release
@@ -14,7 +15,6 @@
 - Proper Sink Error handling + sink edit screen
 - Fix Auto-Naming Problems
 - load things in the right order.
-- Sinks should error out when they can't be created. Don't try to use MDNS more than once at a time.
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
