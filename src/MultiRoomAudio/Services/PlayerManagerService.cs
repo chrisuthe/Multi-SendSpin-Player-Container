@@ -446,6 +446,13 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                     };
 
                     await CreatePlayerAsync(request, cancellationToken);
+
+                    // Apply hardware volume limit if configured
+                    if (playerConfig.HardwareVolumeLimit.HasValue)
+                    {
+                        await SetHardwareVolumeLimitAsync(playerConfig.Name, playerConfig.HardwareVolumeLimit.Value, cancellationToken);
+                    }
+
                     _logger.LogInformation("Player {PlayerName} autostarted successfully", playerConfig.Name);
                 }
                 catch (ArgumentException ex)
@@ -907,7 +914,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // Clamp to valid range
         maxVolume = Math.Clamp(maxVolume, 0, 100);
 
-        // Update config
+        // Update runtime config
         context.Config.HardwareVolumeLimit = maxVolume;
 
         // Apply to device if one is assigned
@@ -934,8 +941,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             }
         }
 
-        // Persist configuration
-        _config.Save();
+        // Persist configuration (update the YAML model)
+        _config.UpdatePlayerField(name, p => p.HardwareVolumeLimit = maxVolume);
 
         // Broadcast status update
         _ = BroadcastStatusAsync();

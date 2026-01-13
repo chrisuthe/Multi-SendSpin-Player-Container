@@ -12,15 +12,18 @@ public class DeviceMatchingService
     private readonly ILogger<DeviceMatchingService> _logger;
     private readonly ConfigurationService _config;
     private readonly BackendFactory _backend;
+    private readonly CustomSinksService _customSinks;
 
     public DeviceMatchingService(
         ILogger<DeviceMatchingService> logger,
         ConfigurationService config,
-        BackendFactory backend)
+        BackendFactory backend,
+        CustomSinksService customSinks)
     {
         _logger = logger;
         _config = config;
         _backend = backend;
+        _customSinks = customSinks;
     }
 
     /// <summary>
@@ -239,20 +242,32 @@ public class DeviceMatchingService
     }
 
     /// <summary>
-    /// Enrich an AudioDevice with its alias and hidden status from configuration.
+    /// Enrich an AudioDevice with its alias, hidden status, and custom sink name.
     /// </summary>
     public AudioDevice EnrichWithConfig(AudioDevice device)
     {
+        var enriched = device;
+
+        // Check if this device is a custom sink and use its name as display name
+        var customSink = _customSinks.GetSink(device.Id);
+        if (customSink != null)
+        {
+            // Use the custom sink's user-provided name instead of PulseAudio's auto-generated description
+            enriched = enriched with { Name = customSink.Name };
+        }
+
+        // Apply device config (alias, hidden status) if present
         var config = _config.GetDeviceConfigBySinkName(device.Id);
         if (config != null)
         {
-            return device with
+            enriched = enriched with
             {
                 Alias = config.Alias,
                 Hidden = config.Hidden
             };
         }
-        return device;
+
+        return enriched;
     }
 
     /// <summary>

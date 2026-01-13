@@ -89,6 +89,7 @@ public class PlayerConfiguration
     public int DelayMs { get; set; } = 0;
     public string? Server { get; set; }
     public int? Volume { get; set; }
+    public int? HardwareVolumeLimit { get; set; }
 
     // PortAudio device index (for Sendspin SDK)
     public int? PortAudioDeviceIndex { get; set; }
