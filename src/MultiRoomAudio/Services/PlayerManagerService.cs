@@ -594,7 +594,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             {
                 ClientId = request.ClientId ?? GenerateClientId(request.Name),
                 ClientName = request.Name,
-                Roles = new List<string> { "player@v1" },
+                Roles = new List<string> { "controller@v1", "player@v1", "metadata@v1" },
                 AudioFormats = GetDefaultFormats(),
                 BufferCapacity = ServerAnnouncedBufferCapacityBytes,
                 InitialVolume = request.Volume  // Set initial volume for hello message
