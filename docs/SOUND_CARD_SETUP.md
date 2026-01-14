@@ -96,7 +96,7 @@ Click on a card to expand its profile list:
 1. PulseAudio switches the card to the new profile
 2. Old sinks (outputs) are removed
 3. New sinks are created for the profile
-4. Any sinks created by the new profile are automatically unmuted
+4. Any sinks created by the new profile are automatically unmuted (unless a boot mute preference is set)
 5. The selection is saved for persistence across restarts
 
 ### Profile Persistence
@@ -105,6 +105,13 @@ Changed profiles are:
 - Saved to `card-profiles.yaml` in the config directory
 - Automatically restored when the container/add-on starts
 - Applied before custom sinks are loaded
+
+### Boot Mute Preference
+
+Each card can also be configured to start **Muted** or **Unmuted** on boot. The preference is:
+- Saved alongside the profile in `card-profiles.yaml`
+- Applied after profiles are restored (so it affects the new sinks)
+- Independent from manual mute/unmute actions in the UI
 
 ---
 
@@ -245,6 +252,8 @@ Goal: Split a 4-channel DAC into two stereo zones
 | GET | `/api/cards` | List all sound cards |
 | GET | `/api/cards/{id}` | Get card details |
 | PUT | `/api/cards/{id}/profile` | Set card profile |
+| PUT | `/api/cards/{id}/boot-mute` | Set boot mute preference |
+| PUT | `/api/cards/{id}/mute` | Mute or unmute a card in real time |
 
 ### Example Request
 

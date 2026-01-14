@@ -108,6 +108,7 @@ public class CardProfileService : IHostedService
                         "Card '{CardName}' already at profile '{Profile}'",
                         cardName, config.ProfileName);
                     restoredCount++;
+                    await ApplyBootMutePreferenceAsync(card.Name, card.Index, defaultUnmute: false);
                     continue;
                 }
 
@@ -140,6 +141,7 @@ public class CardProfileService : IHostedService
                         "Restored card '{CardName}' to profile '{Profile}'",
                         cardName, config.ProfileName);
                     restoredCount++;
+                    await ApplyBootMutePreferenceAsync(card.Name, card.Index, defaultUnmute: false);
                 }
                 else
                 {
@@ -178,7 +180,23 @@ public class CardProfileService : IHostedService
     /// </summary>
     public IEnumerable<PulseAudioCard> GetCards()
     {
-        return PulseAudioCardEnumerator.GetCards();
+        var cards = PulseAudioCardEnumerator.GetCards().ToList();
+        var savedProfiles = LoadConfigurations();
+
+        return cards.Select(card =>
+        {
+            var config = savedProfiles.GetValueOrDefault(card.Name);
+            var isMuted = GetCardMuteState(card);
+            var bootMuted = config?.BootMuted;
+            var bootMatches = bootMuted.HasValue && isMuted.HasValue && bootMuted.Value == isMuted.Value;
+
+            return card with
+            {
+                IsMuted = isMuted,
+                BootMuted = bootMuted,
+                BootMuteMatchesCurrent = bootMatches
+            };
+        });
     }
 
     /// <summary>
@@ -186,7 +204,23 @@ public class CardProfileService : IHostedService
     /// </summary>
     public PulseAudioCard? GetCard(string cardNameOrIndex)
     {
-        return PulseAudioCardEnumerator.GetCard(cardNameOrIndex);
+        var card = PulseAudioCardEnumerator.GetCard(cardNameOrIndex);
+        if (card == null)
+        {
+            return null;
+        }
+
+        var config = LoadConfigurations().GetValueOrDefault(card.Name);
+        var isMuted = GetCardMuteState(card);
+        var bootMuted = config?.BootMuted;
+        var bootMatches = bootMuted.HasValue && isMuted.HasValue && bootMuted.Value == isMuted.Value;
+
+        return card with
+        {
+            IsMuted = isMuted,
+            BootMuted = bootMuted,
+            BootMuteMatchesCurrent = bootMatches
+        };
     }
 
     /// <summary>
@@ -227,23 +261,7 @@ public class CardProfileService : IHostedService
         // Give PulseAudio a moment to create the new sinks
         await Task.Delay(500);
 
-        // Unmute all sinks belonging to this card (new sinks may start muted)
-        var sinks = PulseAudioCardEnumerator.GetSinksByCard(card.Index);
-        foreach (var sinkName in sinks)
-        {
-            try
-            {
-                var unmuted = await _volumeRunner.SetMuteAsync(sinkName, false);
-                if (unmuted)
-                {
-                    _logger.LogDebug("Unmuted sink '{Sink}' after profile change", sinkName);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to unmute sink '{Sink}' after profile change", sinkName);
-            }
-        }
+        await ApplyBootMutePreferenceAsync(card.Name, card.Index, defaultUnmute: true);
 
         return new CardProfileResponse(
             Success: true,
@@ -281,6 +299,74 @@ public class CardProfileService : IHostedService
         var cardName = card?.Name ?? cardNameOrIndex;
 
         return RemoveProfile(cardName);
+    }
+
+    /// <summary>
+    /// Sets the mute state for all sinks belonging to a card (real-time).
+    /// </summary>
+    public async Task<CardMuteResponse> SetCardMuteAsync(string cardNameOrIndex, bool muted)
+    {
+        var card = PulseAudioCardEnumerator.GetCard(cardNameOrIndex);
+        if (card == null)
+        {
+            return new CardMuteResponse(false, $"Card '{cardNameOrIndex}' not found.");
+        }
+
+        var sinks = PulseAudioCardEnumerator.GetSinksByCard(card.Index);
+        if (sinks.Count == 0)
+        {
+            return new CardMuteResponse(false, $"No sinks found for card '{card.Name}'.", card.Name);
+        }
+
+        var failed = new List<string>();
+        foreach (var sinkName in sinks)
+        {
+            try
+            {
+                var success = await _volumeRunner.SetMuteAsync(sinkName, muted);
+                if (!success)
+                {
+                    failed.Add(sinkName);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to set mute for sink '{Sink}'", sinkName);
+                failed.Add(sinkName);
+            }
+        }
+
+        if (failed.Count > 0)
+        {
+            return new CardMuteResponse(false,
+                $"Failed to set mute for {failed.Count} sink(s): {string.Join(", ", failed)}",
+                card.Name,
+                GetCardMuteState(card));
+        }
+
+        return new CardMuteResponse(true,
+            muted ? "Card muted." : "Card unmuted.",
+            card.Name,
+            muted);
+    }
+
+    /// <summary>
+    /// Sets the boot mute preference for a card and persists it.
+    /// </summary>
+    public CardBootMuteResponse SetCardBootMute(string cardNameOrIndex, bool muted)
+    {
+        var card = PulseAudioCardEnumerator.GetCard(cardNameOrIndex);
+        if (card == null)
+        {
+            return new CardBootMuteResponse(false, $"Card '{cardNameOrIndex}' not found.");
+        }
+
+        SaveBootMute(card.Name, card.ActiveProfile, muted);
+
+        return new CardBootMuteResponse(true,
+            muted ? "Card will boot muted." : "Card will boot unmuted.",
+            card.Name,
+            muted);
     }
 
     private Dictionary<string, CardProfileConfiguration> LoadConfigurations()
@@ -345,11 +431,19 @@ public class CardProfileService : IHostedService
             }
 
             // Add or update
-            configs[cardName] = new CardProfileConfiguration
+            if (configs.TryGetValue(cardName, out var existing))
             {
-                CardName = cardName,
-                ProfileName = profileName
-            };
+                existing.CardName = cardName;
+                existing.ProfileName = profileName;
+            }
+            else
+            {
+                configs[cardName] = new CardProfileConfiguration
+                {
+                    CardName = cardName,
+                    ProfileName = profileName
+                };
+            }
 
             // Save
             try
@@ -402,6 +496,138 @@ public class CardProfileService : IHostedService
             {
                 _logger.LogError(ex, "Failed to remove saved profile for card '{CardName}'", cardName);
                 return false;
+            }
+        }
+    }
+
+    private void SaveBootMute(string cardName, string profileName, bool muted)
+    {
+        lock (_configLock)
+        {
+            var configs = new Dictionary<string, CardProfileConfiguration>();
+
+            if (File.Exists(_configPath))
+            {
+                try
+                {
+                    var yaml = File.ReadAllText(_configPath);
+                    if (!string.IsNullOrWhiteSpace(yaml))
+                    {
+                        configs = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(yaml)
+                            ?? new Dictionary<string, CardProfileConfiguration>();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to read existing card profiles config, starting fresh");
+                }
+            }
+
+            if (configs.TryGetValue(cardName, out var existing))
+            {
+                existing.CardName = cardName;
+                existing.BootMuted = muted;
+                existing.ProfileName = profileName;
+            }
+            else
+            {
+                configs[cardName] = new CardProfileConfiguration
+                {
+                    CardName = cardName,
+                    ProfileName = profileName,
+                    BootMuted = muted
+                };
+            }
+
+            try
+            {
+                var dir = Path.GetDirectoryName(_configPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                var yaml = _serializer.Serialize(configs);
+                File.WriteAllText(_configPath, yaml);
+                _logger.LogDebug("Saved boot mute configuration for '{CardName}'", cardName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save boot mute configuration");
+            }
+        }
+    }
+
+    private bool? GetCardMuteState(PulseAudioCard card)
+    {
+        var sinks = PulseAudioCardEnumerator.GetSinksByCard(card.Index);
+        if (sinks.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var output = PulseAudioCardEnumerator.GetSinksMuteStates();
+            if (output.Count == 0)
+            {
+                return null;
+            }
+
+            var sinkMutes = sinks
+                .Select(sink => output.TryGetValue(sink, out var muted) ? muted : (bool?)null)
+                .ToList();
+
+            if (sinkMutes.Any(state => state == true))
+            {
+                return true;
+            }
+
+            if (sinkMutes.All(state => state == false))
+            {
+                return false;
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to determine mute state for card {Card}", card.Name);
+            return null;
+        }
+    }
+
+    private async Task ApplyBootMutePreferenceAsync(string cardName, int cardIndex, bool defaultUnmute)
+    {
+        var savedProfiles = LoadConfigurations();
+        if (!savedProfiles.TryGetValue(cardName, out var config))
+        {
+            if (!defaultUnmute)
+            {
+                return;
+            }
+        }
+
+        if (config?.BootMuted == null && !defaultUnmute)
+        {
+            return;
+        }
+
+        var desiredMuted = config?.BootMuted ?? false;
+        var sinks = PulseAudioCardEnumerator.GetSinksByCard(cardIndex);
+        foreach (var sinkName in sinks)
+        {
+            try
+            {
+                var success = await _volumeRunner.SetMuteAsync(sinkName, desiredMuted);
+                if (success)
+                {
+                    _logger.LogDebug("Set sink '{Sink}' mute to {Muted} after profile restore", sinkName, desiredMuted);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to set mute for sink '{Sink}' after profile restore", sinkName);
             }
         }
     }

@@ -1820,6 +1820,11 @@ function renderSoundCards() {
         const activeProfile = availableProfiles.find(p => p.name === card.activeProfile);
         const activeDesc = activeProfile?.description || card.activeProfile;
 
+        const muteState = getCardMuteDisplayState(card);
+        const bootPreference = typeof card.bootMuted === 'boolean'
+            ? (card.bootMuted ? 'muted' : 'unmuted')
+            : 'unset';
+
         return `
             <div class="card mb-3" id="settings-card-${card.index}">
                 <div class="card-body">
@@ -1834,6 +1839,31 @@ function renderSoundCards() {
                         <span class="badge bg-secondary" id="settings-card-status-${card.index}">
                             ${escapeHtml(activeDesc)}
                         </span>
+                    </div>
+
+                    <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-link p-0 card-mute-toggle"
+                                    title="${escapeHtml(muteState.label)}"
+                                    aria-label="${escapeHtml(muteState.label)}"
+                                    onclick="setSoundCardMute('${escapeHtml(card.name)}', ${!muteState.isMuted}, ${card.index})">
+                                <i class="fas ${muteState.icon} ${muteState.iconClass}"></i>
+                            </button>
+                            <span class="small text-muted" id="settings-card-mute-label-${card.index}">
+                                ${escapeHtml(muteState.label)}
+                            </span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <label class="form-label small text-muted mb-0">Boot Mute</label>
+                            <select class="form-select form-select-sm"
+                                    style="width: auto;"
+                                    id="settings-boot-mute-select-${card.index}"
+                                    onchange="setSoundCardBootMute('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                <option value="unset" ${bootPreference === 'unset' ? 'selected' : ''}>Not set</option>
+                                <option value="muted" ${bootPreference === 'muted' ? 'selected' : ''}>Muted</option>
+                                <option value="unmuted" ${bootPreference === 'unmuted' ? 'selected' : ''}>Unmuted</option>
+                            </select>
+                        </div>
                     </div>
 
                     ${hasMultipleProfiles ? `
@@ -1858,6 +1888,122 @@ function renderSoundCards() {
     }).join('');
 
     container.innerHTML = cardsHtml;
+}
+
+function getCardMuteDisplayState(card) {
+    if (typeof card.isMuted !== 'boolean') {
+        return {
+            isMuted: false,
+            label: 'Mute status unknown',
+            icon: 'fa-question-circle',
+            iconClass: 'text-muted'
+        };
+    }
+
+    const isMuted = card.isMuted;
+    const usesBoot = typeof card.bootMuted === 'boolean' && card.bootMuteMatchesCurrent;
+    const labelSuffix = usesBoot ? ' (boot)' : ' (manual)';
+    return {
+        isMuted,
+        label: `${isMuted ? 'Muted' : 'Unmuted'}${labelSuffix}`,
+        icon: isMuted ? 'fa-volume-mute' : 'fa-volume-up',
+        iconClass: isMuted ? 'text-danger' : 'text-success'
+    };
+}
+
+async function setSoundCardMute(cardName, muted, cardIndex) {
+    const button = document.querySelector(`#settings-card-${cardIndex} .card-mute-toggle`);
+    const label = document.getElementById(`settings-card-mute-label-${cardIndex}`);
+
+    if (button) button.disabled = true;
+
+    try {
+        const response = await fetch(`./api/cards/${encodeURIComponent(cardName)}/mute`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ muted })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to set mute');
+        }
+
+        const card = soundCards.find(c => c.name === cardName);
+        if (card) {
+            card.isMuted = muted;
+            card.bootMuteMatchesCurrent = typeof card.bootMuted === 'boolean' && card.bootMuted === muted;
+        }
+
+        const muteState = getCardMuteDisplayState(card || { isMuted: muted, bootMuted: null, bootMuteMatchesCurrent: false });
+        if (button) {
+            const icon = button.querySelector('i');
+            if (icon) {
+                icon.className = `fas ${muteState.icon} ${muteState.iconClass}`;
+            }
+            button.setAttribute('aria-label', muteState.label);
+            button.setAttribute('title', muteState.label);
+        }
+        if (label) {
+            label.textContent = muteState.label;
+        }
+    } catch (error) {
+        console.error('Failed to set card mute:', error);
+        showAlert(error.message, 'danger');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function setSoundCardBootMute(cardName, value, cardIndex) {
+    const select = document.getElementById(`settings-boot-mute-select-${cardIndex}`);
+    if (!select || value === 'unset') {
+        return;
+    }
+
+    select.disabled = true;
+
+    try {
+        const muted = value === 'muted';
+        const response = await fetch(`./api/cards/${encodeURIComponent(cardName)}/boot-mute`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ muted })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to set boot mute');
+        }
+
+        const card = soundCards.find(c => c.name === cardName);
+        if (card) {
+            card.bootMuted = muted;
+            card.bootMuteMatchesCurrent = typeof card.isMuted === 'boolean' && card.isMuted === muted;
+        }
+
+        const muteState = getCardMuteDisplayState(card || { isMuted: null, bootMuted: muted, bootMuteMatchesCurrent: false });
+        const label = document.getElementById(`settings-card-mute-label-${cardIndex}`);
+        const button = document.querySelector(`#settings-card-${cardIndex} .card-mute-toggle i`);
+        if (label) {
+            label.textContent = muteState.label;
+        }
+        if (button) {
+            button.className = `fas ${muteState.icon} ${muteState.iconClass}`;
+        }
+    } catch (error) {
+        console.error('Failed to set boot mute:', error);
+        showAlert(error.message, 'danger');
+        const card = soundCards.find(c => c.name === cardName);
+        if (card && select) {
+            const fallback = typeof card.bootMuted === 'boolean'
+                ? (card.bootMuted ? 'muted' : 'unmuted')
+                : 'unset';
+            select.value = fallback;
+        }
+    } finally {
+        if (select) select.disabled = false;
+    }
 }
 
 // Set a sound card's profile

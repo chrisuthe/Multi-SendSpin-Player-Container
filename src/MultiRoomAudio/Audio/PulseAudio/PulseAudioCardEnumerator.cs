@@ -317,6 +317,46 @@ public static partial class PulseAudioCardEnumerator
     }
 
     /// <summary>
+    /// Gets mute state for all sinks.
+    /// </summary>
+    public static Dictionary<string, bool> GetSinksMuteStates()
+    {
+        var muteStates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var output = RunPactl("list sinks");
+            if (string.IsNullOrEmpty(output))
+                return muteStates;
+
+            string? currentSinkName = null;
+
+            foreach (var line in output.Split('\n'))
+            {
+                var trimmed = line.Trim();
+
+                if (trimmed.StartsWith("Name:"))
+                {
+                    currentSinkName = trimmed.Substring(5).Trim();
+                }
+                else if (trimmed.StartsWith("Mute:") && currentSinkName != null)
+                {
+                    var muteValue = trimmed.Substring(5).Trim();
+                    var isMuted = muteValue.Equals("yes", StringComparison.OrdinalIgnoreCase);
+                    muteStates[currentSinkName] = isMuted;
+                    currentSinkName = null;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to enumerate sink mute states");
+        }
+
+        return muteStates;
+    }
+
+    /// <summary>
     /// Maximum retries for pactl commands when PulseAudio is temporarily unavailable.
     /// </summary>
     private const int MaxPactlRetries = 3;
