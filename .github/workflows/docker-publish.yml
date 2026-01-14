@@ -44,6 +44,7 @@ jobs:
   login-dockerhub:
     needs: build-test
     runs-on: ubuntu-latest
+    continue-on-error: true
     outputs:
       logged_in: ${{ steps.login_result.outputs.logged_in }}
     steps:
@@ -58,6 +59,10 @@ jobs:
       - name: Record Docker Hub login result
         id: login_result
         run: echo "logged_in=${{ steps.login.outcome == 'success' }}" >> $GITHUB_OUTPUT
+
+      - name: Mark login failure (non-blocking)
+        if: steps.login.outcome != 'success'
+        run: exit 1
 
   login-ghcr:
     needs: build-test
