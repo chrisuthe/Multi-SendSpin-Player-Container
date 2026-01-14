@@ -181,6 +181,9 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.login-dockerhub.outputs.logged_in == 'true'
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -214,6 +217,9 @@ jobs:
     permissions:
       packages: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -248,6 +254,9 @@ jobs:
     permissions:
       packages: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -282,6 +291,9 @@ jobs:
     permissions:
       packages: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
