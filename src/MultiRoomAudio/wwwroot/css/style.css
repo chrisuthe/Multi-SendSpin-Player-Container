@@ -80,6 +80,31 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 0.875rem;
 }
 
+.header-gradient .build-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+
+.header-gradient .build-label {
+    color: var(--header-text-muted);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.header-gradient .build-version {
+    font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.75rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    color: var(--header-text);
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
 .header-gradient .btn-outline-light {
     border-color: rgba(255, 255, 255, 0.25);
     color: var(--header-text);
