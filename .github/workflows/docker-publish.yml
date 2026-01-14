@@ -7,13 +7,15 @@ on:
       - dev
     tags:
       - 'v*'
+    paths-ignore:
+      - '.github/**'
   workflow_dispatch:
 
 env:
-  DOCKERHUB_IMAGE: chrisuthe/squeezelitemultiroom
-  GHCR_IMAGE: ghcr.io/chrisuthe/multiroom-audio
-  HASSIO_IMAGE: ghcr.io/chrisuthe/multiroom-audio-hassio
-  HASSIO_DEV_IMAGE: ghcr.io/chrisuthe/multiroom-audio-hassio-dev
+  DOCKERHUB_IMAGE: ${{ github.repository_owner }}/squeezelitemultiroom
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/multiroom-audio
+  HASSIO_IMAGE: ghcr.io/${{ github.repository_owner }}/multiroom-audio-hassio
+  HASSIO_DEV_IMAGE: ghcr.io/${{ github.repository_owner }}/multiroom-audio-hassio-dev
 
 jobs:
   # ==========================================================================

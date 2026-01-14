@@ -5,6 +5,42 @@ let players = {};
 let devices = [];
 let connection = null;
 
+function formatBuildVersion(apiInfo) {
+    const version = apiInfo?.version;
+    if (typeof version === 'string' && version.trim()) {
+        return version.trim();
+    }
+
+    const build = apiInfo?.build;
+    if (typeof build === 'string' && build.trim()) {
+        const trimmedBuild = build.trim();
+        if (trimmedBuild.startsWith('sha-')) {
+            return trimmedBuild;
+        }
+        return `sha-${trimmedBuild.slice(0, 7)}`;
+    }
+
+    return 'unknown';
+}
+
+async function refreshBuildInfo() {
+    const buildVersion = document.getElementById('build-version');
+    if (!buildVersion) return;
+
+    try {
+        const response = await fetch('./api');
+        if (!response.ok) throw new Error('Failed to fetch build info');
+
+        const data = await response.json();
+        buildVersion.textContent = formatBuildVersion(data);
+        buildVersion.title = data?.build ? `Full build: ${data.build}` : '';
+    } catch (error) {
+        console.error('Error fetching build info:', error);
+        buildVersion.textContent = 'unknown';
+        buildVersion.title = '';
+    }
+}
+
 /**
  * Get display name for a device ID.
  * Returns alias if available, otherwise name, otherwise the ID itself.
@@ -56,6 +92,7 @@ function formatChannelName(channel) {
 document.addEventListener('DOMContentLoaded', async () => {
     // Load initial data
     await Promise.all([
+        refreshBuildInfo(),
         refreshStatus(),
         refreshDevices()
     ]);
