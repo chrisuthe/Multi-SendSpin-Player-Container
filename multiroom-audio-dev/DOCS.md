@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-d75fd61
+## Development Build: sha-63e2ee2
 
 **Current Dev Build Changes** (recent)
 
-- Merge pull request #63 from scyto/dev
-- Update docker-publish.yml to ignore changes in .githhub
-- Update image names to use repository owner
-- Merge pull request #1 from scyto/codex/display-short-sha-version-on-main-page
-- Display build version on main page
-- Fix sink descriptions with spaces and special characters
-- Make hardware volume slider always visible on player cards
-- Add controller and metadata roles to player registration
-- Update .gitignore
-- Persist hardware volume limit and use custom sink names for display
+- Merge pull request #64 from scyto/dev
+- docs: add mute control documentation and changelog entry
+- Merge pull request #10 from scyto/codex/adjust-ui-for-mute-options
+- Update sound card mute section labels
+- Merge pull request #9 from scyto/codex/add-logging-for-mute-actions
+- Add card mute logging
+- Merge pull request #8 from scyto/codex/fix-toggle-behavior-of-mute/unmute-button
+- Fix sound card mute toggle
+- Merge pull request #7 from scyto/codex/add-mute-control-for-cards-at-boot
+- Make card mute control a filled button
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
