@@ -214,6 +214,11 @@ squeezelite-docker/
 | PUT | `/api/players/{name}/offset` | Set delay offset |
 | GET | `/api/devices` | List audio devices |
 | GET | `/api/providers` | List available providers |
+| GET | `/api/cards` | List all sound cards |
+| GET | `/api/cards/{id}` | Get card details |
+| PUT | `/api/cards/{id}/profile` | Set card profile |
+| PUT | `/api/cards/{id}/mute` | Mute/unmute card in real-time |
+| PUT | `/api/cards/{id}/boot-mute` | Set boot mute preference |
 | GET | `/api/health` | Health check |
 
 ---

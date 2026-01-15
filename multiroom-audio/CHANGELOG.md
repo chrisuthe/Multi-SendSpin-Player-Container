@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.0.15] - Sound Card Mute Control
+
+### Added
+- **Real-time mute control**: Mute/unmute sound cards instantly from the web UI
+  - New mute toggle button on each sound card in Settings > Sound Card Setup
+  - Changes take effect immediately without affecting boot preferences
+  - API endpoint: `PUT /api/cards/{id}/mute`
+- **Boot mute preference**: Configure cards to start muted or unmuted on boot
+  - Set via dropdown in Sound Card Setup UI (Not set / Muted / Unmuted)
+  - Persisted to `card-profiles.yaml` alongside profile selection
+  - Applied after profiles are restored, affecting newly created sinks
+  - API endpoint: `PUT /api/cards/{id}/boot-mute`
+- **Mute state indicators**: UI shows current mute state with visual feedback
+  - Icons indicate muted/unmuted status
+  - Labels show "(boot)" or "(manual)" to distinguish preference vs manual change
+
+### Technical
+- Added `GetSinksMuteStates()` to `PulseAudioCardEnumerator` for batch mute queries
+- Extended `PulseAudioCard` model with `IsMuted`, `BootMuted`, and `BootMuteMatchesCurrent`
+- Refactored `GetSinksByCard()` parsing for cleaner block-based approach
+- Boot mute preferences are applied via `ApplyBootMutePreferenceAsync()` after profile restoration
+
+### CI/CD
+- **Decoupled Docker workflow**: Separated build and push into independent jobs
+  - Docker Hub login failures no longer block GHCR/HASSIO pushes
+  - Enables fork contributions without Docker Hub credentials
+  - Build cache is warmed once and reused across all registry pushes
+
+---
+
 ## [2.0.14] - ALSA Latency Detection & Delay Offset
 
 ### Fixed
