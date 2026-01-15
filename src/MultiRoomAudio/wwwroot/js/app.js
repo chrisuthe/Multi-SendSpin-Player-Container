@@ -1841,28 +1841,28 @@ function renderSoundCards() {
                         </span>
                     </div>
 
-                    <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
-                        <div class="d-flex align-items-center gap-2">
-                            <button class="btn card-mute-toggle"
-                                    title="${escapeHtml(muteState.label)}"
-                                    aria-label="${escapeHtml(muteState.label)}"
-                                    onclick="toggleSoundCardMute('${escapeHtml(card.name)}', ${card.index})">
-                                <i class="fas ${muteState.icon} ${muteState.iconClass}"></i>
-                            </button>
-                            <span class="small text-muted" id="settings-card-mute-label-${card.index}">
-                                ${escapeHtml(muteState.label)}
-                            </span>
-                        </div>
-                        <div class="d-flex align-items-center gap-2">
-                            <label class="form-label small text-muted mb-0">Boot Mute</label>
-                            <select class="form-select form-select-sm"
-                                    style="width: auto;"
-                                    id="settings-boot-mute-select-${card.index}"
-                                    onchange="setSoundCardBootMute('${escapeHtml(card.name)}', this.value, ${card.index})">
-                                <option value="unset" ${bootPreference === 'unset' ? 'selected' : ''}>Not set</option>
-                                <option value="muted" ${bootPreference === 'muted' ? 'selected' : ''}>Muted</option>
-                                <option value="unmuted" ${bootPreference === 'unmuted' ? 'selected' : ''}>Unmuted</option>
-                            </select>
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-1">Mute Options</label>
+                        <div class="d-flex flex-wrap align-items-center gap-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <button class="btn card-mute-toggle"
+                                        title="${escapeHtml(muteState.label)}"
+                                        aria-label="${escapeHtml(muteState.label)}"
+                                        onclick="toggleSoundCardMute('${escapeHtml(card.name)}', ${card.index})">
+                                    <i class="fas ${muteState.icon} ${muteState.iconClass}"></i>
+                                </button>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <label class="form-label small text-muted mb-0">Boot-time</label>
+                                <select class="form-select form-select-sm"
+                                        style="width: auto;"
+                                        id="settings-boot-mute-select-${card.index}"
+                                        onchange="setSoundCardBootMute('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                    <option value="unset" ${bootPreference === 'unset' ? 'selected' : ''}>Not set</option>
+                                    <option value="muted" ${bootPreference === 'muted' ? 'selected' : ''}>Muted</option>
+                                    <option value="unmuted" ${bootPreference === 'unmuted' ? 'selected' : ''}>Unmuted</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
 
@@ -1913,7 +1913,6 @@ function getCardMuteDisplayState(card) {
 
 async function setSoundCardMute(cardName, muted, cardIndex) {
     const button = document.querySelector(`#settings-card-${cardIndex} .card-mute-toggle`);
-    const label = document.getElementById(`settings-card-mute-label-${cardIndex}`);
 
     if (button) button.disabled = true;
 
@@ -1943,9 +1942,6 @@ async function setSoundCardMute(cardName, muted, cardIndex) {
             }
             button.setAttribute('aria-label', muteState.label);
             button.setAttribute('title', muteState.label);
-        }
-        if (label) {
-            label.textContent = muteState.label;
         }
     } catch (error) {
         console.error('Failed to set card mute:', error);
@@ -1989,11 +1985,7 @@ async function setSoundCardBootMute(cardName, value, cardIndex) {
         }
 
         const muteState = getCardMuteDisplayState(card || { isMuted: null, bootMuted: muted, bootMuteMatchesCurrent: false });
-        const label = document.getElementById(`settings-card-mute-label-${cardIndex}`);
         const button = document.querySelector(`#settings-card-${cardIndex} .card-mute-toggle i`);
-        if (label) {
-            label.textContent = muteState.label;
-        }
         if (button) {
             button.className = `fas ${muteState.icon} ${muteState.iconClass}`;
         }
