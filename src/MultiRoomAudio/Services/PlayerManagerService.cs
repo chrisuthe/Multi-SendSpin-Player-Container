@@ -1552,7 +1552,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             {
                 // Check if this is a spurious reset during track transition
                 // MA sometimes resets volume when starting new tracks - ignore these
-                var isStable = context.State == PlayerState.Playing || context.State == PlayerState.Idle;
+                // Only persist when player is in a stable state (Playing or Connected, not transitioning)
+                var isStable = context.State == PlayerState.Playing || context.State == PlayerState.Connected;
 
                 _logger.LogInformation("VOLUME [ServerSync] Player '{Name}': {OldVol}% -> {NewVol}% (state={State}, persist={Persist})",
                     name, context.Config.Volume, serverVolume, context.State, isStable);
