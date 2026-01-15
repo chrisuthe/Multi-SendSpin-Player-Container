@@ -1846,7 +1846,7 @@ function renderSoundCards() {
                             <button class="btn card-mute-toggle"
                                     title="${escapeHtml(muteState.label)}"
                                     aria-label="${escapeHtml(muteState.label)}"
-                                    onclick="setSoundCardMute('${escapeHtml(card.name)}', ${!muteState.isMuted}, ${card.index})">
+                                    onclick="toggleSoundCardMute('${escapeHtml(card.name)}', ${card.index})">
                                 <i class="fas ${muteState.icon} ${muteState.iconClass}"></i>
                             </button>
                             <span class="small text-muted" id="settings-card-mute-label-${card.index}">
@@ -1953,6 +1953,12 @@ async function setSoundCardMute(cardName, muted, cardIndex) {
     } finally {
         if (button) button.disabled = false;
     }
+}
+
+function toggleSoundCardMute(cardName, cardIndex) {
+    const card = soundCards.find(c => c.name === cardName);
+    const isMuted = typeof card?.isMuted === 'boolean' ? card.isMuted : false;
+    return setSoundCardMute(cardName, !isMuted, cardIndex);
 }
 
 async function setSoundCardBootMute(cardName, value, cardIndex) {
