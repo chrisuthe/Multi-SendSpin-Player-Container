@@ -5,6 +5,8 @@ let players = {};
 let devices = [];
 let connection = null;
 let currentBuildVersion = null; // Stored build version for comparison
+let isUserInteracting = false; // Track if user is dragging a slider
+let pendingUpdate = null; // Store pending updates during interaction
 
 function formatBuildVersion(apiInfo) {
     const version = apiInfo?.version;
@@ -186,7 +188,14 @@ function setupSignalR() {
             (data.players || []).forEach(p => {
                 players[p.name] = p;
             });
-            renderPlayers();
+
+            // If user is interacting with a slider, defer the update
+            if (isUserInteracting) {
+                console.log('Deferring update - user is interacting');
+                pendingUpdate = { players: { ...players } };
+            } else {
+                renderPlayers();
+            }
         }
     });
 
@@ -787,7 +796,7 @@ function renderPlayers() {
                                    data-bs-title="Current playback volume (syncs with Music Assistant)"></i>
                             </div>
                             <div class="d-flex align-items-center">
-                                <input type="range" class="form-range form-range-sm flex-grow-1" min="0" max="100" value="${player.volume}"
+                                <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100" value="${player.volume}"
                                     onchange="setVolume('${escapeHtml(name)}', this.value)"
                                     oninput="this.nextElementSibling.textContent = this.value + '%'">
                                 <span class="volume-display ms-2 small">${player.volume}%</span>
@@ -804,7 +813,7 @@ function renderPlayers() {
                                    data-bs-title="Initial volume sent when player connects (on container or player restart)"></i>
                             </div>
                             <div class="d-flex align-items-center">
-                                <input type="range" class="form-range form-range-sm flex-grow-1" min="0" max="100"
+                                <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100"
                                        value="${player.startupVolume || player.volume}"
                                        onchange="setStartupVolume('${escapeHtml(name)}', this.value)"
                                        oninput="this.nextElementSibling.textContent = this.value + '%'">
@@ -828,10 +837,59 @@ function renderPlayers() {
 
     // Initialize Bootstrap tooltips for the rendered elements
     initializeTooltips();
+
+    // Attach interaction tracking to all volume sliders
+    attachSliderInteractionHandlers();
+}
+
+/**
+ * Attaches mousedown/mouseup/touchstart/touchend handlers to volume sliders
+ * to track user interaction and prevent DOM updates during drag.
+ */
+function attachSliderInteractionHandlers() {
+    const sliders = document.querySelectorAll('.volume-slider');
+
+    sliders.forEach(slider => {
+        // Mouse events
+        slider.addEventListener('mousedown', () => {
+            isUserInteracting = true;
+            console.log('Slider interaction started (mouse)');
+        });
+
+        // Touch events
+        slider.addEventListener('touchstart', () => {
+            isUserInteracting = true;
+            console.log('Slider interaction started (touch)');
+        });
+    });
+
+    // Global handlers for mouse/touch release
+    // These fire when user releases anywhere, not just on the slider
+    const handleInteractionEnd = () => {
+        if (isUserInteracting) {
+            isUserInteracting = false;
+            console.log('Slider interaction ended');
+
+            // Apply any pending updates
+            if (pendingUpdate) {
+                console.log('Applying pending update');
+                players = pendingUpdate.players;
+                pendingUpdate = null;
+                renderPlayers();
+            }
+        }
+    };
+
+    // Use 'once: false' and remove old listeners to avoid duplicates
+    document.removeEventListener('mouseup', handleInteractionEnd);
+    document.removeEventListener('touchend', handleInteractionEnd);
+    document.addEventListener('mouseup', handleInteractionEnd);
+    document.addEventListener('touchend', handleInteractionEnd);
 }
 
 /**
  * Disposes all existing Bootstrap tooltips to prevent memory leaks and conflicts.
+ * Also removes any orphaned tooltip popover elements from the DOM.
  */
 function disposeTooltips() {
     const tooltipElements = document.querySelectorAll('[data-bs-toggle="tooltip"]');
@@ -840,6 +898,13 @@ function disposeTooltips() {
         if (tooltip) {
             tooltip.dispose();
         }
+    });
+
+    // Aggressively remove any orphaned tooltip popovers from the DOM
+    // These can be left behind when tooltips are disposed while visible
+    const orphanedTooltips = document.querySelectorAll('.tooltip');
+    orphanedTooltips.forEach(tooltipElement => {
+        tooltipElement.remove();
     });
 }
 
