@@ -31,15 +31,34 @@ public enum RelayState
 }
 
 /// <summary>
-/// Configuration for a single trigger channel (1-8).
+/// Valid channel count options for relay boards.
+/// </summary>
+public static class ValidChannelCounts
+{
+    public static readonly int[] Values = { 1, 2, 4, 8, 16 };
+
+    public static bool IsValid(int count) => Values.Contains(count);
+
+    public static int Clamp(int count)
+    {
+        if (count <= 1) return 1;
+        if (count <= 2) return 2;
+        if (count <= 4) return 4;
+        if (count <= 8) return 8;
+        return 16;
+    }
+}
+
+/// <summary>
+/// Configuration for a single trigger channel (1-16).
 /// Maps a relay to a custom sink with configurable off-delay.
 /// </summary>
 public class TriggerConfiguration
 {
     /// <summary>
-    /// Channel number (1-8).
+    /// Channel number (1-16).
     /// </summary>
-    [Range(1, 8)]
+    [Range(1, 16)]
     public int Channel { get; set; }
 
     /// <summary>
@@ -73,6 +92,12 @@ public class TriggerFeatureConfiguration
     public bool Enabled { get; set; }
 
     /// <summary>
+    /// Number of relay channels on the board (1, 2, 4, 8, or 16).
+    /// Default is 8 for standard Denkovi boards.
+    /// </summary>
+    public int ChannelCount { get; set; } = 8;
+
+    /// <summary>
     /// Serial port device path for the relay board.
     /// On Linux, typically /dev/ttyUSB0 or similar for FTDI devices.
     /// </summary>
@@ -85,7 +110,7 @@ public class TriggerFeatureConfiguration
     public string? FtdiSerialNumber { get; set; }
 
     /// <summary>
-    /// Configuration for each trigger channel (1-8).
+    /// Configuration for each trigger channel.
     /// </summary>
     public List<TriggerConfiguration> Triggers { get; set; } = new();
 }
@@ -111,11 +136,12 @@ public record TriggerResponse(
 public record TriggerFeatureResponse(
     bool Enabled,
     TriggerFeatureState State,
+    int ChannelCount,
     string? DevicePath,
     string? FtdiSerialNumber,
     string? ErrorMessage,
     List<TriggerResponse> Triggers,
-    byte CurrentRelayStates
+    int CurrentRelayStates
 );
 
 /// <summary>
@@ -133,6 +159,12 @@ public class TriggerFeatureEnableRequest
     /// If not specified, uses the first available FTDI device.
     /// </summary>
     public string? FtdiSerialNumber { get; set; }
+
+    /// <summary>
+    /// Optional channel count (1, 2, 4, 8, or 16).
+    /// If not specified, keeps the existing value.
+    /// </summary>
+    public int? ChannelCount { get; set; }
 }
 
 /// <summary>
@@ -141,10 +173,10 @@ public class TriggerFeatureEnableRequest
 public class TriggerConfigureRequest
 {
     /// <summary>
-    /// Channel number (1-8).
+    /// Channel number (1-16).
     /// </summary>
     [Required]
-    [Range(1, 8, ErrorMessage = "Channel must be between 1 and 8.")]
+    [Range(1, 16, ErrorMessage = "Channel must be between 1 and 16.")]
     public int Channel { get; set; }
 
     /// <summary>
@@ -172,10 +204,10 @@ public class TriggerConfigureRequest
 public class RelayManualControlRequest
 {
     /// <summary>
-    /// Channel number (1-8).
+    /// Channel number (1-16).
     /// </summary>
     [Required]
-    [Range(1, 8, ErrorMessage = "Channel must be between 1 and 8.")]
+    [Range(1, 16, ErrorMessage = "Channel must be between 1 and 16.")]
     public int Channel { get; set; }
 
     /// <summary>
@@ -183,6 +215,18 @@ public class RelayManualControlRequest
     /// </summary>
     [Required]
     public bool On { get; set; }
+}
+
+/// <summary>
+/// Request to update the channel count.
+/// </summary>
+public class ChannelCountRequest
+{
+    /// <summary>
+    /// Number of relay channels (1, 2, 4, 8, or 16).
+    /// </summary>
+    [Required]
+    public int ChannelCount { get; set; }
 }
 
 /// <summary>

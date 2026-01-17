@@ -32,9 +32,10 @@ public static class TriggersEndpoint
             ILoggerFactory lf) =>
         {
             var logger = lf.CreateLogger("TriggersEndpoint");
-            logger.LogDebug("API: PUT /api/triggers/enabled - {Enabled}", request.Enabled);
+            logger.LogDebug("API: PUT /api/triggers/enabled - {Enabled}, ChannelCount={ChannelCount}",
+                request.Enabled, request.ChannelCount);
 
-            var success = service.SetEnabled(request.Enabled, request.FtdiSerialNumber);
+            var success = service.SetEnabled(request.Enabled, request.FtdiSerialNumber, request.ChannelCount);
             var status = service.GetStatus();
 
             if (success)
@@ -51,6 +52,37 @@ public static class TriggersEndpoint
         })
         .WithName("SetTriggerEnabled")
         .WithDescription("Enable or disable the 12V trigger feature");
+
+        // PUT /api/triggers/channels - Update channel count
+        group.MapPut("/channels", (
+            ChannelCountRequest request,
+            TriggerService service,
+            ILoggerFactory lf) =>
+        {
+            var logger = lf.CreateLogger("TriggersEndpoint");
+            logger.LogDebug("API: PUT /api/triggers/channels - {ChannelCount}", request.ChannelCount);
+
+            if (!ValidChannelCounts.IsValid(request.ChannelCount))
+            {
+                return Results.BadRequest(new ErrorResponse(false,
+                    $"Channel count must be one of: {string.Join(", ", ValidChannelCounts.Values)}"));
+            }
+
+            var success = service.SetChannelCount(request.ChannelCount);
+            var status = service.GetStatus();
+
+            if (success)
+            {
+                logger.LogInformation("Channel count updated to {Count}", request.ChannelCount);
+                return Results.Ok(status);
+            }
+            else
+            {
+                return Results.BadRequest(new ErrorResponse(false, "Failed to update channel count"));
+            }
+        })
+        .WithName("SetChannelCount")
+        .WithDescription("Update the number of relay channels (1, 2, 4, 8, or 16)");
 
         // GET /api/triggers/devices - List available FTDI devices
         group.MapGet("/devices", (TriggerService service, ILoggerFactory lf) =>

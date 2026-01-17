@@ -74,10 +74,19 @@ public class TriggerService : IHostedService, IAsyncDisposable
             .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull | DefaultValuesHandling.OmitDefaults)
             .Build();
 
-        // Initialize channel states for all 8 channels
-        for (int i = 1; i <= 8; i++)
+        // Initialize channel states (will be adjusted when config is loaded)
+        InitializeChannelStates(8);
+    }
+
+    private void InitializeChannelStates(int channelCount)
+    {
+        // Ensure we have states for all channels up to the max
+        for (int i = 1; i <= 16; i++)
         {
-            _channelStates[i] = new TriggerChannelState();
+            if (!_channelStates.ContainsKey(i))
+            {
+                _channelStates[i] = new TriggerChannelState();
+            }
         }
     }
 
@@ -135,8 +144,9 @@ public class TriggerService : IHostedService, IAsyncDisposable
     public TriggerFeatureResponse GetStatus()
     {
         var triggers = new List<TriggerResponse>();
+        var channelCount = _config.ChannelCount;
 
-        for (int channel = 1; channel <= 8; channel++)
+        for (int channel = 1; channel <= channelCount; channel++)
         {
             var config = _config.Triggers.FirstOrDefault(t => t.Channel == channel)
                 ?? new TriggerConfiguration { Channel = channel };
@@ -171,6 +181,7 @@ public class TriggerService : IHostedService, IAsyncDisposable
         return new TriggerFeatureResponse(
             Enabled: _config.Enabled,
             State: _state,
+            ChannelCount: channelCount,
             DevicePath: _config.DevicePath,
             FtdiSerialNumber: _config.FtdiSerialNumber,
             ErrorMessage: _errorMessage,
@@ -182,12 +193,39 @@ public class TriggerService : IHostedService, IAsyncDisposable
     /// <summary>
     /// Enable or disable the trigger feature.
     /// </summary>
-    public bool SetEnabled(bool enabled, string? ftdiSerialNumber = null)
+    public bool SetEnabled(bool enabled, string? ftdiSerialNumber = null, int? channelCount = null)
     {
         lock (_stateLock)
         {
             _config.Enabled = enabled;
             _config.FtdiSerialNumber = ftdiSerialNumber;
+
+            // Update channel count if provided
+            if (channelCount.HasValue && ValidChannelCounts.IsValid(channelCount.Value))
+            {
+                var oldCount = _config.ChannelCount;
+                _config.ChannelCount = channelCount.Value;
+
+                // If reducing channels, turn off and unassign triggers beyond new count
+                if (channelCount.Value < oldCount)
+                {
+                    for (int ch = channelCount.Value + 1; ch <= oldCount; ch++)
+                    {
+                        CancelOffTimer(ch);
+                        _relayBoard?.SetRelay(ch, false);
+                        var state = _channelStates.GetValueOrDefault(ch);
+                        if (state != null)
+                        {
+                            state.IsActive = false;
+                            state.ActivePlayerCount = 0;
+                        }
+                        // Remove trigger config for channels beyond the new count
+                        _config.Triggers.RemoveAll(t => t.Channel > channelCount.Value);
+                    }
+                }
+
+                _logger.LogInformation("Channel count changed from {Old} to {New}", oldCount, channelCount.Value);
+            }
 
             if (enabled)
             {
@@ -211,12 +249,55 @@ public class TriggerService : IHostedService, IAsyncDisposable
     }
 
     /// <summary>
+    /// Update just the channel count without changing enabled state.
+    /// </summary>
+    public bool SetChannelCount(int channelCount)
+    {
+        if (!ValidChannelCounts.IsValid(channelCount))
+        {
+            _logger.LogWarning("Invalid channel count: {Count}", channelCount);
+            return false;
+        }
+
+        lock (_stateLock)
+        {
+            var oldCount = _config.ChannelCount;
+            if (oldCount == channelCount)
+                return true;
+
+            _config.ChannelCount = channelCount;
+
+            // If reducing channels, turn off and unassign triggers beyond new count
+            if (channelCount < oldCount)
+            {
+                for (int ch = channelCount + 1; ch <= oldCount; ch++)
+                {
+                    CancelOffTimer(ch);
+                    _relayBoard?.SetRelay(ch, false);
+                    var state = _channelStates.GetValueOrDefault(ch);
+                    if (state != null)
+                    {
+                        state.IsActive = false;
+                        state.ActivePlayerCount = 0;
+                    }
+                }
+                // Remove trigger configs beyond the new count
+                _config.Triggers.RemoveAll(t => t.Channel > channelCount);
+            }
+
+            SaveConfiguration();
+            _logger.LogInformation("Channel count changed from {Old} to {New}", oldCount, channelCount);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Configure a trigger channel.
     /// </summary>
     public bool ConfigureTrigger(int channel, string? customSinkName, int offDelaySeconds, string? zoneName)
     {
-        if (channel < 1 || channel > 8)
-            throw new ArgumentOutOfRangeException(nameof(channel));
+        if (channel < 1 || channel > _config.ChannelCount)
+            throw new ArgumentOutOfRangeException(nameof(channel), $"Channel must be between 1 and {_config.ChannelCount}");
 
         lock (_configLock)
         {
@@ -270,8 +351,8 @@ public class TriggerService : IHostedService, IAsyncDisposable
     /// </summary>
     public bool ManualControl(int channel, bool on)
     {
-        if (channel < 1 || channel > 8)
-            throw new ArgumentOutOfRangeException(nameof(channel));
+        if (channel < 1 || channel > _config.ChannelCount)
+            throw new ArgumentOutOfRangeException(nameof(channel), $"Channel must be between 1 and {_config.ChannelCount}");
 
         if (_relayBoard == null || !_relayBoard.IsConnected)
         {

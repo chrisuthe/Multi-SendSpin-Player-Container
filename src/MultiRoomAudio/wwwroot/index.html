@@ -516,7 +516,24 @@
                                 </div>
                                 <span id="triggersStatus" class="badge bg-secondary">Disabled</span>
                             </div>
-                            <div id="triggersDeviceInfo" class="small text-muted d-none">
+                            <div class="row align-items-center mt-2">
+                                <div class="col-auto">
+                                    <label class="form-label mb-0 small text-muted" for="triggersChannelCount">
+                                        Relay Channels:
+                                    </label>
+                                </div>
+                                <div class="col-auto">
+                                    <select class="form-select form-select-sm" id="triggersChannelCount"
+                                            onchange="updateChannelCount(this.value)" style="width: auto;">
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="4">4</option>
+                                        <option value="8" selected>8</option>
+                                        <option value="16">16</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="triggersDeviceInfo" class="small text-muted mt-2 d-none">
                                 <i class="fas fa-usb me-1"></i>
                                 <span id="triggersDeviceText">Not connected</span>
                                 <button class="btn btn-link btn-sm p-0 ms-2" onclick="reconnectTriggerBoard()">

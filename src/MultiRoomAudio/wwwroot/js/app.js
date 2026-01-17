@@ -2596,6 +2596,7 @@ document.addEventListener('DOMContentLoaded', () => {
 let triggersModal = null;
 let triggersData = null;
 let customSinksList = [];
+let ftdiDevicesData = null;
 
 // Open the triggers configuration modal
 async function openTriggersModal() {
@@ -2620,10 +2621,11 @@ async function loadTriggers() {
     `;
 
     try {
-        // Load triggers and custom sinks in parallel
-        const [triggersResponse, sinksResponse] = await Promise.all([
+        // Load triggers, custom sinks, and devices in parallel
+        const [triggersResponse, sinksResponse, devicesResponse] = await Promise.all([
             fetch('./api/triggers'),
-            fetch('./api/sinks')
+            fetch('./api/sinks'),
+            fetch('./api/triggers/devices')
         ]);
 
         if (!triggersResponse.ok) {
@@ -2636,6 +2638,13 @@ async function loadTriggers() {
         triggersData = await triggersResponse.json();
         const sinksData = await sinksResponse.json();
         customSinksList = sinksData.sinks || [];
+
+        // Get device info (may fail if library not available)
+        if (devicesResponse.ok) {
+            ftdiDevicesData = await devicesResponse.json();
+        } else {
+            ftdiDevicesData = { devices: [], count: 0, libraryAvailable: false };
+        }
 
         renderTriggers();
     } catch (error) {
@@ -2664,18 +2673,42 @@ function renderTriggers() {
         return;
     }
 
+    // Check if FTDI hardware is available
+    const noHardware = ftdiDevicesData && !ftdiDevicesData.libraryAvailable && ftdiDevicesData.count === 0;
+    const noDevicesDetected = ftdiDevicesData && ftdiDevicesData.libraryAvailable && ftdiDevicesData.count === 0;
+
     // Update header state
     enabledCheckbox.checked = triggersData.enabled;
+    enabledCheckbox.disabled = noHardware;
+
+    // Update channel count selector
+    const channelCountSelect = document.getElementById('triggersChannelCount');
+    if (channelCountSelect) {
+        channelCountSelect.value = triggersData.channelCount || 8;
+        channelCountSelect.disabled = noHardware;
+    }
 
     // Update status badge
-    const stateColors = {
-        'Disabled': 'bg-secondary',
-        'Disconnected': 'bg-warning',
-        'Connected': 'bg-success',
-        'Error': 'bg-danger'
-    };
-    statusBadge.className = `badge ${stateColors[triggersData.state] || 'bg-secondary'}`;
-    statusBadge.textContent = triggersData.state;
+    let statusText = triggersData.state;
+    let statusClass = 'bg-secondary';
+
+    if (noHardware) {
+        statusText = 'No Hardware';
+        statusClass = 'bg-secondary';
+    } else if (noDevicesDetected && !triggersData.enabled) {
+        statusText = 'No Device';
+        statusClass = 'bg-warning';
+    } else {
+        const stateColors = {
+            'Disabled': 'bg-secondary',
+            'Disconnected': 'bg-warning',
+            'Connected': 'bg-success',
+            'Error': 'bg-danger'
+        };
+        statusClass = stateColors[triggersData.state] || 'bg-secondary';
+    }
+    statusBadge.className = `badge ${statusClass}`;
+    statusBadge.textContent = statusText;
 
     // Show/hide device info
     if (triggersData.enabled) {
@@ -2691,8 +2724,14 @@ function renderTriggers() {
         deviceInfo.classList.add('d-none');
     }
 
-    // Show/hide error
-    if (triggersData.errorMessage) {
+    // Show/hide error - also show hardware warnings
+    if (noHardware) {
+        errorDiv.classList.remove('d-none');
+        errorText.textContent = 'No FT245RL detected. Install libftdi1 and connect a Denkovi USB relay board.';
+    } else if (noDevicesDetected && !triggersData.enabled) {
+        errorDiv.classList.remove('d-none');
+        errorText.textContent = 'No FT245RL device detected. Connect a Denkovi USB relay board to enable triggers.';
+    } else if (triggersData.errorMessage) {
         errorDiv.classList.remove('d-none');
         errorText.textContent = triggersData.errorMessage;
     } else {
@@ -2703,6 +2742,10 @@ function renderTriggers() {
     const sinkOptions = customSinksList.map(sink =>
         `<option value="${escapeHtml(sink.name)}">${escapeHtml(sink.description || sink.name)}</option>`
     ).join('');
+
+    // Determine if controls should be disabled
+    const controlsDisabled = noHardware || !triggersData.enabled;
+    const testButtonsDisabled = noHardware || !triggersData.enabled || triggersData.state !== 'Connected';
 
     // Render trigger channels
     const triggersHtml = triggersData.triggers.map(trigger => {
@@ -2717,9 +2760,10 @@ function renderTriggers() {
             : '';
 
         const selectedSink = trigger.customSinkName || '';
+        const cardClass = noHardware ? 'card mb-2 opacity-50' : 'card mb-2';
 
         return `
-            <div class="card mb-2" id="trigger-card-${trigger.channel}">
+            <div class="${cardClass}" id="trigger-card-${trigger.channel}">
                 <div class="card-body py-2">
                     <div class="row align-items-center">
                         <div class="col-auto">
@@ -2733,7 +2777,7 @@ function renderTriggers() {
                                     <select class="form-select form-select-sm"
                                             id="trigger-sink-${trigger.channel}"
                                             onchange="updateTriggerSink(${trigger.channel}, this.value)"
-                                            ${!triggersData.enabled ? 'disabled' : ''}>
+                                            ${controlsDisabled ? 'disabled' : ''}>
                                         <option value="">Not assigned</option>
                                         ${sinkOptions}
                                     </select>
@@ -2746,7 +2790,7 @@ function renderTriggers() {
                                                value="${trigger.offDelaySeconds}"
                                                min="0" max="3600" step="1"
                                                onchange="updateTriggerDelay(${trigger.channel}, this.value)"
-                                               ${!triggersData.enabled ? 'disabled' : ''}>
+                                               ${controlsDisabled ? 'disabled' : ''}>
                                         <span class="input-group-text">s</span>
                                     </div>
                                 </div>
@@ -2754,13 +2798,13 @@ function renderTriggers() {
                                     <button class="btn btn-outline-secondary btn-sm"
                                             onclick="testTrigger(${trigger.channel}, true)"
                                             title="Test relay ON"
-                                            ${!triggersData.enabled || triggersData.state !== 'Connected' ? 'disabled' : ''}>
+                                            ${testButtonsDisabled ? 'disabled' : ''}>
                                         <i class="fas fa-power-off"></i> On
                                     </button>
                                     <button class="btn btn-outline-secondary btn-sm"
                                             onclick="testTrigger(${trigger.channel}, false)"
                                             title="Test relay OFF"
-                                            ${!triggersData.enabled || triggersData.state !== 'Connected' ? 'disabled' : ''}>
+                                            ${testButtonsDisabled ? 'disabled' : ''}>
                                         <i class="fas fa-power-off"></i> Off
                                     </button>
                                 </div>
@@ -2805,6 +2849,39 @@ async function toggleTriggersEnabled(enabled) {
         showAlert(`Failed to ${enabled ? 'enable' : 'disable'} triggers: ${error.message}`, 'danger');
         // Revert checkbox
         document.getElementById('triggersEnabled').checked = !enabled;
+    }
+}
+
+// Update channel count
+async function updateChannelCount(count) {
+    const channelCount = parseInt(count, 10);
+    const validCounts = [1, 2, 4, 8, 16];
+
+    if (!validCounts.includes(channelCount)) {
+        showAlert('Invalid channel count', 'danger');
+        return;
+    }
+
+    try {
+        const response = await fetch('./api/triggers/channels', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channelCount })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to update channel count');
+        }
+
+        triggersData = await response.json();
+        renderTriggers();
+        showAlert(`Relay channels set to ${channelCount}`, 'success', 2000);
+    } catch (error) {
+        console.error('Error updating channel count:', error);
+        showAlert(`Failed to update channel count: ${error.message}`, 'danger');
+        // Revert selector
+        document.getElementById('triggersChannelCount').value = triggersData.channelCount || 8;
     }
 }
 

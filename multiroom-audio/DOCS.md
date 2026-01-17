@@ -112,11 +112,48 @@ If a player does not appear:
 All player communication uses mDNS for discovery and the Sendspin protocol for
 streaming. No additional port configuration is required.
 
+## 12V Trigger Control (Optional)
+
+This add-on supports 12V trigger control via Denkovi USB 8-channel relay boards
+(FT245RL chip). This allows automatic power-on/off of amplifiers when playback
+starts and stops.
+
+### Supported Hardware
+
+- Denkovi USB 8 Relay Board (DAE0006K or similar with FT245RL chip)
+- Any FTDI FT245RL-based relay board
+
+### Setup (Docker)
+
+For standalone Docker deployments, enable USB passthrough:
+
+```yaml
+services:
+  multiroom-audio:
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    cap_add:
+      - SYS_RAWIO
+```
+
+### Setup (Home Assistant OS)
+
+FTDI relay boards should work automatically when connected via USB. If not
+detected, ensure the USB device is visible in Home Assistant's hardware settings.
+
+### Trigger Configuration
+
+1. Open Settings > 12V Triggers in the web interface
+2. Enable the trigger feature
+3. Assign relay channels to custom sinks
+4. Configure off-delay (time before relay turns off after playback stops)
+
 ## Known Limitations
 
 1. **Sendspin only**: This add-on only supports Music Assistant via Sendspin protocol
 2. **PulseAudio on HAOS**: Device names differ from standalone Docker deployments
 3. **Permissions**: Requires `full_access` for proper audio device access
+4. **FTDI relay boards**: Requires USB passthrough and SYS_RAWIO capability in Docker
 
 ## Support
 

@@ -13,6 +13,10 @@ services:
     # devices:
       # Pass through all audio devices (only if /dev/snd exists)
       # - /dev/snd:/dev/snd
+      #
+      # FTDI USB Relay Board (optional - for 12V trigger control)
+      # Uncomment the following to enable FTDI relay board support:
+      # - /dev/bus/usb:/dev/bus/usb
     volumes:
       # Persistent configuration storage
       - ./config:/app/config
@@ -28,6 +32,9 @@ services:
     privileged: false
     cap_add:
       - SYS_NICE
+      # FTDI USB Relay Board (optional - for 12V trigger control)
+      # Uncomment the following to allow libftdi to detach kernel drivers:
+      # - SYS_RAWIO
     group_add:
       - audio
     user: "0:29"  # root user, audio group
