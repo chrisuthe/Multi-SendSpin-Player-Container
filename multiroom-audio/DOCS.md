@@ -1,10 +1,29 @@
 # Multi-Room Audio Controller
 
 <!-- VERSION_INFO_START -->
-## Latest Release: 3.0.0
+## Latest Release: 4.0.0
 
 
 
+### Highlights
+- **aarch64 (ARM64) Support** - Now works on Home Assistant Green, Raspberry Pi 4/5, and other ARM64 devices
+- **SendSpin.SDK 5.2.0** - Major SDK upgrade with improved protocol handling
+- **Dual-Volume System** - Separate startup and runtime volume controls for better multi-room sync
+- **Volume Preservation** - Volume now persists across track changes
+- **Boot Mute Control** - Configure sound cards to start muted or unmuted
+
+### Added
+- ARM64 architecture support for HAOS add-on (Home Assistant Green, Raspberry Pi 4/5)
+- Automatic page reload when backend version changes (detects upgrades automatically)
+- Volume grace period to resolve startup volume sync battles with Music Assistant
+- Boot mute preferences for sound cards (persisted to `card-profiles.yaml`)
+- Real-time mute toggle for sound cards from web UI
+- Controller and metadata roles for player registration
+- Hardware volume slider always visible on player cards
+- Custom sink names for display
+- Automatic reconnection for failed autostart players
+- Onboarding wizard for first-time setup
+- Custom sink creation and management
 
 [View full changelog](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/CHANGELOG.md)
 <!-- VERSION_INFO_END -->
