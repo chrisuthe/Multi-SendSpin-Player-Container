@@ -69,3 +69,7 @@ logs/*
 !logs/.gitkeep
 config/*
 !config/players.yaml.example
+
+# Fork-specific workflow files (not for upstream)
+FORK_WORKFLOW.md
+setup-git-remotes.sh
