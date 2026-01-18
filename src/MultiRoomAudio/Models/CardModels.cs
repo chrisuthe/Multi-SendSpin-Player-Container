@@ -3,6 +3,33 @@ using System.ComponentModel.DataAnnotations;
 namespace MultiRoomAudio.Models;
 
 /// <summary>
+/// Status codes for card operations enabling structured error handling.
+/// </summary>
+public enum CardOperationStatus
+{
+    /// <summary>Operation completed successfully.</summary>
+    Success,
+
+    /// <summary>The specified card was not found.</summary>
+    CardNotFound,
+
+    /// <summary>The specified profile was not found or is not available.</summary>
+    ProfileNotFound,
+
+    /// <summary>The profile is not available for use.</summary>
+    ProfileNotAvailable,
+
+    /// <summary>No sinks were found for the card.</summary>
+    NoSinksFound,
+
+    /// <summary>One or more sinks failed during the operation.</summary>
+    PartialFailure,
+
+    /// <summary>A general/unexpected error occurred.</summary>
+    Error
+}
+
+/// <summary>
 /// A PulseAudio card profile representing an audio configuration mode.
 /// For example: stereo output, 5.1 surround, 7.1 surround, etc.
 /// </summary>
@@ -96,6 +123,7 @@ public class CardProfileConfiguration
 public record CardProfileResponse(
     bool Success,
     string Message,
+    CardOperationStatus Status = CardOperationStatus.Success,
     string? CardName = null,
     string? ActiveProfile = null,
     string? PreviousProfile = null
@@ -131,6 +159,7 @@ public class SetCardBootMuteRequest
 public record CardMuteResponse(
     bool Success,
     string Message,
+    CardOperationStatus Status = CardOperationStatus.Success,
     string? CardName = null,
     bool? IsMuted = null
 );

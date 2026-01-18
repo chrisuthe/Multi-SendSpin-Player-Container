@@ -21,7 +21,7 @@ public class CardProfileService : IHostedService
     private readonly string _configPath;
     private readonly IDeserializer _deserializer;
     private readonly ISerializer _serializer;
-    private readonly object _configLock = new();
+    private readonly ReaderWriterLockSlim _configLock = new(LockRecursionPolicy.NoRecursion);
 
     public CardProfileService(
         ILogger<CardProfileService> logger,
@@ -336,7 +336,7 @@ public class CardProfileService : IHostedService
         var sinks = PulseAudioCardEnumerator.GetSinksByCard(card.Index);
         if (sinks.Count == 0)
         {
-            return new CardMuteResponse(false, $"No sinks found for card '{card.Name}'.", card.Name);
+            return new CardMuteResponse(false, $"No sinks found for card '{card.Name}'.", CardOperationStatus.Error, card.Name);
         }
 
         var failed = new List<string>();
@@ -361,6 +361,7 @@ public class CardProfileService : IHostedService
         {
             return new CardMuteResponse(false,
                 $"Failed to set mute for {failed.Count} sink(s): {string.Join(", ", failed)}",
+                CardOperationStatus.Error,
                 card.Name,
                 GetCardMuteState(card));
         }
@@ -374,6 +375,7 @@ public class CardProfileService : IHostedService
 
         return new CardMuteResponse(true,
             muted ? "Card muted." : "Card unmuted.",
+            CardOperationStatus.Success,
             card.Name,
             muted);
     }
@@ -490,62 +492,94 @@ public class CardProfileService : IHostedService
 
     private Dictionary<string, CardProfileConfiguration> LoadConfigurations()
     {
-        lock (_configLock)
+        // Read file content outside the lock to avoid blocking on slow I/O
+        string? yaml = null;
+        bool fileExists;
+
+        try
         {
-            if (!File.Exists(_configPath))
+            fileExists = File.Exists(_configPath);
+            if (fileExists)
+            {
+                yaml = File.ReadAllText(_configPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read card profiles configuration from {Path}", _configPath);
+            return new Dictionary<string, CardProfileConfiguration>();
+        }
+
+        // Process the data under a read lock
+        _configLock.EnterReadLock();
+        try
+        {
+            if (!fileExists)
             {
                 _logger.LogDebug("Card profiles config not found at {Path}", _configPath);
                 return new Dictionary<string, CardProfileConfiguration>();
             }
 
-            try
-            {
-                var yaml = File.ReadAllText(_configPath);
-                if (string.IsNullOrWhiteSpace(yaml))
-                    return new Dictionary<string, CardProfileConfiguration>();
-
-                var dict = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(yaml);
-                if (dict == null)
-                    return new Dictionary<string, CardProfileConfiguration>();
-
-                // Ensure CardName field matches dictionary key
-                foreach (var (name, config) in dict)
-                {
-                    config.CardName = name;
-                }
-
-                _logger.LogDebug("Loaded {Count} saved card profile configurations", dict.Count);
-                return dict;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to load card profiles configuration from {Path}", _configPath);
+            if (string.IsNullOrWhiteSpace(yaml))
                 return new Dictionary<string, CardProfileConfiguration>();
+
+            var dict = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(yaml);
+            if (dict == null)
+                return new Dictionary<string, CardProfileConfiguration>();
+
+            // Ensure CardName field matches dictionary key
+            foreach (var (name, config) in dict)
+            {
+                config.CardName = name;
             }
+
+            _logger.LogDebug("Loaded {Count} saved card profile configurations", dict.Count);
+            return dict;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse card profiles configuration from {Path}", _configPath);
+            return new Dictionary<string, CardProfileConfiguration>();
+        }
+        finally
+        {
+            _configLock.ExitReadLock();
         }
     }
 
     private void SaveProfile(string cardName, string profileName)
     {
-        lock (_configLock)
+        // Read existing config file outside the lock
+        string? existingYaml = null;
+        try
+        {
+            if (File.Exists(_configPath))
+            {
+                existingYaml = File.ReadAllText(_configPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read existing card profiles config");
+        }
+
+        // Process and serialize under write lock
+        string yamlToWrite;
+        _configLock.EnterWriteLock();
+        try
         {
             var configs = new Dictionary<string, CardProfileConfiguration>();
 
-            // Load existing
-            if (File.Exists(_configPath))
+            if (!string.IsNullOrWhiteSpace(existingYaml))
             {
                 try
                 {
-                    var yaml = File.ReadAllText(_configPath);
-                    if (!string.IsNullOrWhiteSpace(yaml))
-                    {
-                        configs = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(yaml)
-                            ?? new Dictionary<string, CardProfileConfiguration>();
-                    }
+                    configs = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(existingYaml)
+                        ?? new Dictionary<string, CardProfileConfiguration>();
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to read existing card profiles config, starting fresh");
+                    _logger.LogWarning(ex, "Failed to parse existing card profiles config, starting fresh");
                 }
             }
 
@@ -564,81 +598,129 @@ public class CardProfileService : IHostedService
                 };
             }
 
-            // Save
-            try
-            {
-                // Ensure directory exists
-                var dir = Path.GetDirectoryName(_configPath);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
+            yamlToWrite = _serializer.Serialize(configs);
+        }
+        finally
+        {
+            _configLock.ExitWriteLock();
+        }
 
-                var yaml = _serializer.Serialize(configs);
-                File.WriteAllText(_configPath, yaml);
-                _logger.LogDebug("Saved card profile configuration for '{CardName}'", cardName);
-            }
-            catch (Exception ex)
+        // Write file outside the lock
+        try
+        {
+            var dir = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
-                _logger.LogError(ex, "Failed to save card profile configuration");
+                Directory.CreateDirectory(dir);
             }
+
+            File.WriteAllText(_configPath, yamlToWrite);
+            _logger.LogDebug("Saved card profile configuration for '{CardName}'", cardName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save card profile configuration");
         }
     }
 
     private bool RemoveProfile(string cardName)
     {
-        lock (_configLock)
+        // Read existing config file outside the lock
+        string? existingYaml = null;
+        bool fileExists;
+        try
         {
-            if (!File.Exists(_configPath))
-                return false;
+            fileExists = File.Exists(_configPath);
+            if (fileExists)
+            {
+                existingYaml = File.ReadAllText(_configPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read card profiles config for removal");
+            return false;
+        }
 
+        if (!fileExists || string.IsNullOrWhiteSpace(existingYaml))
+            return false;
+
+        // Process under write lock
+        string? yamlToWrite = null;
+        bool removed;
+        _configLock.EnterWriteLock();
+        try
+        {
+            var configs = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(existingYaml)
+                ?? new Dictionary<string, CardProfileConfiguration>();
+
+            removed = configs.Remove(cardName);
+            if (removed)
+            {
+                yamlToWrite = _serializer.Serialize(configs);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process removal of saved profile for card '{CardName}'", cardName);
+            return false;
+        }
+        finally
+        {
+            _configLock.ExitWriteLock();
+        }
+
+        // Write file outside the lock if we removed the card
+        if (removed && yamlToWrite != null)
+        {
             try
             {
-                var yaml = File.ReadAllText(_configPath);
-                if (string.IsNullOrWhiteSpace(yaml))
-                    return false;
-
-                var configs = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(yaml)
-                    ?? new Dictionary<string, CardProfileConfiguration>();
-
-                if (configs.Remove(cardName))
-                {
-                    yaml = _serializer.Serialize(configs);
-                    File.WriteAllText(_configPath, yaml);
-                    _logger.LogDebug("Removed saved profile for card '{CardName}'", cardName);
-                    return true;
-                }
-
-                return false;
+                File.WriteAllText(_configPath, yamlToWrite);
+                _logger.LogDebug("Removed saved profile for card '{CardName}'", cardName);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to remove saved profile for card '{CardName}'", cardName);
+                _logger.LogError(ex, "Failed to save config after removing profile for card '{CardName}'", cardName);
                 return false;
             }
         }
+
+        return removed;
     }
 
     private void SaveBootMute(string cardName, string profileName, bool muted)
     {
-        lock (_configLock)
+        // Read existing config file outside the lock
+        string? existingYaml = null;
+        try
+        {
+            if (File.Exists(_configPath))
+            {
+                existingYaml = File.ReadAllText(_configPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read existing card profiles config");
+        }
+
+        // Process and serialize under write lock
+        string yamlToWrite;
+        _configLock.EnterWriteLock();
+        try
         {
             var configs = new Dictionary<string, CardProfileConfiguration>();
 
-            if (File.Exists(_configPath))
+            if (!string.IsNullOrWhiteSpace(existingYaml))
             {
                 try
                 {
-                    var yaml = File.ReadAllText(_configPath);
-                    if (!string.IsNullOrWhiteSpace(yaml))
-                    {
-                        configs = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(yaml)
-                            ?? new Dictionary<string, CardProfileConfiguration>();
-                    }
+                    configs = _deserializer.Deserialize<Dictionary<string, CardProfileConfiguration>>(existingYaml)
+                        ?? new Dictionary<string, CardProfileConfiguration>();
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to read existing card profiles config, starting fresh");
+                    _logger.LogWarning(ex, "Failed to parse existing card profiles config, starting fresh");
                 }
             }
 
@@ -658,22 +740,28 @@ public class CardProfileService : IHostedService
                 };
             }
 
-            try
-            {
-                var dir = Path.GetDirectoryName(_configPath);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
+            yamlToWrite = _serializer.Serialize(configs);
+        }
+        finally
+        {
+            _configLock.ExitWriteLock();
+        }
 
-                var yaml = _serializer.Serialize(configs);
-                File.WriteAllText(_configPath, yaml);
-                _logger.LogDebug("Saved boot mute configuration for '{CardName}'", cardName);
-            }
-            catch (Exception ex)
+        // Write file outside the lock
+        try
+        {
+            var dir = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
-                _logger.LogError(ex, "Failed to save boot mute configuration");
+                Directory.CreateDirectory(dir);
             }
+
+            File.WriteAllText(_configPath, yamlToWrite);
+            _logger.LogDebug("Saved boot mute configuration for '{CardName}'", cardName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save boot mute configuration");
         }
     }
 
