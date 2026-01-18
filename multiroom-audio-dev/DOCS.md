@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-8bd4a33
+## Development Build: sha-2b1f17d
 
 **Current Dev Build Changes** (recent)
 
+- Refactor controllers: move batch logic to service, standardize patterns
 - Extract StartupDiagnosticsService and add UpdateDeviceProperty helper
 - Update all user-facing references from "Initial Volume" to "Startup Volume"
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into feature/rename-initial-volume-to-startup-volume
@@ -14,7 +15,6 @@
 - Add ApiExceptionHandler utility to reduce duplicated exception handling
 - Rename "Initial Volume" to "Startup Volume" in player edit dialog
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into dev
-- add back aarch64 to the config so it can get the already building images.
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
