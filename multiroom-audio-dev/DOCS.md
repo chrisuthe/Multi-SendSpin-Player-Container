@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-996577d
+## Development Build: sha-d3c7519
 
 **Current Dev Build Changes** (recent)
 
+- Add ApiExceptionHandler utility to reduce duplicated exception handling
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into dev
 - add back aarch64 to the config so it can get the already building images.
 - Merge branch 'main' into dev
@@ -13,7 +14,6 @@
 - Fix UI slider interaction and tooltip issues
 - Add volume grace period to resolve startup volume sync battle
 - Fix tooltip persistence issues by properly disposing old instances
-- Add automatic page reload on backend version change
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
