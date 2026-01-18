@@ -4,6 +4,22 @@
 // This module handles the first-time setup wizard for Multi-Room Audio.
 // It guides users through device discovery, identification, naming, and player creation.
 
+// Sanitize a string to be a valid player name
+// Player names can only contain: alphanumeric, spaces, hyphens, underscores, apostrophes
+// This matches the backend validation in PlayerManagerService.ValidatePlayerName()
+function sanitizePlayerName(name) {
+    if (!name) return '';
+
+    // Remove any characters that aren't alphanumeric, space, hyphen, underscore, or apostrophe
+    let sanitized = name.replace(/[^a-zA-Z0-9\s\-_']/g, '');
+
+    // Collapse multiple spaces into one
+    sanitized = sanitized.replace(/\s+/g, ' ').trim();
+
+    // Limit length to 100 characters (backend limit)
+    return sanitized.substring(0, 100);
+}
+
 // Parse bus_path into user-friendly USB port hint
 // Handles Linux sysfs format: /devices/pci.../usb3/3-2/3-2.4/3-2.4:1.0/sound/card1
 // e.g., "3-2.4" → "Port 4"
@@ -108,9 +124,44 @@ const Wizard = {
         // Load cards first so progress indicator shows Cards step if needed
         await this.loadCards();
 
+        // Load existing custom sinks to filter out their master/slave devices
+        await this.loadExistingCustomSinks();
+
         this.renderProgress();
         this.renderStep();
         this.modal.show();
+    },
+
+    // Load existing custom sinks from the API
+    async loadExistingCustomSinks() {
+        try {
+            const response = await fetch('./api/sinks');
+            if (response.ok) {
+                const sinks = await response.json();
+                // Store sinks with their slaves/masterSink info for filtering
+                this.customSinks = sinks.map(s => ({
+                    id: s.sinkName || s.name,
+                    name: s.sinkName || s.name,
+                    type: s.type?.toLowerCase() || 'unknown',
+                    description: s.description,
+                    slaves: s.slaves || [],
+                    masterSink: s.masterSink || null,
+                    maxChannels: 2,
+                    defaultSampleRate: 48000
+                }));
+            }
+        } catch (error) {
+            console.warn('Failed to load existing custom sinks:', error);
+            // Continue without existing sinks - not fatal
+        }
+    },
+
+    // Check if a device is used as a master sink or slave by any custom sink
+    isDeviceUsedBySink(deviceId) {
+        return this.customSinks.some(sink =>
+            sink.masterSink === deviceId ||
+            (sink.slaves && sink.slaves.includes(deviceId))
+        );
     },
 
     // Hide the wizard
@@ -582,10 +633,18 @@ const Wizard = {
                         </span>
                         <small class="text-muted d-block">${escapeHtml(sink.description || '')}</small>
                     </div>
-                    <button class="btn btn-outline-danger btn-sm"
-                            onclick="Wizard.removeCustomSink('${escapeHtml(sink.id)}')">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-primary"
+                                id="sink-tone-btn-${escapeHtml(sink.name)}"
+                                onclick="Wizard.playTestToneForSink('${escapeHtml(sink.name)}')"
+                                title="Play test tone">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                        <button class="btn btn-outline-danger"
+                                onclick="Wizard.removeCustomSink('${escapeHtml(sink.id)}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
                 </div>
             `).join('')
             : '<div class="list-group-item text-center text-muted py-3">No custom sinks created yet</div>';
@@ -839,12 +898,14 @@ const Wizard = {
                 throw new Error(result.message || result.detail || 'Failed to create combine sink');
             }
 
-            // Add to custom sinks list
+            // Add to custom sinks list (include slaves for filtering)
             this.customSinks.push({
                 id: result.sinkName || name,
                 name: result.sinkName || name,
                 type: 'combine',
                 description: description,
+                slaves: slaves,
+                masterSink: null,
                 maxChannels: 2,
                 defaultSampleRate: 48000
             });
@@ -928,12 +989,14 @@ const Wizard = {
                 throw new Error(result.message || result.detail || 'Failed to create remap sink');
             }
 
-            // Add to custom sinks list
+            // Add to custom sinks list (include masterSink for filtering)
             this.customSinks.push({
                 id: result.sinkName || name,
                 name: result.sinkName || name,
                 type: 'remap',
                 description: description,
+                slaves: [],
+                masterSink: masterSink,
                 maxChannels: 2,
                 defaultSampleRate: 48000
             });
@@ -1011,9 +1074,12 @@ const Wizard = {
 
     // Step 4: Create Players
     renderPlayers() {
-        // Combine devices and custom sinks, excluding hidden devices
+        // Combine devices and custom sinks, excluding:
+        // - Hidden devices
+        // - Devices used as master/slave by custom sinks (use the sink instead)
         const allDevices = [...this.devices, ...this.customSinks].filter(d =>
-            !(this.deviceState[d.id]?.hidden || d.hidden)
+            !(this.deviceState[d.id]?.hidden || d.hidden) &&
+            !this.isDeviceUsedBySink(d.id)
         );
 
         const playerHtml = allDevices.map(device => {
@@ -1200,6 +1266,35 @@ const Wizard = {
         }
     },
 
+    // Play test tone on custom sink
+    async playTestToneForSink(sinkName) {
+        const btn = document.getElementById(`sink-tone-btn-${sinkName}`);
+        if (!btn) return;
+
+        const originalContent = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(`./api/sinks/${encodeURIComponent(sinkName)}/test-tone`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frequencyHz: 1000, durationMs: 1500 })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to play test tone');
+            }
+        } catch (error) {
+            console.error('Failed to play test tone for sink:', error);
+            showAlert(`Test tone failed: ${error.message}`, 'danger');
+        } finally {
+            btn.innerHTML = originalContent;
+            btn.disabled = false;
+        }
+    },
+
     // Toggle device hidden state
     async toggleHidden(deviceId) {
         if (!this.deviceState[deviceId]) {
@@ -1238,8 +1333,8 @@ const Wizard = {
 
     // Suggest a name for a device
     suggestName(device) {
-        // Use alias if available
-        if (device.alias) return device.alias;
+        // Use alias if available (already user-provided, assume valid)
+        if (device.alias) return sanitizePlayerName(device.alias);
 
         // Try to create a friendly name from the device name
         let name = device.name || device.id;
@@ -1255,7 +1350,9 @@ const Wizard = {
             word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
         ).join(' ');
 
-        return name.substring(0, 30);  // Limit length
+        // Sanitize to remove invalid characters (like parentheses)
+        // and limit length for player name compatibility
+        return sanitizePlayerName(name);
     },
 
     // Save aliases to server
@@ -1286,8 +1383,18 @@ const Wizard = {
             const volumeInput = document.getElementById(`volume-${deviceId}`);
             const volume = volumeInput ? parseInt(volumeInput.value) : 75;
 
+            // Sanitize the player name to ensure it's valid
+            // (removes parentheses and other invalid characters)
+            const sanitizedName = sanitizePlayerName(deviceName);
+
+            // Skip if sanitized name is empty (unlikely but possible)
+            if (!sanitizedName) {
+                console.warn(`Skipping player with invalid name from device: ${deviceId}`);
+                return;
+            }
+
             this.playersToCreate.push({
-                name: deviceName,
+                name: sanitizedName,
                 device: deviceId,
                 volume: volume,
                 autostart: true

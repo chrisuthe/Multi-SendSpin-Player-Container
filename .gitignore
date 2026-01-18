@@ -43,6 +43,7 @@ Thumbs.db
 *.tmp
 *.temp
 /tmp/
+tmpclaude-*
 
 # Environment files
 .env

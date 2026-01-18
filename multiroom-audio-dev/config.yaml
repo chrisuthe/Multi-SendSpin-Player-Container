@@ -9,6 +9,7 @@ image: ghcr.io/chrisuthe/multiroom-audio-hassio-dev
 startup: services
 arch:
   - amd64
+  - aarch64
 
 # Hardware access
 audio: true

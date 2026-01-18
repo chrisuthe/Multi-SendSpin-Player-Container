@@ -7,13 +7,15 @@ on:
       - dev
     tags:
       - 'v*'
+    paths-ignore:
+      - '.github/**'
   workflow_dispatch:
 
 env:
-  DOCKERHUB_IMAGE: chrisuthe/squeezelitemultiroom
-  GHCR_IMAGE: ghcr.io/chrisuthe/multiroom-audio
-  HASSIO_IMAGE: ghcr.io/chrisuthe/multiroom-audio-hassio
-  HASSIO_DEV_IMAGE: ghcr.io/chrisuthe/multiroom-audio-hassio-dev
+  DOCKERHUB_IMAGE: ${{ github.repository_owner }}/squeezelitemultiroom
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/multiroom-audio
+  HASSIO_IMAGE: ghcr.io/${{ github.repository_owner }}/multiroom-audio-hassio
+  HASSIO_DEV_IMAGE: ghcr.io/${{ github.repository_owner }}/multiroom-audio-hassio-dev
 
 jobs:
   # ==========================================================================
@@ -37,15 +39,64 @@ jobs:
         run: dotnet build src/MultiRoomAudio/MultiRoomAudio.csproj --no-restore -c Release
 
   # ==========================================================================
-  # Build Once, Push to Multiple Registries (Docker Hub + GHCR + HASSIO)
+  # Registry Logins
+  # ==========================================================================
+  login-dockerhub:
+    needs: build-test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      logged_in: ${{ steps.login_result.outputs.logged_in }}
+    steps:
+      - name: Login to Docker Hub
+        id: login
+        continue-on-error: true
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Record Docker Hub login result
+        id: login_result
+        run: echo "logged_in=${{ steps.login.outcome == 'success' }}" >> $GITHUB_OUTPUT
+
+      - name: Mark login failure (non-blocking)
+        if: steps.login.outcome != 'success'
+        run: exit 1
+
+  login-ghcr:
+    needs: build-test
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    outputs:
+      logged_in: ${{ steps.login_result.outputs.logged_in }}
+    steps:
+      - name: Login to GitHub Container Registry
+        id: login
+        continue-on-error: true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Record GHCR login result
+        id: login_result
+        run: echo "logged_in=${{ steps.login.outcome == 'success' }}" >> $GITHUB_OUTPUT
+
+  # ==========================================================================
+  # Build Once
   # ==========================================================================
   build-docker:
     needs: build-test
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
+    outputs:
+      build_version: ${{ steps.version.outputs.version }}
+      dockerhub_tags: ${{ steps.tag_lists.outputs.dockerhub_tags }}
+      ghcr_tags: ${{ steps.tag_lists.outputs.ghcr_tags }}
+      hassio_tags: ${{ steps.tag_lists.outputs.hassio_tags }}
+      labels: ${{ steps.meta.outputs.labels }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -55,19 +106,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine build version
         id: version
@@ -103,14 +141,33 @@ jobs:
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
             type=sha,prefix=sha-,format=short
 
-      - name: Build and push to all registries
+      - name: Collect registry-specific tags
+        id: tag_lists
+        run: |
+          tag_json='${{ steps.meta.outputs.json }}'
+          dockerhub_tags=$(echo "$tag_json" | jq -r '.tags[] | select(startswith("${{ env.DOCKERHUB_IMAGE }}:"))')
+          ghcr_tags=$(echo "$tag_json" | jq -r '.tags[] | select(startswith("${{ env.GHCR_IMAGE }}:"))')
+          hassio_tags=$(echo "$tag_json" | jq -r '.tags[] | select(startswith("${{ env.HASSIO_IMAGE }}:"))')
+          {
+            echo "dockerhub_tags<<EOF"
+            echo "$dockerhub_tags"
+            echo "EOF"
+            echo "ghcr_tags<<EOF"
+            echo "$ghcr_tags"
+            echo "EOF"
+            echo "hassio_tags<<EOF"
+            echo "$hassio_tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build image (cache warm)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          push: false
+          outputs: type=cacheonly
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=docker
           cache-to: type=gha,mode=max,scope=docker
@@ -119,15 +176,144 @@ jobs:
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
 
-      # Get short SHA for dev image tag (must match what's set in config.yaml)
+  # ==========================================================================
+  # Pushes (registry-specific)
+  # ==========================================================================
+  push-dockerhub:
+    needs:
+      - build-docker
+      - login-dockerhub
+    runs-on: ubuntu-latest
+    if: needs.login-dockerhub.outputs.logged_in == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Push to Docker Hub
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.build-docker.outputs.dockerhub_tags }}
+          labels: ${{ needs.build-docker.outputs.labels }}
+          cache-from: type=gha,scope=docker
+          build-args: |
+            BUILD_VERSION=${{ needs.build-docker.outputs.build_version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+  push-ghcr:
+    needs:
+      - build-docker
+      - login-ghcr
+    runs-on: ubuntu-latest
+    if: needs.login-ghcr.outputs.logged_in == 'true'
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Push to GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.build-docker.outputs.ghcr_tags }}
+          labels: ${{ needs.build-docker.outputs.labels }}
+          cache-from: type=gha,scope=docker
+          build-args: |
+            BUILD_VERSION=${{ needs.build-docker.outputs.build_version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+  push-hassio:
+    needs:
+      - build-docker
+      - login-ghcr
+    runs-on: ubuntu-latest
+    if: needs.login-ghcr.outputs.logged_in == 'true'
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Push to HASSIO (GHCR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.build-docker.outputs.hassio_tags }}
+          labels: ${{ needs.build-docker.outputs.labels }}
+          cache-from: type=gha,scope=docker
+          build-args: |
+            BUILD_VERSION=${{ needs.build-docker.outputs.build_version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+  push-hassio-dev:
+    needs:
+      - build-docker
+      - login-ghcr
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/dev' && needs.login-ghcr.outputs.logged_in == 'true'
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Get short SHA
-        if: github.ref == 'refs/heads/dev'
         id: short_sha
         run: echo "sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
-      # Push to separate HASSIO dev image with SHA tag (HAOS uses version as image tag)
       - name: Push to HASSIO dev image
-        if: github.ref == 'refs/heads/dev'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -137,10 +323,10 @@ jobs:
           tags: |
             ${{ env.HASSIO_DEV_IMAGE }}:latest
             ${{ env.HASSIO_DEV_IMAGE }}:sha-${{ steps.short_sha.outputs.sha }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: ${{ needs.build-docker.outputs.labels }}
           cache-from: type=gha,scope=docker
           build-args: |
-            BUILD_VERSION=${{ steps.version.outputs.version }}
+            BUILD_VERSION=${{ needs.build-docker.outputs.build_version }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
 
@@ -165,7 +351,7 @@ jobs:
   # ==========================================================================
   update-readme:
     runs-on: ubuntu-latest
-    needs: build-docker
+    needs: push-dockerhub
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout repository

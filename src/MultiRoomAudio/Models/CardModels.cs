@@ -36,7 +36,15 @@ public record PulseAudioCard(
     /// <summary>List of available profiles for this card.</summary>
     List<CardProfile> Profiles,
     /// <summary>Currently active profile name.</summary>
-    string ActiveProfile
+    string ActiveProfile,
+    /// <summary>Whether the card is currently muted (based on sinks).</summary>
+    bool? IsMuted = null,
+    /// <summary>Boot mute preference if configured.</summary>
+    bool? BootMuted = null,
+    /// <summary>Whether the current mute state matches the boot preference.</summary>
+    bool BootMuteMatchesCurrent = false,
+    /// <summary>Maximum volume limit for the card's sinks (0-100), or null if no limit.</summary>
+    int? MaxVolume = null
 );
 
 /// <summary>
@@ -75,6 +83,11 @@ public class CardProfileConfiguration
     /// Selected profile name.
     /// </summary>
     public required string ProfileName { get; set; }
+
+    /// <summary>
+    /// Boot mute preference (true = muted, false = unmuted).
+    /// </summary>
+    public bool? BootMuted { get; set; }
 }
 
 /// <summary>
@@ -86,4 +99,69 @@ public record CardProfileResponse(
     string? CardName = null,
     string? ActiveProfile = null,
     string? PreviousProfile = null
+);
+
+/// <summary>
+/// Request to set a card's mute state.
+/// </summary>
+public class SetCardMuteRequest
+{
+    /// <summary>
+    /// True to mute the card, false to unmute it.
+    /// </summary>
+    [Required(ErrorMessage = "Mute state is required.")]
+    public bool Muted { get; set; }
+}
+
+/// <summary>
+/// Request to set a card's boot mute preference.
+/// </summary>
+public class SetCardBootMuteRequest
+{
+    /// <summary>
+    /// True to mute the card at boot, false to unmute it at boot.
+    /// </summary>
+    [Required(ErrorMessage = "Boot mute state is required.")]
+    public bool Muted { get; set; }
+}
+
+/// <summary>
+/// Response for card mute operations.
+/// </summary>
+public record CardMuteResponse(
+    bool Success,
+    string Message,
+    string? CardName = null,
+    bool? IsMuted = null
+);
+
+/// <summary>
+/// Response for card boot mute operations.
+/// </summary>
+public record CardBootMuteResponse(
+    bool Success,
+    string Message,
+    string? CardName = null,
+    bool? BootMuted = null
+);
+
+/// <summary>
+/// Request to set a card's maximum volume limit.
+/// </summary>
+public class SetCardMaxVolumeRequest
+{
+    /// <summary>
+    /// Maximum volume limit (0-100), or null to clear the limit.
+    /// </summary>
+    public int? MaxVolume { get; set; }
+}
+
+/// <summary>
+/// Response for card max volume operations.
+/// </summary>
+public record CardMaxVolumeResponse(
+    bool Success,
+    string Message,
+    string? CardName = null,
+    int? MaxVolume = null
 );

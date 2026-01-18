@@ -101,19 +101,26 @@ builder.Services.AddSingleton<DeviceMatchingService>();
 builder.Services.AddSingleton<ToneGeneratorService>();
 builder.Services.AddSingleton<OnboardingService>();
 
-// Add PlayerManagerService as singleton and hosted service
-builder.Services.AddSingleton<PlayerManagerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<PlayerManagerService>());
-
-// Add CustomSinksService for PulseAudio sink management
+// Add PulseAudio utilities (no startup dependency)
 builder.Services.AddSingleton<PaModuleRunner>();
 builder.Services.AddSingleton<DefaultPaParser>();
+
+// IMPORTANT: Hosted services start in registration order.
+// Correct order: CardProfiles → CustomSinks → Players
+// - Card profiles must be set before sinks can use surround channels
+// - Sinks must exist before players can use them
+
+// 1. CardProfileService - restore saved card profiles (e.g., surround 7.1) FIRST
+builder.Services.AddSingleton<CardProfileService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CardProfileService>());
+
+// 2. CustomSinksService - load remap/combine sinks SECOND (depends on profiles)
 builder.Services.AddSingleton<CustomSinksService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CustomSinksService>());
 
-// Add CardProfileService for sound card profile management
-builder.Services.AddSingleton<CardProfileService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<CardProfileService>());
+// 3. PlayerManagerService - autostart players LAST (depends on sinks existing)
+builder.Services.AddSingleton<PlayerManagerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PlayerManagerService>());
 
 // Static files are served via UseStaticFiles() middleware below
 

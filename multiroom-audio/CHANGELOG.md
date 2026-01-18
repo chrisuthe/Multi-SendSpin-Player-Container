@@ -1,5 +1,86 @@
 # Changelog
 
+## [4.0.0] - ARM64 Support & Volume Improvements
+
+### Highlights
+- **aarch64 (ARM64) Support** - Now works on Home Assistant Green, Raspberry Pi 4/5, and other ARM64 devices
+- **SendSpin.SDK 5.2.0** - Major SDK upgrade with improved protocol handling
+- **Dual-Volume System** - Separate startup and runtime volume controls for better multi-room sync
+- **Volume Preservation** - Volume now persists across track changes
+- **Boot Mute Control** - Configure sound cards to start muted or unmuted
+
+### Added
+- ARM64 architecture support for HAOS add-on (Home Assistant Green, Raspberry Pi 4/5)
+- Automatic page reload when backend version changes (detects upgrades automatically)
+- Volume grace period to resolve startup volume sync battles with Music Assistant
+- Boot mute preferences for sound cards (persisted to `card-profiles.yaml`)
+- Real-time mute toggle for sound cards from web UI
+- Controller and metadata roles for player registration
+- Hardware volume slider always visible on player cards
+- Custom sink names for display
+- Automatic reconnection for failed autostart players
+- Onboarding wizard for first-time setup
+- Custom sink creation and management
+- Sound card profile configuration UI
+- Test tone generation for audio verification
+
+### Fixed
+- Volume preserved across track changes (no more volume reset when new track starts)
+- Startup volume synced to Music Assistant immediately on connection
+- Hardware volume limits respected during initialization
+- SendSpin protocol GoodbyeReason values now valid (fixes protocol compliance)
+- Failed players removed before reconnection attempt
+- Health endpoint corrected to `/api/health` (was `./health`)
+- UI slider interaction and tooltip issues
+- Sink descriptions with spaces and special characters now handled correctly
+- Tooltip persistence issues by properly disposing old instances
+
+### Changed
+- Volume limit control moved from player level to card level
+- Decoupled CI/CD workflow - Docker Hub login failures no longer block GHCR/HASSIO pushes
+- Build version displayed on main page for easy version identification
+- Migrated from PortAudio to direct PulseAudio API for improved stability
+- Removed ALSA backend in favor of PulseAudio-only architecture
+
+### Technical
+- SendSpin.SDK upgraded from 3.x to 5.2.0
+- Implemented dual-volume system with separate startup and runtime volume handling
+- Volume grace period prevents sync battles during player startup
+- New custom sinks service for dynamic audio routing
+- Card profile service for persistent sound card configuration
+
+---
+
+## [2.0.15] - Sound Card Mute Control
+
+### Added
+- **Real-time mute control**: Mute/unmute sound cards instantly from the web UI
+  - New mute toggle button on each sound card in Settings > Sound Card Setup
+  - Changes take effect immediately without affecting boot preferences
+  - API endpoint: `PUT /api/cards/{id}/mute`
+- **Boot mute preference**: Configure cards to start muted or unmuted on boot
+  - Set via dropdown in Sound Card Setup UI (Not set / Muted / Unmuted)
+  - Persisted to `card-profiles.yaml` alongside profile selection
+  - Applied after profiles are restored, affecting newly created sinks
+  - API endpoint: `PUT /api/cards/{id}/boot-mute`
+- **Mute state indicators**: UI shows current mute state with visual feedback
+  - Icons indicate muted/unmuted status
+  - Labels show "(boot)" or "(manual)" to distinguish preference vs manual change
+
+### Technical
+- Added `GetSinksMuteStates()` to `PulseAudioCardEnumerator` for batch mute queries
+- Extended `PulseAudioCard` model with `IsMuted`, `BootMuted`, and `BootMuteMatchesCurrent`
+- Refactored `GetSinksByCard()` parsing for cleaner block-based approach
+- Boot mute preferences are applied via `ApplyBootMutePreferenceAsync()` after profile restoration
+
+### CI/CD
+- **Decoupled Docker workflow**: Separated build and push into independent jobs
+  - Docker Hub login failures no longer block GHCR/HASSIO pushes
+  - Enables fork contributions without Docker Hub credentials
+  - Build cache is warmed once and reused across all registry pushes
+
+---
+
 ## [2.0.14] - ALSA Latency Detection & Delay Offset
 
 ### Fixed

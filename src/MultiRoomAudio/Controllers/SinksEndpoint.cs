@@ -206,6 +206,76 @@ public static class SinksEndpoint
         .WithName("ReloadCustomSink")
         .WithDescription("Unload and reload a custom sink");
 
+        // POST /api/sinks/{name}/test-tone - Play test tone through custom sink
+        group.MapPost("/{name}/test-tone", async (
+            string name,
+            TestToneRequest? request,
+            CustomSinksService service,
+            ToneGeneratorService toneGenerator,
+            ILoggerFactory lf,
+            CancellationToken ct) =>
+        {
+            var logger = lf.CreateLogger("SinksEndpoint");
+            logger.LogDebug("API: POST /api/sinks/{SinkName}/test-tone", name);
+
+            var sink = service.GetSink(name);
+            if (sink == null)
+                return SinkNotFoundResult(name, logger, "test-tone");
+
+            if (sink.State != CustomSinkState.Loaded)
+            {
+                logger.LogWarning("API: Cannot play test tone - sink {SinkName} is not loaded (state: {State})", name, sink.State);
+                return Results.BadRequest(new ErrorResponse(false, $"Sink '{name}' is not loaded (state: {sink.State})"));
+            }
+
+            if (string.IsNullOrEmpty(sink.PulseAudioSinkName))
+            {
+                logger.LogWarning("API: Cannot play test tone - sink {SinkName} has no PulseAudio sink name", name);
+                return Results.BadRequest(new ErrorResponse(false, $"Sink '{name}' has no PulseAudio sink name"));
+            }
+
+            try
+            {
+                await toneGenerator.PlayTestToneAsync(
+                    sink.PulseAudioSinkName,
+                    frequencyHz: request?.FrequencyHz ?? 1000,
+                    durationMs: request?.DurationMs ?? 1500,
+                    ct: ct);
+
+                return Results.Ok(new
+                {
+                    success = true,
+                    message = "Test tone played successfully",
+                    sinkName = name,
+                    pulseAudioSinkName = sink.PulseAudioSinkName,
+                    frequencyHz = request?.FrequencyHz ?? 1000,
+                    durationMs = request?.DurationMs ?? 1500
+                });
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("already playing"))
+            {
+                return Results.Conflict(new ErrorResponse(false, ex.Message));
+            }
+            catch (TimeoutException ex)
+            {
+                logger.LogWarning(ex, "Test tone playback timed out for sink {SinkName}", name);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 504,
+                    title: "Test tone playback timed out");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to play test tone on sink {SinkName}", name);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to play test tone");
+            }
+        })
+        .WithName("PlaySinkTestTone")
+        .WithDescription("Play a test tone through a custom sink for identification");
+
         // GET /api/sinks/import/scan - Scan default.pa for importable sinks
         group.MapGet("/import/scan", (DefaultPaParser parser, ILoggerFactory lf) =>
         {

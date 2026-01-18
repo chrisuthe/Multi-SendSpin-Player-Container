@@ -259,6 +259,43 @@ public static class PlayersEndpoint
         .WithName("SetVolume")
         .WithDescription("Set player volume (0-100)");
 
+        // PUT /api/players/{name}/startup-volume - Set startup volume
+        group.MapPut("/{name}/startup-volume", async (
+            string name,
+            VolumeRequest request,
+            PlayerManagerService manager,
+            ConfigurationService config,
+            ILogger<PlayerManagerService> logger,
+            CancellationToken ct) =>
+        {
+            logger.LogInformation("VOLUME [API] PUT /api/players/{Name}/startup-volume: {Volume}%", name, request.Volume);
+            try
+            {
+                // Update persisted config only
+                if (!config.Players.TryGetValue(name, out var playerConfig))
+                    return PlayerNotFoundResult(name, logger, "set startup volume");
+
+                playerConfig.Volume = Math.Clamp(request.Volume, 0, 100);
+                config.Save();
+
+                logger.LogInformation("VOLUME [StartupConfig] Player '{Name}': startup volume set to {Volume}%",
+                    name, request.Volume);
+
+                return Results.Ok(new SuccessResponse(true,
+                    $"Startup volume set to {request.Volume}% (takes effect on next restart)"));
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "API: Failed to set startup volume for player {PlayerName}", name);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to set startup volume");
+            }
+        })
+        .WithName("SetStartupVolume")
+        .WithDescription("Set player startup volume (0-100) - takes effect on restart");
+
         // PUT /api/players/{name}/mute - Set mute state
         group.MapPut("/{name}/mute", (
             string name,
@@ -376,12 +413,15 @@ public static class PlayersEndpoint
                 var currentName = name;
 
                 // Handle rename first (affects subsequent operations)
+                // Note: Rename requires restart for the name to appear in Music Assistant
+                // because the SDK's ClientName is set at player creation time
                 if (!string.IsNullOrEmpty(request.Name) && request.Name != name)
                 {
                     var renamed = manager.RenamePlayer(name, request.Name);
                     if (!renamed)
                         return Results.Conflict(new ErrorResponse(false, $"Player '{request.Name}' already exists"));
                     currentName = request.Name;
+                    needsRestart = true; // Name change requires restart for MA sync
                     logger.LogInformation("API: Player renamed from {OldName} to {NewName}", name, request.Name);
                 }
 
@@ -473,7 +513,17 @@ public static class PlayersEndpoint
                     return PlayerNotFoundResult(name, logger, "rename");
 
                 logger.LogInformation("API: Player {PlayerName} renamed to {NewName}", name, request.NewName);
-                return Results.Ok(new SuccessResponse(true, $"Player renamed to '{request.NewName}'"));
+
+                // Return response with restart hint - the name change is saved locally
+                // but the SDK's ClientName is set at creation time, so Music Assistant
+                // will still see the old name until the player is restarted
+                return Results.Ok(new PlayerRenameResponse(
+                    Success: true,
+                    Message: $"Player renamed to '{request.NewName}'",
+                    NewName: request.NewName,
+                    RestartRequired: true,
+                    RestartHint: "Restart the player for the name change to appear in Music Assistant."
+                ));
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
             {
@@ -495,6 +545,6 @@ public static class PlayersEndpoint
             }
         })
         .WithName("RenamePlayer")
-        .WithDescription("Rename a player to a new name");
+        .WithDescription("Rename a player to a new name. Note: Restart the player for the name change to appear in Music Assistant.");
     }
 }

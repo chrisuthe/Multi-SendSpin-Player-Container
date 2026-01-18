@@ -78,19 +78,32 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
             .OrderBy(c => c.Type == CustomSinkType.Combine ? 0 : 1)
             .ToList();
 
+        var loadedCount = 0;
+        var failedCount = 0;
+
         foreach (var config in sorted)
         {
             try
             {
                 await LoadSinkAsync(config, cancellationToken);
+                loadedCount++;
             }
             catch (Exception ex)
             {
+                failedCount++;
                 _logger.LogError(ex, "Failed to load sink '{Name}' on startup", config.Name);
             }
         }
 
-        _logger.LogInformation("CustomSinksService started with {Count} sinks", _sinks.Count);
+        if (failedCount > 0)
+        {
+            _logger.LogWarning("CustomSinksService started: {Loaded} sinks loaded, {Failed} failed",
+                loadedCount, failedCount);
+        }
+        else
+        {
+            _logger.LogInformation("CustomSinksService started with {Count} sinks loaded", loadedCount);
+        }
     }
 
     /// <summary>
@@ -168,17 +181,18 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
                 context.State = CustomSinkState.Loaded;
                 _logger.LogInformation("Created combine-sink '{Name}' with module index {Index}",
                     request.Name, moduleIndex.Value);
+
+                // Persist to YAML only on success
+                SaveConfiguration(config);
+
+                return ToResponse(request.Name, context);
             }
             else
             {
-                context.State = CustomSinkState.Error;
-                context.ErrorMessage = "Failed to load module (no module index returned)";
+                // Module failed to load - remove from tracking and throw
+                _sinks.TryRemove(request.Name, out _);
+                throw new InvalidOperationException($"Failed to load combine-sink '{request.Name}' in PulseAudio");
             }
-
-            // Persist to YAML
-            SaveConfiguration(config);
-
-            return ToResponse(request.Name, context);
         }
         catch (Exception ex)
         {
@@ -248,17 +262,18 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
                 context.State = CustomSinkState.Loaded;
                 _logger.LogInformation("Created remap-sink '{Name}' with module index {Index}",
                     request.Name, moduleIndex.Value);
+
+                // Persist to YAML only on success
+                SaveConfiguration(config);
+
+                return ToResponse(request.Name, context);
             }
             else
             {
-                context.State = CustomSinkState.Error;
-                context.ErrorMessage = "Failed to load module (no module index returned)";
+                // Module failed to load - remove from tracking and throw
+                _sinks.TryRemove(request.Name, out _);
+                throw new InvalidOperationException($"Failed to load remap-sink '{request.Name}' in PulseAudio");
             }
-
-            // Persist to YAML
-            SaveConfiguration(config);
-
-            return ToResponse(request.Name, context);
         }
         catch (Exception ex)
         {
@@ -486,8 +501,10 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
             }
             else
             {
+                // Module failed to load - set error state and throw so caller knows
                 context.State = CustomSinkState.Error;
-                context.ErrorMessage = "Failed to load module";
+                context.ErrorMessage = "Failed to load module in PulseAudio";
+                throw new InvalidOperationException($"Failed to load {config.Type}-sink '{config.Name}' in PulseAudio");
             }
         }
         catch (Exception ex)

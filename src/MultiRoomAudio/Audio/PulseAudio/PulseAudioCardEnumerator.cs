@@ -264,6 +264,91 @@ public static partial class PulseAudioCardEnumerator
     }
 
     /// <summary>
+    /// Gets all sink names belonging to a specific card.
+    /// </summary>
+    /// <param name="cardIndex">The card index to find sinks for.</param>
+    /// <returns>List of sink names belonging to the card.</returns>
+    public static List<string> GetSinksByCard(int cardIndex)
+    {
+        var sinks = new List<string>();
+
+        try
+        {
+            var output = RunPactl("list sinks");
+            if (string.IsNullOrEmpty(output))
+                return sinks;
+
+            var sinkBlocks = output.Split(new[] { "Sink #" }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var block in sinkBlocks)
+            {
+                var nameMatch = Regex.Match(block, @"Name:\s*(.+)$", RegexOptions.Multiline);
+                if (!nameMatch.Success)
+                    continue;
+
+                var cardMatch = Regex.Match(block, @"alsa\.card\s*=\s*""(\d+)""");
+                if (!cardMatch.Success)
+                {
+                    cardMatch = Regex.Match(block, @"device\.card\s*=\s*""(\d+)""");
+                }
+
+                if (!cardMatch.Success)
+                    continue;
+
+                if (int.TryParse(cardMatch.Groups[1].Value, out var sinkCard) && sinkCard == cardIndex)
+                {
+                    var sinkName = nameMatch.Groups[1].Value.Trim();
+                    sinks.Add(sinkName);
+                    _logger?.LogDebug("Found sink '{Sink}' belonging to card {Card}", sinkName, cardIndex);
+                }
+            }
+
+            _logger?.LogDebug("Found {Count} sinks for card {Card}", sinks.Count, cardIndex);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to enumerate sinks for card {Card}", cardIndex);
+        }
+
+        return sinks;
+    }
+
+    /// <summary>
+    /// Gets mute state for all sinks.
+    /// </summary>
+    public static Dictionary<string, bool> GetSinksMuteStates()
+    {
+        var muteStates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var output = RunPactl("list sinks");
+            if (string.IsNullOrEmpty(output))
+                return muteStates;
+
+            var sinkBlocks = output.Split(new[] { "Sink #" }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var block in sinkBlocks)
+            {
+                var nameMatch = Regex.Match(block, @"Name:\s*(.+)$", RegexOptions.Multiline);
+                var muteMatch = Regex.Match(block, @"Mute:\s*(yes|no)", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                if (!nameMatch.Success || !muteMatch.Success)
+                    continue;
+
+                var sinkName = nameMatch.Groups[1].Value.Trim();
+                var isMuted = muteMatch.Groups[1].Value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+                muteStates[sinkName] = isMuted;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to enumerate sink mute states");
+        }
+
+        return muteStates;
+    }
+
+    /// <summary>
     /// Maximum retries for pactl commands when PulseAudio is temporarily unavailable.
     /// </summary>
     private const int MaxPactlRetries = 3;

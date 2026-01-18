@@ -40,6 +40,12 @@ public class DeviceConfiguration
     /// Hidden devices don't appear in dropdowns by default (useful for HDMI outputs).
     /// </summary>
     public bool Hidden { get; set; }
+
+    /// <summary>
+    /// Maximum volume limit for this device (0-100%).
+    /// Applied to the PulseAudio sink at startup and when changed via API.
+    /// </summary>
+    public int? MaxVolume { get; set; }
 }
 
 /// <summary>
@@ -58,7 +64,8 @@ public class DeviceIdentifiersConfig
     /// </summary>
     public static DeviceIdentifiersConfig? FromModel(DeviceIdentifiers? identifiers)
     {
-        if (identifiers == null) return null;
+        if (identifiers == null)
+            return null;
         return new DeviceIdentifiersConfig
         {
             Serial = identifiers.Serial,
@@ -533,6 +540,38 @@ public class ConfigurationService
     }
 
     /// <summary>
+    /// Set the maximum volume limit for a device.
+    /// </summary>
+    public bool SetDeviceMaxVolume(string deviceKey, int? maxVolume, AudioDevice? currentDevice = null)
+    {
+        lock (_lock)
+        {
+            if (!_devices.TryGetValue(deviceKey, out var config))
+            {
+                config = new DeviceConfiguration
+                {
+                    FirstSeen = DateTime.UtcNow
+                };
+                _devices[deviceKey] = config;
+            }
+
+            config.MaxVolume = maxVolume;
+            config.LastSeen = DateTime.UtcNow;
+
+            // Update from current device info if provided
+            if (currentDevice != null)
+            {
+                config.LastKnownSinkName = currentDevice.Id;
+                config.Identifiers = DeviceIdentifiersConfig.FromModel(currentDevice.Identifiers);
+            }
+
+            _logger.LogInformation("Set device max volume: {DeviceKey} = {MaxVolume}%",
+                deviceKey, maxVolume?.ToString() ?? "(cleared)");
+            return SaveDevices();
+        }
+    }
+
+    /// <summary>
     /// Set the alias for a device, creating or updating its configuration.
     /// </summary>
     public bool SetDeviceAlias(string deviceKey, string? alias, AudioDevice? currentDevice = null)
@@ -638,6 +677,17 @@ public class ConfigurationService
             return _devices
                 .Where(d => !string.IsNullOrEmpty(d.Value.Alias) && !string.IsNullOrEmpty(d.Value.LastKnownSinkName))
                 .ToDictionary(d => d.Value.LastKnownSinkName!, d => d.Value.Alias!);
+        }
+    }
+
+    /// <summary>
+    /// Get all device configurations (for applying startup settings like volume limits).
+    /// </summary>
+    public IReadOnlyDictionary<string, DeviceConfiguration> GetAllDeviceConfigurations()
+    {
+        lock (_lock)
+        {
+            return new Dictionary<string, DeviceConfiguration>(_devices);
         }
     }
 }

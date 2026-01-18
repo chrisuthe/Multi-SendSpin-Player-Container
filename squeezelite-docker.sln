@@ -8,8 +8,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{E4A5C1D2
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MultiRoomAudio", "src\MultiRoomAudio\MultiRoomAudio.csproj", "{B9DCE673-00E4-8331-B9FE-93C483B4C4AB}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MultiRoomAudio.Tests", "tests\MultiRoomAudio.Tests\MultiRoomAudio.Tests.csproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,17 +18,12 @@ Global
 		{B9DCE673-00E4-8331-B9FE-93C483B4C4AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B9DCE673-00E4-8331-B9FE-93C483B4C4AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B9DCE673-00E4-8331-B9FE-93C483B4C4AB}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B9DCE673-00E4-8331-B9FE-93C483B4C4AB} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890} = {E4A5C1D2-3B4F-5A6D-8C9E-0F1A2B3C4D5E}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D85CE74A-4A92-488F-BC63-001BF92B8E08}

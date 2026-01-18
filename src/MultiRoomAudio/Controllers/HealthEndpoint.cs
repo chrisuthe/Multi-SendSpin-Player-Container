@@ -11,8 +11,8 @@ public static class HealthEndpoint
 {
     public static void MapHealthEndpoints(this WebApplication app)
     {
-        // GET /health - Basic health check
-        app.MapGet("/health", () =>
+        // GET /api/health - Basic health check
+        app.MapGet("/api/health", () =>
         {
             return Results.Ok(new HealthResponse(
                 Status: "healthy",
@@ -25,8 +25,8 @@ public static class HealthEndpoint
         .WithDescription("Basic health check endpoint")
         .WithOpenApi();
 
-        // GET /health/ready - Readiness check
-        app.MapGet("/health/ready", (PlayerManagerService manager) =>
+        // GET /api/health/ready - Readiness check
+        app.MapGet("/api/health/ready", (PlayerManagerService manager) =>
         {
             try
             {
@@ -61,8 +61,8 @@ public static class HealthEndpoint
         .WithDescription("Readiness check for container orchestration")
         .WithOpenApi();
 
-        // GET /health/live - Liveness check
-        app.MapGet("/health/live", () =>
+        // GET /api/health/live - Liveness check
+        app.MapGet("/api/health/live", () =>
         {
             return Results.Ok(new
             {

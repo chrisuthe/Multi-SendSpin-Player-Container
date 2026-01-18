@@ -2,8 +2,7 @@
 
 Complete guide for running Multi-Room Audio Controller on Home Assistant OS.
 
-> **Version 2.0**: This guide has been updated for the C# ASP.NET Core 8.0 rewrite.
-> If you are upgrading from v1.x, see the [CHANGELOG](../multiroom-audio/CHANGELOG.md) for migration notes.
+> **Version 4.0**: Now includes a guided setup wizard, custom sinks for multi-channel DACs, sound card profile management, and device-level volume limits. [See what's new](WHATS_NEW_4.0).
 
 ---
 
@@ -105,6 +104,22 @@ To change:
 **Option B - Ingress**
 1. Click **Open Web UI** on the Info tab
 
+### Step 6: Complete the Setup Wizard (First-Time Only)
+
+On first launch, the Setup Wizard automatically guides you through configuration:
+
+1. **Welcome** - Overview of multi-room audio setup
+2. **Hardware Detection** - Review detected audio cards and devices
+3. **Sound Card Configuration** - Set profiles for multi-channel devices
+4. **Player Creation** - Create players for each zone/room
+5. **Audio Testing** - Verify audio plays on correct outputs
+6. **Complete** - Start using your multi-room system
+
+**Tips:**
+- Skip any step you want to configure later
+- Re-run the wizard anytime from **Settings > Run Setup Wizard**
+- The wizard only appears for new installations (no existing players)
+
 ---
 
 ## Audio Device Setup
@@ -203,6 +218,50 @@ If you run Music Assistant as an add-on (recommended setup):
 1. Stop the player first
 2. Click the **Delete** (trash) icon
 3. Confirm deletion
+
+---
+
+## Advanced Features (4.0+)
+
+### Sound Card Profiles
+
+Many USB DACs and audio interfaces support multiple operational modes. Access **Settings > Sound Card Setup** to:
+
+- View all detected sound cards
+- See available profiles (stereo, surround, pro audio, etc.)
+- Switch profiles to enable multi-channel output
+- Profiles persist across reboots
+
+**Common use case**: Your multi-channel DAC shows only stereo. Switch to "Analog Surround 4.0" or "Pro Audio" profile to enable all channels.
+
+See [Sound Card Setup Guide](SOUND_CARD_SETUP) for detailed instructions.
+
+### Custom Sinks
+
+Create virtual audio outputs for advanced configurations. Access **Settings > Custom Sinks** to create:
+
+**Combine Sinks** - Play audio on multiple outputs simultaneously
+- Party mode (all rooms together)
+- Open floor plans
+- Redundant announcements
+
+**Remap Sinks** - Extract channels from multi-channel devices
+- Split 4-channel DAC into 2 stereo zones
+- Use surround receiver as multi-zone amp
+- Route specific channels to specific outputs
+
+See [Custom Sinks Guide](CUSTOM_SINKS) for step-by-step instructions.
+
+### Device Volume Limits
+
+Set maximum volume limits per sound card for safety:
+
+- Navigate to Settings > Sound Cards
+- Use the **Limit Max. Vol.** slider for each card
+- Volume limit is applied at the device level
+- Prevents accidental over-driving of speakers
+
+Settings persist across restarts and are applied automatically at startup.
 
 ---
 
@@ -329,6 +388,24 @@ No. One add-on instance manages all players. Create multiple players within the 
 ### Does this work with Bluetooth speakers?
 
 Bluetooth audio in HAOS is limited. Check HA's Bluetooth integration first. If your speaker appears as a PulseAudio sink, it may work.
+
+### How do I split a multi-channel DAC?
+
+1. Go to **Settings > Sound Card Setup** and enable a multi-channel profile
+2. Go to **Settings > Custom Sinks** and create Remap Sinks for each stereo pair
+3. Create players using the new remap sinks
+
+See [Custom Sinks Guide](CUSTOM_SINKS) for detailed walkthrough.
+
+### Can I play the same audio on multiple outputs?
+
+Yes! Create a Combine Sink in **Settings > Custom Sinks**. Select multiple outputs to combine, then create a player using the combined sink.
+
+### The setup wizard didn't appear
+
+The wizard only shows for new installations with no existing players. To run it manually:
+1. Go to **Settings > Run Setup Wizard**, or
+2. Go to **Settings > Reset First-Run State** then refresh the page
 
 ---
 

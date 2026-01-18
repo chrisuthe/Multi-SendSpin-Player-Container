@@ -2,6 +2,8 @@
 
 **Time to first audio**: 5 minutes | **Difficulty**: Beginner
 
+> **New in 4.0**: The setup wizard now guides you through initial configuration automatically. Just install and follow the prompts!
+
 ---
 
 ## The Problem
@@ -65,9 +67,30 @@ docker run -d \
 
 Navigate to: `http://YOUR-SERVER-IP:8096`
 
-You should see the Multi-Room Audio Controller dashboard.
+**First-time users**: The Setup Wizard launches automatically to guide you through:
+1. Detecting your audio hardware
+2. Configuring sound card profiles (if applicable)
+3. Creating your first players
+4. Testing audio output
 
-### Step 3: Create Your First Player
+**Returning users**: You'll see the main dashboard with your existing players.
+
+### Step 3: Follow the Setup Wizard (New Installations)
+
+The wizard walks you through configuration:
+
+1. **Welcome**: Overview of what you'll set up
+2. **Hardware**: Review detected audio devices
+3. **Configure**: Set up sound card profiles for multi-channel devices
+4. **Create Players**: Name your zones and assign devices
+5. **Test**: Verify audio plays correctly
+6. **Done**: Start using your multi-room system
+
+**Tip**: You can skip the wizard and configure manually, or re-run it anytime from **Settings > Run Setup Wizard**.
+
+### Step 3 (Alternative): Create Players Manually
+
+If you skipped the wizard or need to add more players:
 
 1. Click **"Add Player"**
 2. Fill in the form:
@@ -142,7 +165,22 @@ After restarting the container, your custom ALSA devices will appear in the devi
 3. Enable **Show in sidebar** (optional but recommended)
 4. Click **Open Web UI**
 
-### Step 4: Create Your First Player
+### Step 4: Follow the Setup Wizard
+
+On first launch, the Setup Wizard guides you through:
+
+1. **Hardware detection**: See all available audio devices
+2. **Sound card configuration**: Set up profiles for multi-channel devices
+3. **Player creation**: Create players for each room/zone
+4. **Audio testing**: Verify everything works
+
+The wizard makes setup simple - just follow the prompts!
+
+**Tip**: Re-run the wizard anytime from **Settings > Run Setup Wizard** when adding new hardware.
+
+### Step 4 (Alternative): Manual Setup
+
+If you prefer manual configuration or need to add more players:
 
 1. Click **"Add Player"**
 2. Fill in the form:
@@ -192,6 +230,9 @@ After restarting the container, your custom ALSA devices will appear in the devi
 
 | Goal | Documentation |
 |------|---------------|
-| Full HAOS setup | [HAOS Add-on Guide](HAOS_ADDON_GUIDE.md) |
-| Understand the architecture | [Architecture](ARCHITECTURE.md) |
-| Something not working | Troubleshooting |
+| See all new features | [What's New in 4.0](WHATS_NEW_4.0) |
+| Full HAOS setup | [HAOS Add-on Guide](HAOS_ADDON_GUIDE) |
+| Split multi-channel DAC | [Custom Sinks Guide](CUSTOM_SINKS) |
+| Configure sound cards | [Sound Card Setup](SOUND_CARD_SETUP) |
+| Understand the architecture | [Architecture](ARCHITECTURE) |
+| Something not working | [Troubleshooting](Home#troubleshooting) |

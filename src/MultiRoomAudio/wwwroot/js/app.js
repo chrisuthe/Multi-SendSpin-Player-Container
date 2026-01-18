@@ -4,6 +4,97 @@
 let players = {};
 let devices = [];
 let connection = null;
+let currentBuildVersion = null; // Stored build version for comparison
+let isUserInteracting = false; // Track if user is dragging a slider
+let pendingUpdate = null; // Store pending updates during interaction
+
+function formatBuildVersion(apiInfo) {
+    const version = apiInfo?.version;
+    if (typeof version === 'string' && version.trim()) {
+        return version.trim();
+    }
+
+    const build = apiInfo?.build;
+    if (typeof build === 'string' && build.trim()) {
+        const trimmedBuild = build.trim();
+        if (trimmedBuild.startsWith('sha-')) {
+            return trimmedBuild;
+        }
+        return `sha-${trimmedBuild.slice(0, 7)}`;
+    }
+
+    return 'unknown';
+}
+
+async function refreshBuildInfo() {
+    const buildVersion = document.getElementById('build-version');
+    if (!buildVersion) return;
+
+    try {
+        const response = await fetch('./api');
+        if (!response.ok) throw new Error('Failed to fetch build info');
+
+        const data = await response.json();
+        const formattedVersion = formatBuildVersion(data);
+        buildVersion.textContent = formattedVersion;
+        buildVersion.title = data?.build ? `Full build: ${data.build}` : '';
+
+        // Store the full build string for version comparison
+        if (currentBuildVersion === null) {
+            // First load - store the version
+            currentBuildVersion = data?.build || formattedVersion;
+            console.log('Initial build version:', currentBuildVersion);
+        }
+    } catch (error) {
+        console.error('Error fetching build info:', error);
+        buildVersion.textContent = 'unknown';
+        buildVersion.title = '';
+    }
+}
+
+/**
+ * Checks if the backend version has changed and reloads the page if needed.
+ * Called on SignalR reconnect and periodically as a fallback.
+ */
+async function checkVersionAndReload() {
+    try {
+        const response = await fetch('./api');
+        if (!response.ok) return; // Silently fail - backend might be starting
+
+        const data = await response.json();
+        const serverVersion = data?.build || formatBuildVersion(data);
+
+        // If we have a stored version and it differs from server, reload
+        if (currentBuildVersion !== null && currentBuildVersion !== serverVersion) {
+            console.log(`Version changed: ${currentBuildVersion} → ${serverVersion}. Reloading page...`);
+            showAlert('Backend updated - reloading page...', 'info', 2000);
+
+            // Wait 2 seconds to show the alert, then reload
+            setTimeout(() => {
+                window.location.reload(true); // Hard reload (bypass cache)
+            }, 2000);
+        }
+    } catch (error) {
+        // Silently fail - backend might be restarting
+        console.debug('Version check failed (backend might be restarting):', error);
+    }
+}
+
+/**
+ * Get display name for a device ID.
+ * Returns alias if available, otherwise name, otherwise the ID itself.
+ * @param {string} deviceId - The device ID (sink name)
+ * @returns {string} Human-readable device name
+ */
+function getDeviceDisplayName(deviceId) {
+    if (!deviceId) return 'Default';
+
+    const device = devices.find(d => d.id === deviceId);
+    if (device) {
+        return device.alias || device.name || deviceId;
+    }
+    return deviceId;  // Fallback to ID if device not found
+}
 
 // XSS protection
 function escapeHtml(text) {
@@ -20,10 +111,27 @@ function formatSampleRate(rate) {
     return rate + 'Hz';
 }
 
+/**
+ * Format a channel name for display (e.g., "front-left" → "Front L")
+ * @param {string} channel - The channel name from PulseAudio
+ * @returns {string} Human-readable channel name
+ */
+function formatChannelName(channel) {
+    const map = {
+        'front-left': 'Front L', 'front-right': 'Front R',
+        'rear-left': 'Rear L', 'rear-right': 'Rear R',
+        'front-center': 'Center', 'lfe': 'LFE',
+        'side-left': 'Side L', 'side-right': 'Side R',
+        'mono': 'Mono'
+    };
+    return map[channel?.toLowerCase()] || channel || 'Unknown';
+}
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
     // Load initial data
     await Promise.all([
+        refreshBuildInfo(),
         refreshStatus(),
         refreshDevices()
     ]);
@@ -40,8 +148,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Set up SignalR connection
     setupSignalR();
 
+    // Check if onboarding wizard should show on fresh install
+    if (typeof Wizard !== 'undefined') {
+        const shouldShow = await Wizard.shouldShow();
+        if (shouldShow) {
+            await Wizard.show();
+        }
+    }
+
     // Poll for status updates as fallback
     setInterval(refreshStatus, 5000);
+
+    // Periodic version check (every 30 seconds) as fallback
+    setInterval(checkVersionAndReload, 30000);
 });
 
 // SignalR setup
@@ -69,7 +188,14 @@ function setupSignalR() {
             (data.players || []).forEach(p => {
                 players[p.name] = p;
             });
-            renderPlayers();
+
+            // If user is interacting with a slider, defer the update
+            if (isUserInteracting) {
+                console.log('Deferring update - user is interacting');
+                pendingUpdate = { players: { ...players } };
+            } else {
+                renderPlayers();
+            }
         }
     });
 
@@ -81,6 +207,9 @@ function setupSignalR() {
     connection.onreconnected(() => {
         statusBadge.textContent = 'Connected';
         statusBadge.className = 'badge bg-success me-2';
+
+        // Check if backend version changed after reconnection
+        checkVersionAndReload();
     });
 
     connection.onclose(() => {
@@ -135,7 +264,7 @@ async function refreshDevices() {
             devices.forEach(device => {
                 const option = document.createElement('option');
                 option.value = device.id;
-                option.textContent = `${device.name}${device.isDefault ? ' (default)' : ''}`;
+                option.textContent = `${device.alias || device.name}${device.isDefault ? ' (default)' : ''}`;
                 select.appendChild(option);
             });
             if (currentValue) select.value = currentValue;
@@ -253,16 +382,7 @@ async function savePlayer() {
 
             const result = await response.json();
             const finalName = result.playerName || name;
-
-            // If restart is needed, trigger it
-            if (result.needsRestart) {
-                const restartResponse = await fetch(`./api/players/${encodeURIComponent(finalName)}/restart`, {
-                    method: 'POST'
-                });
-                if (!restartResponse.ok) {
-                    console.warn('Restart request failed, player may need manual restart');
-                }
-            }
+            const wasRenamed = name !== editingName;
 
             // Close modal and refresh
             bootstrap.Modal.getInstance(document.getElementById('playerModal')).hide();
@@ -270,8 +390,26 @@ async function savePlayer() {
             document.getElementById('initialVolumeValue').textContent = '75%';
             await refreshStatus();
 
+            // Show appropriate message based on changes
             if (result.needsRestart) {
-                showAlert(`Player "${finalName}" updated and restarted`, 'success');
+                if (wasRenamed) {
+                    // For renames, offer to restart rather than auto-restart
+                    // The name change is saved locally, but Music Assistant needs a restart to see it
+                    showAlert(
+                        `Player renamed to "${finalName}". Restart the player for the name to appear in Music Assistant.`,
+                        'info',
+                        8000 // Show for longer since it's actionable
+                    );
+                } else {
+                    // For other changes requiring restart (e.g., server URL), auto-restart
+                    const restartResponse = await fetch(`./api/players/${encodeURIComponent(finalName)}/restart`, {
+                        method: 'POST'
+                    });
+                    if (!restartResponse.ok) {
+                        console.warn('Restart request failed, player may need manual restart');
+                    }
+                    showAlert(`Player "${finalName}" updated and restarted`, 'success');
+                }
             } else {
                 showAlert(`Player "${finalName}" updated successfully`, 'success');
             }
@@ -398,6 +536,36 @@ async function setVolume(name, volume) {
     }
 }
 
+/**
+ * Set the hardware volume limit for a player's audio device.
+ * This controls the PulseAudio sink volume (physical output level).
+ */
+async function setStartupVolume(name, volume) {
+    try {
+        const response = await fetch(`./api/players/${encodeURIComponent(name)}/startup-volume`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ volume: parseInt(volume) })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to set startup volume');
+        }
+
+        // Update local state
+        if (players[name]) {
+            players[name].startupVolume = parseInt(volume);
+        }
+
+        showAlert(`Startup volume set to ${volume}% (takes effect on next restart)`, 'success', 2000);
+    } catch (error) {
+        console.error('Error setting startup volume:', error);
+        showAlert(error.message, 'danger');
+    }
+}
+
+
 async function setDelay(name, delayMs) {
     // Clamp value to valid range
     delayMs = Math.max(-5000, Math.min(5000, parseInt(delayMs) || 0));
@@ -484,7 +652,7 @@ async function showPlayerStats(name) {
                 <h6 class="text-muted text-uppercase small">Configuration</h6>
                 <table class="table table-sm">
                     <tr><td><strong>Name</strong></td><td>${escapeHtml(player.name)}</td></tr>
-                    <tr><td><strong>Device</strong></td><td>${escapeHtml(player.device || 'default')}</td></tr>
+                    <tr><td><strong>Device</strong></td><td>${escapeHtml(getDeviceDisplayName(player.device))}</td></tr>
                     <tr><td><strong>Client ID</strong></td><td><code>${escapeHtml(player.clientId)}</code></td></tr>
                     <tr><td><strong>Server</strong></td><td>${escapeHtml(player.serverUrl || 'Auto-discovered')}</td></tr>
                     <tr><td><strong>Volume</strong></td><td>${player.volume}%</td></tr>
@@ -615,16 +783,41 @@ function renderPlayers() {
                         <div class="status-container mb-3">
                             <span class="status-indicator ${stateClass}"></span>
                             <span class="badge bg-${stateBadgeClass}">${player.state}</span>
-                            <small class="text-muted ms-2">${escapeHtml(player.device || 'default')}</small>
+                            <small class="text-muted ms-2">${escapeHtml(getDeviceDisplayName(player.device))}</small>
                         </div>
 
-                        <div class="volume-control">
+                        <div class="volume-control mb-3 pt-2 border-top">
+                            <div class="d-flex align-items-center mb-1">
+                                <i class="fas fa-volume-up me-1"></i>
+                                <span class="small fw-semibold">Current Volume</span>
+                                <i class="fas fa-info-circle ms-1 text-muted small volume-tooltip"
+                                   data-bs-toggle="tooltip"
+                                   data-bs-placement="top"
+                                   data-bs-title="Current playback volume (syncs with Music Assistant)"></i>
+                            </div>
                             <div class="d-flex align-items-center">
-                                <i class="fas fa-volume-down me-2"></i>
-                                <input type="range" class="form-range flex-grow-1" min="0" max="100" value="${player.volume}"
+                                <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100" value="${player.volume}"
                                     onchange="setVolume('${escapeHtml(name)}', this.value)"
                                     oninput="this.nextElementSibling.textContent = this.value + '%'">
-                                <span class="volume-display ms-2">${player.volume}%</span>
+                                <span class="volume-display ms-2 small">${player.volume}%</span>
+                            </div>
+                        </div>
+
+                        <div class="startup-volume-section mb-3 pt-2 border-top">
+                            <div class="d-flex align-items-center mb-1">
+                                <i class="fas fa-power-off me-1 text-muted small"></i>
+                                <span class="small text-muted">Startup Volume</span>
+                                <i class="fas fa-info-circle ms-1 text-muted small volume-tooltip"
+                                   data-bs-toggle="tooltip"
+                                   data-bs-placement="top"
+                                   data-bs-title="Initial volume sent when player connects (on container or player restart)"></i>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100"
+                                       value="${player.startupVolume || player.volume}"
+                                       onchange="setStartupVolume('${escapeHtml(name)}', this.value)"
+                                       oninput="this.nextElementSibling.textContent = this.value + '%'">
+                                <span class="volume-display ms-2 small">${player.startupVolume || player.volume}%</span>
                             </div>
                         </div>
 
@@ -641,6 +834,92 @@ function renderPlayers() {
             </div>
         `;
     }).join('');
+
+    // Initialize Bootstrap tooltips for the rendered elements
+    initializeTooltips();
+
+    // Attach interaction tracking to all volume sliders
+    attachSliderInteractionHandlers();
+}
+
+/**
+ * Attaches mousedown/mouseup/touchstart/touchend handlers to volume sliders
+ * to track user interaction and prevent DOM updates during drag.
+ */
+function attachSliderInteractionHandlers() {
+    const sliders = document.querySelectorAll('.volume-slider');
+
+    sliders.forEach(slider => {
+        // Mouse events
+        slider.addEventListener('mousedown', () => {
+            isUserInteracting = true;
+            console.log('Slider interaction started (mouse)');
+        });
+
+        // Touch events
+        slider.addEventListener('touchstart', () => {
+            isUserInteracting = true;
+            console.log('Slider interaction started (touch)');
+        });
+    });
+
+    // Global handlers for mouse/touch release
+    // These fire when user releases anywhere, not just on the slider
+    const handleInteractionEnd = () => {
+        if (isUserInteracting) {
+            isUserInteracting = false;
+            console.log('Slider interaction ended');
+
+            // Apply any pending updates
+            if (pendingUpdate) {
+                console.log('Applying pending update');
+                players = pendingUpdate.players;
+                pendingUpdate = null;
+                renderPlayers();
+            }
+        }
+    };
+
+    // Use 'once: false' and remove old listeners to avoid duplicates
+    document.removeEventListener('mouseup', handleInteractionEnd);
+    document.removeEventListener('touchend', handleInteractionEnd);
+    document.addEventListener('mouseup', handleInteractionEnd);
+    document.addEventListener('touchend', handleInteractionEnd);
+}
+
+/**
+ * Disposes all existing Bootstrap tooltips to prevent memory leaks and conflicts.
+ * Also removes any orphaned tooltip popover elements from the DOM.
+ */
+function disposeTooltips() {
+    const tooltipElements = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+    tooltipElements.forEach(element => {
+        const tooltip = bootstrap.Tooltip.getInstance(element);
+        if (tooltip) {
+            tooltip.dispose();
+        }
+    });
+
+    // Aggressively remove any orphaned tooltip popovers from the DOM
+    // These can be left behind when tooltips are disposed while visible
+    const orphanedTooltips = document.querySelectorAll('.tooltip');
+    orphanedTooltips.forEach(tooltipElement => {
+        tooltipElement.remove();
+    });
+}
+
+/**
+ * Initializes Bootstrap tooltips for elements with data-bs-toggle="tooltip"
+ */
+function initializeTooltips() {
+    // First dispose any existing tooltips to prevent conflicts
+    disposeTooltips();
+
+    // Then create new tooltip instances
+    const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+    tooltipTriggerList.forEach(tooltipTriggerEl => {
+        new bootstrap.Tooltip(tooltipTriggerEl);
+    });
 }
 
 function getStateClass(state) {
@@ -671,7 +950,7 @@ function getStateBadgeClass(state) {
 }
 
 // Alert helpers
-function showAlert(message, type = 'info') {
+function showAlert(message, type = 'info', duration = 5000) {
     const container = document.getElementById('alert-container');
     const alert = document.createElement('div');
     alert.className = `alert alert-${type} alert-dismissible fade show`;
@@ -681,11 +960,11 @@ function showAlert(message, type = 'info') {
     `;
     container.appendChild(alert);
 
-    // Auto-dismiss after 5 seconds
+    // Auto-dismiss after specified duration
     setTimeout(() => {
         alert.classList.remove('show');
         setTimeout(() => alert.remove(), 150);
-    }, 5000);
+    }, duration);
 }
 
 // ========== Stats for Nerds ==========
@@ -1014,6 +1293,7 @@ function renderSinks() {
         const typeIcon = sink.type === 'Combine' ? 'fa-layer-group' : 'fa-random';
         const typeBadgeClass = sink.type === 'Combine' ? 'bg-info' : 'bg-secondary';
         const stateBadgeClass = getSinkStateBadgeClass(sink.state);
+        const isLoaded = sink.state === 'Loaded';
 
         return `
             <div class="col-md-6 mb-3">
@@ -1024,17 +1304,28 @@ function renderSinks() {
                                 <i class="fas ${typeIcon} me-2 text-muted"></i>
                                 ${escapeHtml(sink.name)}
                             </h6>
-                            <div class="dropdown">
-                                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown">
-                                    <i class="fas fa-ellipsis-v"></i>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-primary"
+                                        id="sink-test-btn-${escapeHtml(name)}"
+                                        onclick="playTestToneForSink('${escapeHtml(name)}')"
+                                        title="Play test tone"
+                                        ${!isLoaded ? 'disabled' : ''}>
+                                    <i class="fas fa-volume-up"></i>
                                 </button>
-                                <ul class="dropdown-menu dropdown-menu-end">
-                                    <li><a class="dropdown-item" href="#" onclick="reloadSink('${escapeHtml(name)}'); return false;">
-                                        <i class="fas fa-sync me-2"></i>Reload</a></li>
-                                    <li><hr class="dropdown-divider"></li>
-                                    <li><a class="dropdown-item text-danger" href="#" onclick="deleteSink('${escapeHtml(name)}'); return false;">
-                                        <i class="fas fa-trash me-2"></i>Delete</a></li>
-                                </ul>
+                                <div class="dropdown">
+                                    <button class="btn btn-outline-secondary" data-bs-toggle="dropdown">
+                                        <i class="fas fa-ellipsis-v"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item" href="#" onclick="editSink('${escapeHtml(name)}'); return false;">
+                                            <i class="fas fa-edit me-2"></i>Edit</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="reloadSink('${escapeHtml(name)}'); return false;">
+                                            <i class="fas fa-sync me-2"></i>Reload</a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><a class="dropdown-item text-danger" href="#" onclick="deleteSink('${escapeHtml(name)}'); return false;">
+                                            <i class="fas fa-trash me-2"></i>Delete</a></li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
 
@@ -1043,15 +1334,31 @@ function renderSinks() {
 
                         ${sink.description ? `<p class="text-muted mt-2 mb-0 small">${escapeHtml(sink.description)}</p>` : ''}
 
-                        ${sink.slaves ? `
+                        ${sink.slaves && sink.slaves.length > 0 ? `
                             <div class="mt-2">
-                                <small class="text-muted"><i class="fas fa-link me-1"></i>${sink.slaves.length} devices combined</small>
+                                <small class="text-muted d-block mb-1"><i class="fas fa-link me-1"></i>Combined devices:</small>
+                                <div class="d-flex flex-wrap gap-1">
+                                    ${sink.slaves.map(s => `<span class="sink-device-badge">${escapeHtml(getDeviceDisplayName(s))}</span>`).join('')}
+                                </div>
                             </div>
                         ` : ''}
 
                         ${sink.masterSink ? `
                             <div class="mt-2">
-                                <small class="text-muted"><i class="fas fa-arrow-right me-1"></i>From: ${escapeHtml(sink.masterSink)}</small>
+                                <small class="text-muted"><i class="fas fa-arrow-right me-1"></i>From: ${escapeHtml(getDeviceDisplayName(sink.masterSink))}</small>
+                            </div>
+                        ` : ''}
+
+                        ${sink.channelMap && sink.channelMap.length > 0 ? `
+                            <div class="channel-mapping mt-2">
+                                <small class="text-muted d-block mb-1"><i class="fas fa-random me-1"></i>Channel mapping:</small>
+                                ${sink.channelMap.map(m => `
+                                    <div class="channel-mapping-row">
+                                        <span>${formatChannelName(m.outputChannel)}</span>
+                                        <span class="text-muted">←</span>
+                                        <span>${formatChannelName(m.sourceChannel)}</span>
+                                    </div>
+                                `).join('')}
                             </div>
                         ` : ''}
 
@@ -1080,71 +1387,141 @@ function getSinkStateBadgeClass(state) {
     return stateMap[state] || 'secondary';
 }
 
-// Open Combine Sink Modal
-function openCombineSinkModal() {
+// Track if we're editing an existing sink
+let editingCombineSink = null;
+let editingRemapSink = null;
+
+// Cached modal instances to avoid creating duplicates
+let combineSinkModalInstance = null;
+let remapSinkModalInstance = null;
+let importSinksModalInstance = null;
+
+// Open Combine Sink Modal (editData is optional - if provided, we're editing)
+function openCombineSinkModal(editData = null) {
     // Hide parent modal to avoid stacking issues
     if (customSinksModal) {
         customSinksModal.hide();
     }
 
-    // Reset form
-    document.getElementById('combineSinkName').value = '';
-    document.getElementById('combineSinkDesc').value = '';
+    // Track if editing
+    editingCombineSink = editData;
+
+    // Update modal title based on mode
+    const modalTitle = document.querySelector('#combineSinkModal .modal-title');
+    if (modalTitle) {
+        modalTitle.textContent = editData ? 'Edit Combine Sink' : 'Create Combine Sink';
+    }
+
+    // Update button text
+    const createBtn = document.querySelector('#combineSinkModal .btn-primary');
+    if (createBtn) {
+        createBtn.textContent = editData ? 'Save Changes' : 'Create Sink';
+    }
+
+    // Fill form with existing data or reset
+    const nameInput = document.getElementById('combineSinkName');
+    nameInput.value = editData ? editData.name : '';
+    nameInput.disabled = !!editData; // Disable name field when editing, enable for create
+    document.getElementById('combineSinkDesc').value = editData?.description || '';
 
     // Populate device list
     const deviceList = document.getElementById('combineDeviceList');
     if (devices.length === 0) {
         deviceList.innerHTML = '<div class="text-center py-2 text-muted">No devices available</div>';
     } else {
+        const selectedSlaves = editData?.slaves || [];
         deviceList.innerHTML = devices.map(d => `
             <div class="form-check device-checkbox-item">
-                <input class="form-check-input" type="checkbox" value="${escapeHtml(d.id)}" id="combine-${escapeHtml(d.id)}">
+                <input class="form-check-input" type="checkbox" value="${escapeHtml(d.id)}" id="combine-${escapeHtml(d.id)}"
+                    ${selectedSlaves.includes(d.id) ? 'checked' : ''}>
                 <label class="form-check-label" for="combine-${escapeHtml(d.id)}">
-                    ${escapeHtml(d.name)}
+                    ${escapeHtml(d.alias || d.name)}
                     ${d.isDefault ? '<span class="badge bg-primary ms-1">default</span>' : ''}
                 </label>
             </div>
         `).join('');
     }
 
-    const combineModal = new bootstrap.Modal(document.getElementById('combineSinkModal'));
-    // Reopen parent modal when this one closes
-    document.getElementById('combineSinkModal').addEventListener('hidden.bs.modal', function handler() {
-        document.getElementById('combineSinkModal').removeEventListener('hidden.bs.modal', handler);
-        if (customSinksModal) {
-            customSinksModal.show();
-        }
-    });
-    combineModal.show();
+    // Get or create modal instance (avoid creating duplicates)
+    const modalEl = document.getElementById('combineSinkModal');
+    if (!combineSinkModalInstance) {
+        combineSinkModalInstance = new bootstrap.Modal(modalEl);
+        // Set up the hidden event handler once
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            editingCombineSink = null; // Clear edit state
+            if (customSinksModal) {
+                customSinksModal.show();
+            }
+        });
+    }
+    combineSinkModalInstance.show();
 }
 
-// Open Remap Sink Modal
-function openRemapSinkModal() {
+// Open Remap Sink Modal (editData is optional - if provided, we're editing)
+function openRemapSinkModal(editData = null) {
     // Hide parent modal to avoid stacking issues
     if (customSinksModal) {
         customSinksModal.hide();
     }
 
-    // Reset form
-    document.getElementById('remapSinkName').value = '';
-    document.getElementById('remapSinkDesc').value = '';
+    // Track if editing
+    editingRemapSink = editData;
+
+    // Update modal title based on mode
+    const modalTitle = document.querySelector('#remapSinkModal .modal-title');
+    if (modalTitle) {
+        modalTitle.textContent = editData ? 'Edit Remap Sink' : 'Create Remap Sink';
+    }
+
+    // Update button text
+    const createBtn = document.querySelector('#remapSinkModal .btn-primary');
+    if (createBtn) {
+        createBtn.textContent = editData ? 'Save Changes' : 'Create Sink';
+    }
+
+    // Fill form with existing data or reset
+    const nameInput = document.getElementById('remapSinkName');
+    nameInput.value = editData ? editData.name : '';
+    nameInput.disabled = !!editData; // Disable name field when editing, enable for create
+    document.getElementById('remapSinkDesc').value = editData?.description || '';
 
     // Populate master device dropdown
     const masterSelect = document.getElementById('remapMasterDevice');
     masterSelect.innerHTML = '<option value="">Select a device...</option>' +
-        devices.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)} (${d.maxChannels}ch)</option>`).join('');
+        devices.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)</option>`).join('');
+
+    // Set master device if editing
+    if (editData?.masterSink) {
+        masterSelect.value = editData.masterSink;
+    }
 
     updateChannelPicker();
 
-    const remapModal = new bootstrap.Modal(document.getElementById('remapSinkModal'));
-    // Reopen parent modal when this one closes
-    document.getElementById('remapSinkModal').addEventListener('hidden.bs.modal', function handler() {
-        document.getElementById('remapSinkModal').removeEventListener('hidden.bs.modal', handler);
-        if (customSinksModal) {
-            customSinksModal.show();
+    // Set channel mappings if editing
+    if (editData?.channelMappings && editData.channelMappings.length >= 2) {
+        const leftMapping = editData.channelMappings.find(m => m.outputChannel === 'front-left');
+        const rightMapping = editData.channelMappings.find(m => m.outputChannel === 'front-right');
+        if (leftMapping) {
+            document.getElementById('leftChannel').value = leftMapping.masterChannel;
         }
-    });
-    remapModal.show();
+        if (rightMapping) {
+            document.getElementById('rightChannel').value = rightMapping.masterChannel;
+        }
+    }
+
+    // Get or create modal instance (avoid creating duplicates)
+    const modalEl = document.getElementById('remapSinkModal');
+    if (!remapSinkModalInstance) {
+        remapSinkModalInstance = new bootstrap.Modal(modalEl);
+        // Set up the hidden event handler once
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            editingRemapSink = null; // Clear edit state
+            if (customSinksModal) {
+                customSinksModal.show();
+            }
+        });
+    }
+    remapSinkModalInstance.show();
 }
 
 // Update channel picker based on selected master device
@@ -1198,12 +1575,13 @@ function updateChannelPicker() {
     rightChannel.value = 'front-right';
 }
 
-// Create combine sink
+// Create or update combine sink
 async function createCombineSink() {
     const name = document.getElementById('combineSinkName').value.trim();
     const description = document.getElementById('combineSinkDesc').value.trim();
     const checkboxes = document.querySelectorAll('#combineDeviceList input:checked');
     const slaves = Array.from(checkboxes).map(cb => cb.value);
+    const isEditing = !!editingCombineSink;
 
     if (!name) {
         showAlert('Please enter a sink name', 'warning');
@@ -1216,6 +1594,18 @@ async function createCombineSink() {
     }
 
     try {
+        // If editing, delete the old sink first
+        if (isEditing) {
+            const deleteResponse = await fetch(`./api/sinks/${encodeURIComponent(name)}`, {
+                method: 'DELETE'
+            });
+            if (!deleteResponse.ok) {
+                const error = await deleteResponse.json();
+                throw new Error(error.message || 'Failed to delete existing sink');
+            }
+        }
+
+        // Create the sink (new or recreated with updates)
         const response = await fetch('./api/sinks/combine', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1227,22 +1617,25 @@ async function createCombineSink() {
             throw new Error(error.message || 'Failed to create sink');
         }
 
-        bootstrap.Modal.getInstance(document.getElementById('combineSinkModal')).hide();
+        if (combineSinkModalInstance) {
+            combineSinkModalInstance.hide();
+        }
         await refreshSinks();
         await refreshDevices(); // Custom sink should now appear in device list
-        showAlert(`Combine sink "${name}" created successfully`, 'success');
+        showAlert(`Combine sink "${name}" ${isEditing ? 'updated' : 'created'} successfully`, 'success');
     } catch (error) {
         showAlert(error.message, 'danger');
     }
 }
 
-// Create remap sink
+// Create or update remap sink
 async function createRemapSink() {
     const name = document.getElementById('remapSinkName').value.trim();
     const description = document.getElementById('remapSinkDesc').value.trim();
     const masterSink = document.getElementById('remapMasterDevice').value;
     const leftChannel = document.getElementById('leftChannel').value;
     const rightChannel = document.getElementById('rightChannel').value;
+    const isEditing = !!editingRemapSink;
 
     if (!name) {
         showAlert('Please enter a sink name', 'warning');
@@ -1260,6 +1653,18 @@ async function createRemapSink() {
     ];
 
     try {
+        // If editing, delete the old sink first
+        if (isEditing) {
+            const deleteResponse = await fetch(`./api/sinks/${encodeURIComponent(name)}`, {
+                method: 'DELETE'
+            });
+            if (!deleteResponse.ok) {
+                const error = await deleteResponse.json();
+                throw new Error(error.message || 'Failed to delete existing sink');
+            }
+        }
+
+        // Create the sink (new or recreated with updates)
         const response = await fetch('./api/sinks/remap', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1278,10 +1683,12 @@ async function createRemapSink() {
             throw new Error(error.message || 'Failed to create sink');
         }
 
-        bootstrap.Modal.getInstance(document.getElementById('remapSinkModal')).hide();
+        if (remapSinkModalInstance) {
+            remapSinkModalInstance.hide();
+        }
         await refreshSinks();
         await refreshDevices(); // Custom sink should now appear in device list
-        showAlert(`Remap sink "${name}" created successfully`, 'success');
+        showAlert(`Remap sink "${name}" ${isEditing ? 'updated' : 'created'} successfully`, 'success');
     } catch (error) {
         showAlert(error.message, 'danger');
     }
@@ -1328,8 +1735,58 @@ async function reloadSink(name) {
     }
 }
 
+// Edit sink - opens the appropriate modal pre-filled with existing values
+function editSink(name) {
+    const sink = customSinks[name];
+    if (!sink) {
+        showAlert(`Sink "${name}" not found`, 'warning');
+        return;
+    }
+
+    if (sink.type === 'Combine') {
+        openCombineSinkModal(sink);
+    } else if (sink.type === 'Remap') {
+        openRemapSinkModal(sink);
+    } else {
+        showAlert(`Unknown sink type: ${sink.type}`, 'warning');
+    }
+}
+
+// Play test tone for custom sink
+async function playTestToneForSink(name) {
+    const btn = document.getElementById(`sink-test-btn-${name}`);
+    if (!btn) return;
+
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    btn.disabled = true;
+
+    try {
+        const response = await fetch(`./api/sinks/${encodeURIComponent(name)}/test-tone`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ frequencyHz: 1000, durationMs: 1500 })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to play test tone');
+        }
+    } catch (error) {
+        showAlert(`Test tone failed: ${error.message}`, 'danger');
+    } finally {
+        btn.innerHTML = originalContent;
+        btn.disabled = false;
+    }
+}
+
 // Open import modal
 async function openImportModal() {
+    // Hide parent modal to avoid stacking issues
+    if (customSinksModal) {
+        customSinksModal.hide();
+    }
+
     const list = document.getElementById('importSinksList');
     const empty = document.getElementById('importEmpty');
     const unavailable = document.getElementById('importUnavailable');
@@ -1342,8 +1799,18 @@ async function openImportModal() {
     unavailable.classList.add('d-none');
     importBtn.disabled = false;
 
-    const modal = new bootstrap.Modal(document.getElementById('importSinksModal'));
-    modal.show();
+    // Get or create cached modal instance
+    const modalEl = document.getElementById('importSinksModal');
+    if (!importSinksModalInstance) {
+        importSinksModalInstance = new bootstrap.Modal(modalEl);
+        // Re-show parent modal when this one closes
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            if (customSinksModal) {
+                customSinksModal.show();
+            }
+        });
+    }
+    importSinksModalInstance.show();
 
     try {
         const response = await fetch('./api/sinks/import/scan');
@@ -1410,7 +1877,9 @@ async function importSelectedSinks() {
         // Refresh before hiding modal to avoid race condition
         await refreshSinks();
         await refreshDevices();
-        bootstrap.Modal.getInstance(document.getElementById('importSinksModal')).hide();
+        if (importSinksModalInstance) {
+            importSinksModalInstance.hide();
+        }
     } catch (error) {
         showAlert(error.message, 'danger');
     } finally {
@@ -1501,6 +1970,11 @@ function renderSoundCards() {
         const activeProfile = availableProfiles.find(p => p.name === card.activeProfile);
         const activeDesc = activeProfile?.description || card.activeProfile;
 
+        const muteState = getCardMuteDisplayState(card);
+        const bootPreference = typeof card.bootMuted === 'boolean'
+            ? (card.bootMuted ? 'muted' : 'unmuted')
+            : 'unset';
+
         return `
             <div class="card mb-3" id="settings-card-${card.index}">
                 <div class="card-body">
@@ -1515,6 +1989,43 @@ function renderSoundCards() {
                         <span class="badge bg-secondary" id="settings-card-status-${card.index}">
                             ${escapeHtml(activeDesc)}
                         </span>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-1">Mute Options</label>
+                        <div class="d-flex flex-wrap align-items-center gap-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <button class="btn card-mute-toggle"
+                                        title="${escapeHtml(muteState.label)}"
+                                        aria-label="${escapeHtml(muteState.label)}"
+                                        onclick="toggleSoundCardMute('${escapeHtml(card.name)}', ${card.index})">
+                                    <i class="fas ${muteState.icon} ${muteState.iconClass}"></i>
+                                </button>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <label class="form-label small text-muted mb-0">Boot-time</label>
+                                <select class="form-select form-select-sm"
+                                        style="width: auto;"
+                                        id="settings-boot-mute-select-${card.index}"
+                                        onchange="setSoundCardBootMute('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                    <option value="unset" ${bootPreference === 'unset' ? 'selected' : ''}>Not set</option>
+                                    <option value="muted" ${bootPreference === 'muted' ? 'selected' : ''}>Muted</option>
+                                    <option value="unmuted" ${bootPreference === 'unmuted' ? 'selected' : ''}>Unmuted</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-1">Limit Max. Vol.</label>
+                        <div class="d-flex align-items-center gap-2">
+                            <input type="range" class="form-range flex-grow-1" min="0" max="100" step="1"
+                                   value="${card.maxVolume || 100}"
+                                   id="settings-max-volume-${card.index}"
+                                   oninput="document.getElementById('settings-max-volume-value-${card.index}').textContent = this.value + '%'"
+                                   onchange="setDeviceMaxVolume('${escapeHtml(card.name)}', this.value, ${card.index})">
+                            <span class="text-muted" style="min-width: 45px;" id="settings-max-volume-value-${card.index}">${card.maxVolume || 100}%</span>
+                        </div>
                     </div>
 
                     ${hasMultipleProfiles ? `
@@ -1539,6 +2050,160 @@ function renderSoundCards() {
     }).join('');
 
     container.innerHTML = cardsHtml;
+}
+
+function getCardMuteDisplayState(card) {
+    if (typeof card.isMuted !== 'boolean') {
+        return {
+            isMuted: false,
+            label: 'Mute status unknown',
+            icon: 'fa-question-circle',
+            iconClass: 'text-muted'
+        };
+    }
+
+    const isMuted = card.isMuted;
+    const usesBoot = typeof card.bootMuted === 'boolean' && card.bootMuteMatchesCurrent;
+    const labelSuffix = usesBoot ? ' (boot)' : ' (manual)';
+    return {
+        isMuted,
+        label: `${isMuted ? 'Muted' : 'Unmuted'}${labelSuffix}`,
+        icon: isMuted ? 'fa-volume-mute' : 'fa-volume-up',
+        iconClass: isMuted ? 'text-danger' : 'text-success'
+    };
+}
+
+async function setSoundCardMute(cardName, muted, cardIndex) {
+    const button = document.querySelector(`#settings-card-${cardIndex} .card-mute-toggle`);
+
+    if (button) button.disabled = true;
+
+    try {
+        const response = await fetch(`./api/cards/${encodeURIComponent(cardName)}/mute`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ muted })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to set mute');
+        }
+
+        const card = soundCards.find(c => c.name === cardName);
+        if (card) {
+            card.isMuted = muted;
+            card.bootMuteMatchesCurrent = typeof card.bootMuted === 'boolean' && card.bootMuted === muted;
+        }
+
+        const muteState = getCardMuteDisplayState(card || { isMuted: muted, bootMuted: null, bootMuteMatchesCurrent: false });
+        if (button) {
+            const icon = button.querySelector('i');
+            if (icon) {
+                icon.className = `fas ${muteState.icon} ${muteState.iconClass}`;
+            }
+            button.setAttribute('aria-label', muteState.label);
+            button.setAttribute('title', muteState.label);
+        }
+    } catch (error) {
+        console.error('Failed to set card mute:', error);
+        showAlert(error.message, 'danger');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function toggleSoundCardMute(cardName, cardIndex) {
+    const card = soundCards.find(c => c.name === cardName);
+    const isMuted = typeof card?.isMuted === 'boolean' ? card.isMuted : false;
+    return setSoundCardMute(cardName, !isMuted, cardIndex);
+}
+
+async function setSoundCardBootMute(cardName, value, cardIndex) {
+    const select = document.getElementById(`settings-boot-mute-select-${cardIndex}`);
+    if (!select || value === 'unset') {
+        return;
+    }
+
+    select.disabled = true;
+
+    try {
+        const muted = value === 'muted';
+        const response = await fetch(`./api/cards/${encodeURIComponent(cardName)}/boot-mute`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ muted })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to set boot mute');
+        }
+
+        const card = soundCards.find(c => c.name === cardName);
+        if (card) {
+            card.bootMuted = muted;
+            card.bootMuteMatchesCurrent = typeof card.isMuted === 'boolean' && card.isMuted === muted;
+        }
+
+        const muteState = getCardMuteDisplayState(card || { isMuted: null, bootMuted: muted, bootMuteMatchesCurrent: false });
+        const button = document.querySelector(`#settings-card-${cardIndex} .card-mute-toggle i`);
+        if (button) {
+            button.className = `fas ${muteState.icon} ${muteState.iconClass}`;
+        }
+    } catch (error) {
+        console.error('Failed to set boot mute:', error);
+        showAlert(error.message, 'danger');
+        const card = soundCards.find(c => c.name === cardName);
+        if (card && select) {
+            const fallback = typeof card.bootMuted === 'boolean'
+                ? (card.bootMuted ? 'muted' : 'unmuted')
+                : 'unset';
+            select.value = fallback;
+        }
+    } finally {
+        if (select) select.disabled = false;
+    }
+}
+
+async function setDeviceMaxVolume(cardName, maxVolume, cardIndex) {
+    const slider = document.getElementById(`settings-max-volume-${cardIndex}`);
+    if (slider) slider.disabled = true;
+
+    try {
+        const volumeValue = parseInt(maxVolume);
+        const response = await fetch(`./api/cards/${encodeURIComponent(cardName)}/max-volume`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ maxVolume: volumeValue })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to set max volume');
+        }
+
+        const card = soundCards.find(c => c.name === cardName);
+        if (card) {
+            card.maxVolume = volumeValue;
+        }
+
+        showAlert(`Max volume set to ${volumeValue}%`, 'success', 2000);
+    } catch (error) {
+        console.error('Failed to set max volume:', error);
+        showAlert(error.message, 'danger');
+        // Revert slider to previous value
+        const card = soundCards.find(c => c.name === cardName);
+        if (slider && card) {
+            slider.value = card.maxVolume || 100;
+            const valueDisplay = document.getElementById(`settings-max-volume-value-${cardIndex}`);
+            if (valueDisplay) {
+                valueDisplay.textContent = (card.maxVolume || 100) + '%';
+            }
+        }
+    } finally {
+        if (slider) slider.disabled = false;
+    }
 }
 
 // Set a sound card's profile

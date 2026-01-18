@@ -80,6 +80,31 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 0.875rem;
 }
 
+.header-gradient .build-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+
+.header-gradient .build-label {
+    color: var(--header-text-muted);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.header-gradient .build-version {
+    font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.75rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    color: var(--header-text);
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
 .header-gradient .btn-outline-light {
     border-color: rgba(255, 255, 255, 0.25);
     color: var(--header-text);
@@ -314,7 +339,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .volume-display {
-    min-width: 42px;
+    min-width: 3.5em;  /* Increased from 42px to accommodate "100%" */
     font-weight: 600;
     font-size: 0.875rem;
     color: var(--accent-primary);
@@ -499,6 +524,26 @@ h1, h2, h3, h4, h5, h6 {
 .stats-value.info { color: var(--accent-primary); }
 .stats-value.muted { color: var(--bs-secondary-color); }
 
+.card-mute-toggle {
+    background: #2b3139;
+    border: 1px solid #4b5563;
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-mute-toggle:hover {
+    background: #333a43;
+    border-color: #6b7280;
+}
+
+.card-mute-toggle:focus-visible {
+    box-shadow: 0 0 0 0.2rem rgba(25, 135, 84, 0.35);
+}
+
 /* Sync status indicator */
 .sync-indicator {
     display: inline-flex;
@@ -563,6 +608,37 @@ h1, h2, h3, h4, h5, h6 {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 600;
+}
+
+/* Sink card button consistency */
+.sink-card .btn-group .btn {
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Channel mapping display for remap sinks */
+.channel-mapping {
+    font-size: 0.75rem;
+    padding: 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.channel-mapping-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    gap: 0.5rem;
+}
+
+/* Device badges in sink cards */
+.sink-device-badge {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.4rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
 }
 
 /* Channel Picker */

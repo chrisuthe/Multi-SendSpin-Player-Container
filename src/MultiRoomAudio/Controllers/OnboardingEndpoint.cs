@@ -152,7 +152,8 @@ public static class OnboardingEndpoint
             BatchCreatePlayersRequest request,
             PlayerManagerService playerManager,
             ConfigurationService config,
-            ILoggerFactory loggerFactory) =>
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("OnboardingEndpoint");
             logger.LogDebug("API: POST /api/onboarding/create-players with {Count} players", request.Players?.Count ?? 0);
@@ -163,6 +164,7 @@ public static class OnboardingEndpoint
             }
 
             var created = new List<string>();
+            var started = new List<string>();
             var failed = new List<object>();
 
             foreach (var playerReq in request.Players)
@@ -172,6 +174,13 @@ public static class OnboardingEndpoint
                     if (string.IsNullOrWhiteSpace(playerReq.Name))
                     {
                         failed.Add(new { name = playerReq.Name ?? "(empty)", error = "Player name is required" });
+                        continue;
+                    }
+
+                    // Validate player name format (alphanumeric, spaces, hyphens, underscores only)
+                    if (!PlayerManagerService.ValidatePlayerName(playerReq.Name, out var nameError))
+                    {
+                        failed.Add(new { name = playerReq.Name, error = nameError });
                         continue;
                     }
 
@@ -209,13 +218,42 @@ public static class OnboardingEndpoint
                 config.Save();
             }
 
+            // Start each created player (autostart won't trigger since app already running)
+            foreach (var playerName in created)
+            {
+                try
+                {
+                    var playerConfig = config.GetPlayer(playerName);
+                    if (playerConfig == null)
+                        continue;
+
+                    var createRequest = new PlayerCreateRequest
+                    {
+                        Name = playerName,
+                        Device = playerConfig.Device,
+                        Volume = playerConfig.Volume ?? 75
+                    };
+
+                    await playerManager.CreatePlayerAsync(createRequest, ct);
+                    started.Add(playerName);
+                    logger.LogInformation("Started player from onboarding: {PlayerName}", playerName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to start player {PlayerName} (config saved, will start on restart)", playerName);
+                    // Don't add to failed - the player was created, just not started
+                }
+            }
+
             return Results.Ok(new
             {
                 success = failed.Count == 0,
-                message = $"Created {created.Count} of {request.Players.Count} players",
+                message = $"Created {created.Count} of {request.Players.Count} players, started {started.Count}",
                 created,
+                started,
                 failed,
                 createdCount = created.Count,
+                startedCount = started.Count,
                 failedCount = failed.Count
             });
         })

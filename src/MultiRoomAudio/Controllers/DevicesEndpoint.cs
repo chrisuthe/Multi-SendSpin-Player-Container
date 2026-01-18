@@ -353,6 +353,61 @@ public static class DevicesEndpoint
         })
         .WithName("SetDeviceHidden")
         .WithDescription("Set whether a device is hidden from player creation");
+
+        // PUT /api/devices/{id}/max-volume - Set maximum volume limit
+        group.MapPut("/{id}/max-volume", async (
+            string id,
+            DeviceMaxVolumeRequest request,
+            BackendFactory backendFactory,
+            ConfigurationService config,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var logger = loggerFactory.CreateLogger("DevicesEndpoint");
+            logger.LogDebug("API: PUT /api/devices/{DeviceId}/max-volume", id);
+            try
+            {
+                // Find the device
+                var device = backendFactory.GetDevice(id);
+                if (device == null)
+                {
+                    return Results.NotFound(new ErrorResponse(false, $"Device '{id}' not found"));
+                }
+
+                // Generate stable key and set max volume in config
+                var deviceKey = ConfigurationService.GenerateDeviceKey(device);
+                config.SetDeviceMaxVolume(deviceKey, request.MaxVolume, device);
+
+                // Apply volume limit immediately to the sink
+                if (request.MaxVolume.HasValue)
+                {
+                    await backendFactory.SetVolumeAsync(device.Id, request.MaxVolume.Value, ct);
+                }
+
+                logger.LogInformation("Set max volume for device {DeviceId}: {MaxVolume}%", id, request.MaxVolume);
+
+                return Results.Ok(new
+                {
+                    success = true,
+                    deviceId = id,
+                    deviceKey,
+                    maxVolume = request.MaxVolume,
+                    message = request.MaxVolume.HasValue
+                        ? $"Max volume set to {request.MaxVolume}%"
+                        : "Max volume limit cleared (using default 100%)"
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to set max volume for device {DeviceId}", id);
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: 500,
+                    title: "Failed to set device max volume");
+            }
+        })
+        .WithName("SetDeviceMaxVolume")
+        .WithDescription("Set the maximum volume limit for a device (applied to PulseAudio sink)");
     }
 }
 
@@ -365,3 +420,8 @@ public record DeviceAliasRequest(string? Alias);
 /// Request to set device hidden status.
 /// </summary>
 public record DeviceHiddenRequest(bool Hidden);
+
+/// <summary>
+/// Request to set device maximum volume limit.
+/// </summary>
+public record DeviceMaxVolumeRequest(int? MaxVolume);

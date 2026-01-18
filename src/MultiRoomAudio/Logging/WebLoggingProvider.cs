@@ -27,7 +27,8 @@ public class WebLoggingProvider : ILoggerProvider
 
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
         _disposed = true;
         _loggers.Clear();
     }

@@ -27,8 +27,7 @@ Transform a single Docker host with multiple USB audio devices into a multi-room
 - **Reference Add-ons:**
   - [home-assistant/addons/vlc](https://github.com/home-assistant/addons/tree/master/vlc) - Official VLC add-on (audio player pattern)
 - **SDK Documentation:**
-  - SendSpin.SDK v2.0.0 - Sendspin protocol handling
-  - PortAudioSharp2 - Native audio output
+  - SendSpin.SDK v5.2.0 - Sendspin protocol handling
 
 ---
 
@@ -191,11 +190,12 @@ squeezelite-docker/
 ## NuGet Packages
 
 ```xml
-<PackageReference Include="SendSpin.SDK" Version="2.0.0" />
-<PackageReference Include="PortAudioSharp2" Version="1.0.2" />
-<PackageReference Include="YamlDotNet" Version="16.2.1" />
-<PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.1.0" />
-<PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+<PackageReference Include="SendSpin.SDK" Version="5.2.0" />
+<PackageReference Include="YamlDotNet" Version="16.3.0" />
+<PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
+<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.22" />
+<PackageReference Include="Swashbuckle.AspNetCore" Version="8.1.4" />
+<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.1" />
 ```
 
 ---
@@ -214,6 +214,11 @@ squeezelite-docker/
 | PUT | `/api/players/{name}/offset` | Set delay offset |
 | GET | `/api/devices` | List audio devices |
 | GET | `/api/providers` | List available providers |
+| GET | `/api/cards` | List all sound cards |
+| GET | `/api/cards/{id}` | Get card details |
+| PUT | `/api/cards/{id}/profile` | Set card profile |
+| PUT | `/api/cards/{id}/mute` | Mute/unmute card in real-time |
+| PUT | `/api/cards/{id}/boot-mute` | Set boot mute preference |
 | GET | `/api/health` | Health check |
 
 ---
