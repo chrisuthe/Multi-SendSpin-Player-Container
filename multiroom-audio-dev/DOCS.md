@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-722d8c0
+## Development Build: sha-b76486b
 
 **Current Dev Build Changes** (recent)
 
-- Update SendSpin.SDK to v5.2.0
-- Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into dev
-- Merge pull request #66 from scyto/dev
-- Merge pull request #68 from scyto/feature/fix-goodbye-reason-protocol
-- Merge pull request #67 from scyto/feature/autostart-reconnection-fix
-- Fix: Use valid SendSpin protocol GoodbyeReason values
-- Fix: Remove failed player before reconnection attempt
-- Fix: Queue failed autostart players for automatic reconnection
-- more readme.md OCD
-- one real change, rest is my vscode OCD
+- Merge pull request #69 from scyto/feature/preserve-volume-across-tracks
+- Fix hardware volume init to always apply volume, not skip
+- Fix UI slider interaction and tooltip issues
+- Add volume grace period to resolve startup volume sync battle
+- Fix tooltip persistence issues by properly disposing old instances
+- Add automatic page reload on backend version change
+- Fix: Restore volume sync and implement proper tooltips
+- UI improvements for player volume controls
+- Fix: Push startup volume to MA immediately on connection
+- Fix: Respect configured volume limits during hardware initialization
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
