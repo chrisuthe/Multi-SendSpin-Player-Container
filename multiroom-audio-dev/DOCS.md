@@ -1,9 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build
+## Development Build: sha-b76486b
 
-This is a development version. Version info will be updated automatically by CI.
+**Current Dev Build Changes** (recent)
+
+- Merge pull request #69 from scyto/feature/preserve-volume-across-tracks
+- Fix hardware volume init to always apply volume, not skip
+- Fix UI slider interaction and tooltip issues
+- Add volume grace period to resolve startup volume sync battle
+- Fix tooltip persistence issues by properly disposing old instances
+- Add automatic page reload on backend version change
+- Fix: Restore volume sync and implement proper tooltips
+- UI improvements for player volume controls
+- Fix: Push startup volume to MA immediately on connection
+- Fix: Respect configured volume limits during hardware initialization
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->

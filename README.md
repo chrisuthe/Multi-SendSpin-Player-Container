@@ -12,26 +12,22 @@
 
 This project enables you to run a single centralized server (like a NAS, Raspberry Pi, or any Docker host) with multiple USB DACs or audio devices connected, creating independent audio zones throughout your home. Instead of buying expensive multi-room audio hardware, connect affordable USB DACs to a central machine and stream synchronized audio to every room.
 
-<!-- markdownlint-disable MD033 -->
-<div align="center">
-<!-- markdownlint-enable MD033 -->
-
-```text
-┌────────────────────────────────────────────────────────────────┐
-│                     CENTRAL SERVER (Docker Host)               │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Multi-Room Audio Container                 │   │
-│  │                                                         │   │
-│  │   ┌──────────┐  ┌──────────┐  ┌──────────┐              │   │
-│  │   │ Player 1 │  │ Player 2 │  │ Player 3 │  ...         │   │
-│  │   │(Kitchen) │  │(Bedroom) │  │ (Patio)  │              │   │
-│  │   └────┬─────┘  └────┬─────┘  └────┬─────┘              │   │
-│  └────────┼─────────────┼─────────────┼────────────────────┘   │
-│           │             │             │                        │
-│      ┌────▼────┐   ┌────▼────┐   ┌────▼────┐                   │
-│      │USB DAC 1│   │USB DAC 2│   │SoundCard│                   │
-│      └────┬────┘   └────┬────┘   └────┬────┘                   │
-└───────────┼─────────────┼─────────────┼────────────────────────┘
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     CENTRAL SERVER (Docker Host)                │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              Multi-Room Audio Container                 │    │
+│  │                                                         │    │
+│  │   ┌──────────┐  ┌──────────┐  ┌──────────┐              │    │
+│  │   │ Player 1 │  │ Player 2 │  │ Player 3 │  ...         │    │
+│  │   │(Kitchen) │  │(Bedroom) │  │ (Patio)  │              │    │
+│  │   └────┬─────┘  └────┬─────┘  └────┬─────┘              │    │
+│  └────────┼─────────────┼─────────────┼────────────────────┘    │
+│           │             │             │                         │
+│      ┌────▼────┐   ┌────▼────┐   ┌────▼────┐                    │
+│      │USB DAC 1│   │USB DAC 2│   │SoundCard│                    │
+│      └────┬────┘   └────┬────┘   └────┬────┘                    │
+└───────────┼─────────────┼─────────────┼─────────────────────────┘
             │             │             │
        ┌────▼────┐   ┌────▼────┐   ┌────▼────┐
        │ Kitchen │   │ Bedroom │   │  Patio  │
@@ -47,6 +43,7 @@ This project enables you to run a single centralized server (like a NAS, Raspber
 ![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet)
 ![Sendspin](https://img.shields.io/badge/Sendspin-Native%20Support-purple?style=for-the-badge)
 
+
 ## Key Features
 
 - **Sendspin Protocol**: Native Music Assistant integration via SendSpin.SDK
@@ -56,26 +53,19 @@ This project enables you to run a single centralized server (like a NAS, Raspber
 - **Auto-Discovery**: Players automatically appear in Music Assistant
 - **Persistent Config**: Survives container restarts and updates
 - **Multi-Architecture**: Runs on AMD64 and ARM64 (Raspberry Pi)
+- **REST API**: Full programmatic control with Swagger documentation
+- **Health Monitoring**: Built-in container health checks at `/api/health`
+- **Logging**: Comprehensive logging for troubleshooting
+- **Home Assistant**: Native add-on for HAOS
 
-### Web Interface
-
-- Modern, responsive design that works on all devices
-- Live status indicators and controls
-- Built-in audio device detection and selection
 
 ### Audio Support
 
 - **USB DACs**: Automatic detection via PortAudio
 - **Built-in Audio**: Support for motherboard audio outputs
 - **HDMI Audio**: Multi-channel HDMI audio output support
-- **Virtual Devices**: Null devices for testing
+- **Virtual Devices**: Null devices for testing, software defined ALSA devices
 
-### Enterprise-Ready Features
-
-- **REST API**: Full programmatic control with Swagger documentation
-- **Health Monitoring**: Built-in container health checks at `/api/health`
-- **Logging**: Comprehensive logging for troubleshooting
-- **Home Assistant**: Native add-on for HAOS
 
 ## Docker Hub Images
 
@@ -92,6 +82,7 @@ This project enables you to run a single centralized server (like a NAS, Raspber
 ```bash
 docker run -d \
   --name multiroom-audio \
+  --network host \
   -p 8096:8096 \
   --device /dev/snd:/dev/snd \
   -v audio_config:/app/config \
@@ -103,12 +94,12 @@ Access web interface at `http://localhost:8096`
 ### Docker Compose
 
 ```yaml
-version: '3.8'
 services:
   multiroom-audio:
     image: ghcr.io/chrisuthe/multiroom-audio:latest
     container_name: multiroom-audio
     restart: unless-stopped
+    network_mode: host
     ports:
       - "8096:8096"
     devices:
@@ -179,15 +170,16 @@ See [HAOS Add-on Guide](docs/HAOS_ADDON_GUIDE.md) for detailed instructions.
 
 ```yaml
 volumes:
-  - ./config:/app/config       # Player configurations
-  - ./logs:/app/logs           # Application logs
+  - ./config:/app/config               # Player configurations
+  - ./logs:/app/logs                   # Application logs
+  - /etc/asound.conf:/etc/asound.conf  # Required only if you need to access software defined devices 
 ```
 
 ### Audio Device Access
 
 ```yaml
 devices:
-  - /dev/snd:/dev/snd          # All audio devices (Linux)
+  - /dev/snd:/dev/snd    # All audio devices (Linux)
 ```
 
 ### Custom ALSA Configuration

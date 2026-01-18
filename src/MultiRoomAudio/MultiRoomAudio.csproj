@@ -23,7 +23,7 @@
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
 
     <!-- Real-time communication -->
-    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.9" />
 
     <!-- API documentation -->
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.22" />

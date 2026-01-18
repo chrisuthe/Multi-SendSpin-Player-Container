@@ -17,11 +17,13 @@ services:
       # Persistent configuration storage
       - ./config:/app/config
       - ./logs:/app/logs
-      # Pass through ALSA configuration (optional)
+      # Pass through ALSA configuration (optional typically used when you have a custom config)
       - /usr/share/alsa:/usr/share/alsa:ro
+      - /etc/asound.conf:/etc/asound.conf:ro
     environment:
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
       - DISPLAY=${DISPLAY}
+    # required for mDNS discovery of sendspin sever
     network_mode: host
     privileged: false
     cap_add:

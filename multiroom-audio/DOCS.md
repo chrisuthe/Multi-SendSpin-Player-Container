@@ -1,14 +1,10 @@
 # Multi-Room Audio Controller
 
 <!-- VERSION_INFO_START -->
-## Latest Release: 2.0.12
+## Latest Release: 3.0.0
 
-Audio Quality and PulseAudio Fixes
 
-- Fixed audio artifacts from sync correction (clicks/pops)
-- Fixed resampler transition pops
-- Fixed PulseAudio timing jitter with wider deadband
-- Dynamic ALSA enumeration for better Docker compatibility
+
 
 [View full changelog](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/CHANGELOG.md)
 <!-- VERSION_INFO_END -->
