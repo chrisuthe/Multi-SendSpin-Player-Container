@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-5c4310a
+## Development Build: sha-96d4e56
 
 **Current Dev Build Changes** (recent)
 
+- Update all user-facing references from "Initial Volume" to "Startup Volume"
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into feature/rename-initial-volume-to-startup-volume
 - Use FireAndForget helper for async player connection and broadcast
 - Add thread safety to DefaultPaParser with file locking
