@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-96d4e56
+## Development Build: sha-8bd4a33
 
 **Current Dev Build Changes** (recent)
 
+- Extract StartupDiagnosticsService and add UpdateDeviceProperty helper
 - Update all user-facing references from "Initial Volume" to "Startup Volume"
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into feature/rename-initial-volume-to-startup-volume
 - Use FireAndForget helper for async player connection and broadcast
@@ -14,7 +15,6 @@
 - Rename "Initial Volume" to "Startup Volume" in player edit dialog
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into dev
 - add back aarch64 to the config so it can get the already building images.
-- Merge branch 'main' into dev
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
