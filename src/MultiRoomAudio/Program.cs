@@ -102,7 +102,16 @@ builder.Services.AddSingleton<ToneGeneratorService>();
 builder.Services.AddSingleton<OnboardingService>();
 
 // Add PulseAudio utilities (no startup dependency)
-builder.Services.AddSingleton<PaModuleRunner>();
+// Use mock runner when MOCK_HARDWARE is enabled
+var isMockHardware = Environment.GetEnvironmentVariable("MOCK_HARDWARE")?.ToLower() == "true";
+if (isMockHardware)
+{
+    builder.Services.AddSingleton<MultiRoomAudio.Utilities.IPaModuleRunner, MultiRoomAudio.Audio.Mock.MockPaModuleRunner>();
+}
+else
+{
+    builder.Services.AddSingleton<MultiRoomAudio.Utilities.IPaModuleRunner, MultiRoomAudio.Utilities.PaModuleRunner>();
+}
 builder.Services.AddSingleton<DefaultPaParser>();
 
 // Startup diagnostics service

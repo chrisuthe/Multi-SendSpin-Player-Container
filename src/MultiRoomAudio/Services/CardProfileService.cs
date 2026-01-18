@@ -1,4 +1,5 @@
 using MultiRoomAudio.Audio;
+using MultiRoomAudio.Audio.Mock;
 using MultiRoomAudio.Audio.PulseAudio;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Utilities;

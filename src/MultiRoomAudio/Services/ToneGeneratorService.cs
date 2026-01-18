@@ -5,10 +5,12 @@ namespace MultiRoomAudio.Services;
 /// <summary>
 /// Service for generating and playing test tones through specific audio sinks.
 /// Used for device identification during onboarding.
+/// In mock hardware mode, simulates playback without actual audio output.
 /// </summary>
 public class ToneGeneratorService
 {
     private readonly ILogger<ToneGeneratorService> _logger;
+    private readonly EnvironmentService _environment;
 
     // Default tone parameters
     private const int DefaultFrequency = 1000;  // 1kHz sine wave
@@ -20,13 +22,15 @@ public class ToneGeneratorService
     // Track active playback to prevent overlapping tones
     private readonly SemaphoreSlim _playbackLock = new(1, 1);
 
-    public ToneGeneratorService(ILogger<ToneGeneratorService> logger)
+    public ToneGeneratorService(ILogger<ToneGeneratorService> logger, EnvironmentService environment)
     {
         _logger = logger;
+        _environment = environment;
     }
 
     /// <summary>
     /// Play a test tone through a specific PulseAudio sink.
+    /// In mock hardware mode, simulates playback with a short delay.
     /// </summary>
     /// <param name="sinkName">PulseAudio sink name (device ID)</param>
     /// <param name="frequencyHz">Tone frequency in Hz (default: 1000)</param>
@@ -45,42 +49,58 @@ public class ToneGeneratorService
             throw new InvalidOperationException("A test tone is already playing");
         }
 
-        string? tempFile = null;
         try
         {
             _logger.LogInformation("Playing test tone: {Frequency}Hz for {Duration}ms on sink {Sink}",
                 frequencyHz, durationMs, sinkName);
 
-            // Generate WAV file
-            var wavData = GenerateWavFile(frequencyHz, durationMs);
+            // In mock mode, simulate playback without actual audio
+            if (_environment.IsMockHardware)
+            {
+                _logger.LogDebug("Mock mode: simulating test tone playback");
+                // Simulate a brief playback delay (100ms instead of full duration)
+                await Task.Delay(Math.Min(durationMs, 100), ct);
+                _logger.LogDebug("Mock test tone playback completed");
+                return;
+            }
 
-            // Write to temp file
-            tempFile = Path.Combine(Path.GetTempPath(), $"testtone_{Guid.NewGuid():N}.wav");
-            await File.WriteAllBytesAsync(tempFile, wavData, ct);
-            _logger.LogDebug("Generated test tone WAV file: {TempFile} ({Size} bytes)", tempFile, wavData.Length);
+            // Real hardware mode - generate and play via paplay
+            string? tempFile = null;
+            try
+            {
+                // Generate WAV file
+                var wavData = GenerateWavFile(frequencyHz, durationMs);
 
-            // Play via paplay
-            await PlayWithPaplayAsync(sinkName, tempFile, ct);
+                // Write to temp file
+                tempFile = Path.Combine(Path.GetTempPath(), $"testtone_{Guid.NewGuid():N}.wav");
+                await File.WriteAllBytesAsync(tempFile, wavData, ct);
+                _logger.LogDebug("Generated test tone WAV file: {TempFile} ({Size} bytes)", tempFile, wavData.Length);
 
-            _logger.LogDebug("Test tone playback completed");
+                // Play via paplay
+                await PlayWithPaplayAsync(sinkName, tempFile, ct);
+
+                _logger.LogDebug("Test tone playback completed");
+            }
+            finally
+            {
+                // Clean up temp file
+                if (tempFile != null && File.Exists(tempFile))
+                {
+                    try
+                    {
+                        File.Delete(tempFile);
+                        _logger.LogDebug("Cleaned up temp file: {TempFile}", tempFile);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to clean up temp file: {TempFile}", tempFile);
+                    }
+                }
+            }
         }
         finally
         {
             _playbackLock.Release();
-
-            // Clean up temp file
-            if (tempFile != null && File.Exists(tempFile))
-            {
-                try
-                {
-                    File.Delete(tempFile);
-                    _logger.LogDebug("Cleaned up temp file: {TempFile}", tempFile);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to clean up temp file: {TempFile}", tempFile);
-                }
-            }
         }
     }
 

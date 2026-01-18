@@ -140,6 +140,18 @@ public static class TriggersEndpoint
                 return Results.BadRequest(new ErrorResponse(false, "Channel must be between 1 and 8"));
             }
 
+            // Validate offDelaySeconds is not negative
+            if (request.OffDelaySeconds < 0)
+            {
+                return Results.BadRequest(new ErrorResponse(false, "Off delay must be 0 or greater"));
+            }
+
+            // Validate offDelaySeconds doesn't exceed maximum (1 hour)
+            if (request.OffDelaySeconds > 3600)
+            {
+                return Results.BadRequest(new ErrorResponse(false, "Off delay must not exceed 3600 seconds (1 hour)"));
+            }
+
             // Override channel from route
             request.Channel = channel;
 

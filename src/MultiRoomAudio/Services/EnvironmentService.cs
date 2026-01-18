@@ -15,6 +15,7 @@ public class EnvironmentService
 {
     private readonly ILogger<EnvironmentService> _logger;
     private readonly bool _isHaos;
+    private readonly bool _isMockHardware;
     private readonly string _configPath;
     private readonly string _logPath;
     private readonly Dictionary<string, JsonElement>? _haosOptions;
@@ -24,6 +25,7 @@ public class EnvironmentService
 
     private const string HaosOptionsFile = "/data/options.json";
     private const string HaosSupervisorTokenEnv = "SUPERVISOR_TOKEN";
+    private const string MockHardwareEnv = "MOCK_HARDWARE";
 
     public EnvironmentService(ILogger<EnvironmentService> logger)
     {
@@ -31,6 +33,12 @@ public class EnvironmentService
 
         _logger.LogDebug("Detecting runtime environment...");
         _isHaos = DetectHaos();
+        _isMockHardware = DetectMockHardware();
+
+        if (_isMockHardware)
+        {
+            _logger.LogInformation("MOCK_HARDWARE mode enabled - using simulated audio devices and relay board");
+        }
 
         if (_isHaos)
         {
@@ -63,6 +71,12 @@ public class EnvironmentService
     /// Whether running in Home Assistant OS add-on mode.
     /// </summary>
     public bool IsHaos => _isHaos;
+
+    /// <summary>
+    /// Whether mock hardware mode is enabled (for testing without real devices).
+    /// When true, the application uses simulated audio devices and relay boards.
+    /// </summary>
+    public bool IsMockHardware => _isMockHardware;
 
     /// <summary>
     /// Current environment name ("haos" or "standalone").
@@ -235,5 +249,31 @@ public class EnvironmentService
                 HaosOptionsFile);
             return null;
         }
+    }
+
+    private bool DetectMockHardware()
+    {
+        var mockHardwareValue = Environment.GetEnvironmentVariable(MockHardwareEnv);
+        if (string.IsNullOrEmpty(mockHardwareValue))
+        {
+            _logger.LogDebug("{EnvVar} environment variable not set", MockHardwareEnv);
+            return false;
+        }
+
+        // Accept "true", "1", "yes" as truthy values (case-insensitive)
+        var isMock = mockHardwareValue.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                     mockHardwareValue == "1" ||
+                     mockHardwareValue.Equals("yes", StringComparison.OrdinalIgnoreCase);
+
+        if (isMock)
+        {
+            _logger.LogDebug("{EnvVar} detected: {Value}", MockHardwareEnv, mockHardwareValue);
+        }
+        else
+        {
+            _logger.LogDebug("{EnvVar} set to {Value}, not enabling mock mode", MockHardwareEnv, mockHardwareValue);
+        }
+
+        return isMock;
     }
 }

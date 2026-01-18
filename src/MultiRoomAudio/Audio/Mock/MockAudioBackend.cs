@@ -1,4 +1,5 @@
 using MultiRoomAudio.Models;
+using MultiRoomAudio.Services;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 
@@ -8,10 +9,12 @@ namespace MultiRoomAudio.Audio.Mock;
 /// Mock audio backend for testing without real hardware.
 /// Provides fake audio devices that simulate USB DACs with multiple profiles.
 /// Channel counts are dynamically determined based on the active card profile.
+/// Also recognizes custom sinks created through the CustomSinksService.
 /// </summary>
 public class MockAudioBackend : IBackend
 {
     private readonly ILogger<MockAudioBackend> _logger;
+    private readonly CustomSinksService? _customSinksService;
     private readonly Dictionary<string, int> _volumes = new();
 
     /// <summary>
@@ -103,9 +106,10 @@ public class MockAudioBackend : IBackend
         int Index,
         bool IsDefault);
 
-    public MockAudioBackend(ILogger<MockAudioBackend> logger)
+    public MockAudioBackend(ILogger<MockAudioBackend> logger, CustomSinksService? customSinksService = null)
     {
         _logger = logger;
+        _customSinksService = customSinksService;
         _logger.LogInformation("Mock audio backend initialized with {Count} devices", MockDeviceConfigs.Count);
     }
 
@@ -169,8 +173,52 @@ public class MockAudioBackend : IBackend
         }
 
         // Try by exact ID match only (no partial name matching)
-        return devices.FirstOrDefault(d =>
+        var device = devices.FirstOrDefault(d =>
             d.Id.Equals(deviceId, StringComparison.OrdinalIgnoreCase));
+
+        if (device != null)
+            return device;
+
+        // Check if it's a custom sink
+        var customSink = _customSinksService?.GetSink(deviceId);
+        if (customSink != null)
+        {
+            _logger.LogDebug("Found custom sink '{SinkName}' as mock device", deviceId);
+            return CreateMockDeviceForCustomSink(customSink);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Creates a mock AudioDevice for a custom sink.
+    /// </summary>
+    private AudioDevice CreateMockDeviceForCustomSink(CustomSinkResponse sink)
+    {
+        return new AudioDevice(
+            Index: 100 + Math.Abs(sink.Name.GetHashCode() % 100), // Generate unique index
+            Id: sink.Name,
+            Name: sink.Description ?? sink.Name,
+            MaxChannels: 2,
+            DefaultSampleRate: 48000,
+            DefaultLowLatencyMs: 20,
+            DefaultHighLatencyMs: 100,
+            IsDefault: false,
+            Capabilities: new DeviceCapabilities(
+                SupportedSampleRates: new[] { 44100, 48000, 96000, 192000 },
+                SupportedBitDepths: new[] { 16, 24, 32 },
+                MaxChannels: 2,
+                PreferredSampleRate: 48000,
+                PreferredBitDepth: 24
+            ),
+            Identifiers: new DeviceIdentifiers(
+                Serial: null,
+                BusPath: null,
+                VendorId: null,
+                ProductId: null,
+                AlsaLongCardName: $"Custom {sink.Type} Sink"
+            )
+        );
     }
 
     /// <inheritdoc />
@@ -228,10 +276,13 @@ public class MockAudioBackend : IBackend
             ? GetDefaultDevice()
             : GetDevice(deviceId);
 
-        _logger.LogInformation("Creating mock player for device: {Device}", device?.Name ?? "(default)");
+        // For custom sinks, use the sink name directly even if GetDevice returns null
+        var deviceName = device?.Name ?? deviceId ?? "(default)";
+
+        _logger.LogInformation("Creating mock player for device: {Device}", deviceName);
 
         // Return a null audio player that discards samples
-        return new MockAudioPlayer(loggerFactory.CreateLogger<MockAudioPlayer>(), device?.Name);
+        return new MockAudioPlayer(loggerFactory.CreateLogger<MockAudioPlayer>(), deviceName);
     }
 
     /// <inheritdoc />

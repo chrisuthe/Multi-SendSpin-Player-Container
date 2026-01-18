@@ -13,7 +13,7 @@ namespace MultiRoomAudio.Services;
 public class CustomSinksService : IHostedService, IAsyncDisposable
 {
     private readonly ILogger<CustomSinksService> _logger;
-    private readonly PaModuleRunner _moduleRunner;
+    private readonly IPaModuleRunner _moduleRunner;
     private readonly EnvironmentService _environment;
     private readonly ConcurrentDictionary<string, CustomSinkContext> _sinks = new();
     private readonly string _configPath;
@@ -37,7 +37,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
     public CustomSinksService(
         ILogger<CustomSinksService> logger,
-        PaModuleRunner moduleRunner,
+        IPaModuleRunner moduleRunner,
         EnvironmentService environment)
     {
         _logger = logger;
