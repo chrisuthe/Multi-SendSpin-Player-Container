@@ -7,9 +7,9 @@ description: >-
 url: https://github.com/chrisuthe/Multi-SendSpin-Player-Container
 image: ghcr.io/chrisuthe/multiroom-audio-hassio
 startup: services
-# Testing only - aarch64 will be added after merge to main
 arch:
   - amd64
+  - aarch64
 
 # Hardware access
 audio: true
