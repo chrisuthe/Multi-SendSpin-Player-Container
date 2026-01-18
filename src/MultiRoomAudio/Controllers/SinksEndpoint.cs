@@ -22,6 +22,27 @@ public static class SinksEndpoint
 
     #endregion
 
+    /// <summary>
+    /// Registers custom PulseAudio sink management API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/sinks - List all custom sinks</item>
+    /// <item>GET /api/sinks/channels - Get available channel names</item>
+    /// <item>GET /api/sinks/{name} - Get specific sink</item>
+    /// <item>GET /api/sinks/{name}/status - Check if sink is loaded</item>
+    /// <item>GET /api/sinks/import/scan - Scan default.pa for importable sinks</item>
+    /// <item>GET /api/sinks/import/status - Check default.pa availability</item>
+    /// <item>POST /api/sinks/combine - Create combine-sink</item>
+    /// <item>POST /api/sinks/remap - Create remap-sink</item>
+    /// <item>POST /api/sinks/import - Import sinks from default.pa</item>
+    /// <item>POST /api/sinks/{name}/reload - Reload a sink</item>
+    /// <item>POST /api/sinks/{name}/test-tone - Play test tone through sink</item>
+    /// <item>DELETE /api/sinks/{name} - Delete sink</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapSinksEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/sinks")

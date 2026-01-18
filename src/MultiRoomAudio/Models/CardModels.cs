@@ -182,6 +182,7 @@ public class SetCardMaxVolumeRequest
     /// <summary>
     /// Maximum volume limit (0-100), or null to clear the limit.
     /// </summary>
+    [Range(0, 100, ErrorMessage = "MaxVolume must be between 0 and 100.")]
     public int? MaxVolume { get; set; }
 }
 

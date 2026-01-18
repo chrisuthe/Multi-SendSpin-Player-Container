@@ -10,6 +10,23 @@ namespace MultiRoomAudio.Controllers;
 /// </summary>
 public static class CardsEndpoint
 {
+    /// <summary>
+    /// Registers PulseAudio sound card profile management API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/cards - List all sound cards with profiles</item>
+    /// <item>GET /api/cards/saved - Get saved profile configurations</item>
+    /// <item>GET /api/cards/{nameOrIndex} - Get specific card details</item>
+    /// <item>PUT /api/cards/{nameOrIndex}/profile - Set active card profile</item>
+    /// <item>PUT /api/cards/{nameOrIndex}/mute - Set card mute state in real-time</item>
+    /// <item>PUT /api/cards/{nameOrIndex}/boot-mute - Set boot mute preference</item>
+    /// <item>PUT /api/cards/{nameOrIndex}/max-volume - Set card max volume limit</item>
+    /// <item>DELETE /api/cards/{nameOrIndex}/saved - Remove saved profile</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapCardsEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/cards")

@@ -23,6 +23,32 @@ public static class PlayersEndpoint
 
     #endregion
 
+    /// <summary>
+    /// Registers all player management API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/players - List all players</item>
+    /// <item>GET /api/players/{name} - Get specific player</item>
+    /// <item>GET /api/players/{name}/stats - Get real-time audio diagnostics</item>
+    /// <item>POST /api/players - Create new player</item>
+    /// <item>PUT /api/players/{name} - Update player configuration</item>
+    /// <item>DELETE /api/players/{name} - Delete player</item>
+    /// <item>POST /api/players/{name}/stop - Stop player</item>
+    /// <item>POST /api/players/{name}/start - Start stopped player</item>
+    /// <item>POST /api/players/{name}/restart - Restart player</item>
+    /// <item>PUT /api/players/{name}/volume - Set volume (0-100)</item>
+    /// <item>PUT /api/players/{name}/startup-volume - Set startup volume</item>
+    /// <item>PUT /api/players/{name}/mute - Set mute state</item>
+    /// <item>PUT /api/players/{name}/offset - Set delay offset (-10000 to 10000ms)</item>
+    /// <item>PUT /api/players/{name}/device - Switch audio device</item>
+    /// <item>PUT /api/players/{name}/rename - Rename player</item>
+    /// <item>POST /api/players/{name}/pause - Pause playback</item>
+    /// <item>POST /api/players/{name}/resume - Resume playback</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapPlayersEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/players")

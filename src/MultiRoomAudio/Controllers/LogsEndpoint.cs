@@ -8,6 +8,18 @@ namespace MultiRoomAudio.Controllers;
 /// </summary>
 public static class LogsEndpoint
 {
+    /// <summary>
+    /// Registers log retrieval and management API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/logs - Query logs with filtering (level, category, search, date range)</item>
+    /// <item>GET /api/logs/stats - Get log statistics by level and category</item>
+    /// <item>DELETE /api/logs - Clear all logs from memory and files</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapLogsEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/logs")

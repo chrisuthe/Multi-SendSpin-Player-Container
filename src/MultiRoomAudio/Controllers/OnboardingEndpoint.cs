@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Services;
@@ -10,6 +11,21 @@ namespace MultiRoomAudio.Controllers;
 /// </summary>
 public static class OnboardingEndpoint
 {
+    /// <summary>
+    /// Registers onboarding wizard API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/onboarding/status - Get onboarding wizard status</item>
+    /// <item>POST /api/onboarding/complete - Mark onboarding as completed</item>
+    /// <item>POST /api/onboarding/skip - Skip the onboarding wizard</item>
+    /// <item>POST /api/onboarding/reset - Reset onboarding to allow re-running</item>
+    /// <item>POST /api/onboarding/create-players - Batch create players</item>
+    /// <item>POST /api/devices/{id}/test-tone - Play test tone through device</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapOnboardingEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/onboarding")
@@ -172,4 +188,10 @@ public record OnboardingCompleteRequest(int DevicesConfigured = 0, int PlayersCr
 /// <summary>
 /// Request to play a test tone.
 /// </summary>
-public record TestToneRequest(int? FrequencyHz = null, int? DurationMs = null);
+/// <param name="FrequencyHz">Tone frequency in Hz (20-20000). Default: 1000Hz.</param>
+/// <param name="DurationMs">Tone duration in milliseconds (100-10000). Default: 1500ms.</param>
+public record TestToneRequest(
+    [property: Range(20, 20000, ErrorMessage = "FrequencyHz must be between 20 and 20000.")]
+    int? FrequencyHz = null,
+    [property: Range(100, 10000, ErrorMessage = "DurationMs must be between 100 and 10000.")]
+    int? DurationMs = null);

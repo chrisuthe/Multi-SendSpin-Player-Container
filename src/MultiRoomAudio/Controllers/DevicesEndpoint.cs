@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Services;
@@ -11,6 +12,25 @@ namespace MultiRoomAudio.Controllers;
 /// </summary>
 public static class DevicesEndpoint
 {
+    /// <summary>
+    /// Registers audio device enumeration and configuration API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/devices - List all audio output devices</item>
+    /// <item>GET /api/devices/default - Get default device</item>
+    /// <item>GET /api/devices/{id} - Get specific device</item>
+    /// <item>GET /api/devices/{id}/capabilities - Get device audio format capabilities</item>
+    /// <item>GET /api/devices/aliases - Get all device aliases</item>
+    /// <item>POST /api/devices/refresh - Re-enumerate audio devices</item>
+    /// <item>POST /api/devices/rematch - Force device re-matching</item>
+    /// <item>PUT /api/devices/{id}/alias - Set device alias</item>
+    /// <item>PUT /api/devices/{id}/hidden - Set device visibility</item>
+    /// <item>PUT /api/devices/{id}/max-volume - Set device max volume limit</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapDevicesEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/devices")
@@ -345,4 +365,7 @@ public record DeviceHiddenRequest(bool Hidden);
 /// <summary>
 /// Request to set device maximum volume limit.
 /// </summary>
-public record DeviceMaxVolumeRequest(int? MaxVolume);
+/// <param name="MaxVolume">Maximum volume limit (0-100), or null to clear the limit.</param>
+public record DeviceMaxVolumeRequest(
+    [property: Range(0, 100, ErrorMessage = "MaxVolume must be between 0 and 100.")]
+    int? MaxVolume);
