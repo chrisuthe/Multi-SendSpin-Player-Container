@@ -1,3 +1,4 @@
+![GitHub all releases](https://img.shields.io/github/downloads/chrisuthe/Multi-SendSpin-Player-Container/total?color=blue)
 # Multi-Room Audio Controller
 
 <!-- markdownlint-disable MD033 -->
