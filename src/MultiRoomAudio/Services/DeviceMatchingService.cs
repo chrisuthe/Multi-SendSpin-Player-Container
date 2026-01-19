@@ -318,9 +318,33 @@ public class DeviceMatchingService
 
     /// <summary>
     /// Get all output devices enriched with their aliases and hidden status.
+    /// Includes both hardware devices and custom sinks.
     /// </summary>
     public IEnumerable<AudioDevice> GetEnrichedDevices()
     {
-        return _backend.GetOutputDevices().Select(EnrichWithConfig);
+        // Get hardware devices
+        var hardwareDevices = _backend.GetOutputDevices().Select(EnrichWithConfig);
+
+        // Get custom sinks and convert to AudioDevice format
+        var customSinksResponse = _customSinks.GetAllSinks();
+        var customSinkDevices = customSinksResponse.Sinks
+            .Where(sink => sink.State == CustomSinkState.Loaded && !string.IsNullOrEmpty(sink.PulseAudioSinkName))
+            .Select(sink => new AudioDevice(
+                Index: -1,  // Custom sinks don't have an index
+                Id: sink.PulseAudioSinkName!,
+                Name: sink.Name,
+                MaxChannels: sink.Channels ?? 2,  // Default to stereo if not specified
+                DefaultSampleRate: 48000,  // Standard sample rate for custom sinks
+                DefaultLowLatencyMs: 0,
+                DefaultHighLatencyMs: 0,
+                IsDefault: false,
+                Capabilities: null,
+                Identifiers: null,
+                Alias: sink.Description ?? sink.Name,  // Use description as alias, fallback to name
+                Hidden: false
+            ));
+
+        // Combine and return
+        return hardwareDevices.Concat(customSinkDevices);
     }
 }

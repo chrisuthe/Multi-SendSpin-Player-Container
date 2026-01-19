@@ -1871,6 +1871,48 @@ async function playTestToneForSink(name) {
     }
 }
 
+// Play test tone for a specific channel in remap sink modal
+async function playChannelTestTone(channel) {
+    const masterSelect = document.getElementById('remapMasterDevice');
+    const channelSelect = document.getElementById(channel === 'left' ? 'leftChannel' : 'rightChannel');
+    const btn = document.getElementById(channel === 'left' ? 'leftChannelTestBtn' : 'rightChannelTestBtn');
+
+    if (!masterSelect.value) {
+        showAlert('Please select a master device first', 'warning');
+        return;
+    }
+
+    if (!btn) return;
+
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    btn.disabled = true;
+    btn.classList.add('playing');
+
+    try {
+        const response = await fetch(`./api/devices/${encodeURIComponent(masterSelect.value)}/test-tone`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                frequencyHz: 1000,
+                durationMs: 1500,
+                channelName: channelSelect.value
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to play test tone');
+        }
+    } catch (error) {
+        showAlert(`Test tone failed: ${error.message}`, 'danger');
+    } finally {
+        btn.innerHTML = originalContent;
+        btn.disabled = false;
+        btn.classList.remove('playing');
+    }
+}
+
 // Open import modal
 async function openImportModal() {
     // Hide parent modal to avoid stacking issues

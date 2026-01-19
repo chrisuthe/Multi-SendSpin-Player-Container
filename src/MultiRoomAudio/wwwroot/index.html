@@ -355,7 +355,7 @@
                                 <div class="mb-3">
                                     <label class="form-label">Channel Mapping</label>
                                     <div class="channel-picker" id="channelPicker">
-                                        <div class="channel-pair mb-2">
+                                        <div class="channel-pair mb-2 d-flex align-items-center">
                                             <span class="output-label">Left Output</span>
                                             <i class="fas fa-arrow-left mx-2 text-muted"></i>
                                             <select class="form-select form-select-sm channel-select" id="leftChannel">
@@ -363,8 +363,14 @@
                                                 <option value="rear-left">Rear Left</option>
                                                 <option value="side-left">Side Left</option>
                                             </select>
+                                            <button class="btn btn-outline-primary btn-sm ms-2"
+                                                    id="leftChannelTestBtn"
+                                                    onclick="playChannelTestTone('left')"
+                                                    title="Play test tone">
+                                                <i class="fas fa-volume-up"></i>
+                                            </button>
                                         </div>
-                                        <div class="channel-pair mb-2">
+                                        <div class="channel-pair mb-2 d-flex align-items-center">
                                             <span class="output-label">Right Output</span>
                                             <i class="fas fa-arrow-left mx-2 text-muted"></i>
                                             <select class="form-select form-select-sm channel-select" id="rightChannel">
@@ -372,6 +378,12 @@
                                                 <option value="rear-right">Rear Right</option>
                                                 <option value="side-right">Side Right</option>
                                             </select>
+                                            <button class="btn btn-outline-primary btn-sm ms-2"
+                                                    id="rightChannelTestBtn"
+                                                    onclick="playChannelTestTone('right')"
+                                                    title="Play test tone">
+                                                <i class="fas fa-volume-up"></i>
+                                            </button>
                                         </div>
                                     </div>
                                     <small class="text-muted">Map output channels to source channels</small>

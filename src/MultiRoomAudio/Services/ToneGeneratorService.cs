@@ -35,11 +35,13 @@ public class ToneGeneratorService
     /// <param name="sinkName">PulseAudio sink name (device ID)</param>
     /// <param name="frequencyHz">Tone frequency in Hz (default: 1000)</param>
     /// <param name="durationMs">Duration in milliseconds (default: 1500)</param>
+    /// <param name="channelName">Optional channel name for single-channel playback (e.g., "front-left", "front-right")</param>
     /// <param name="ct">Cancellation token</param>
     public async Task PlayTestToneAsync(
         string sinkName,
         int frequencyHz = DefaultFrequency,
         int durationMs = DefaultDuration,
+        string? channelName = null,
         CancellationToken ct = default)
     {
         // Prevent overlapping playback
@@ -51,13 +53,14 @@ public class ToneGeneratorService
 
         try
         {
-            _logger.LogInformation("Playing test tone: {Frequency}Hz for {Duration}ms on sink {Sink}",
-                frequencyHz, durationMs, sinkName);
+            _logger.LogInformation("Playing test tone: {Frequency}Hz for {Duration}ms on sink {Sink}{Channel}",
+                frequencyHz, durationMs, sinkName, channelName != null ? $" (channel: {channelName})" : "");
 
             // In mock mode, simulate playback without actual audio
             if (_environment.IsMockHardware)
             {
-                _logger.LogDebug("Mock mode: simulating test tone playback");
+                _logger.LogDebug("Mock mode: simulating test tone playback{Channel}",
+                    channelName != null ? $" on channel {channelName}" : "");
                 // Simulate a brief playback delay (100ms instead of full duration)
                 await Task.Delay(Math.Min(durationMs, 100), ct);
                 _logger.LogDebug("Mock test tone playback completed");
@@ -68,8 +71,8 @@ public class ToneGeneratorService
             string? tempFile = null;
             try
             {
-                // Generate WAV file
-                var wavData = GenerateWavFile(frequencyHz, durationMs);
+                // Generate WAV file (with optional channel selection)
+                var wavData = GenerateWavFile(frequencyHz, durationMs, channelName);
 
                 // Write to temp file
                 tempFile = Path.Combine(Path.GetTempPath(), $"testtone_{Guid.NewGuid():N}.wav");
@@ -107,10 +110,24 @@ public class ToneGeneratorService
     /// <summary>
     /// Generate a WAV file containing a sine wave tone.
     /// </summary>
-    private byte[] GenerateWavFile(int frequencyHz, int durationMs)
+    /// <param name="frequencyHz">Frequency of the tone in Hz</param>
+    /// <param name="durationMs">Duration of the tone in milliseconds</param>
+    /// <param name="channelName">Optional channel name for single-channel playback (e.g., "front-left", "front-right")</param>
+    private byte[] GenerateWavFile(int frequencyHz, int durationMs, string? channelName = null)
     {
         var numSamples = (int)(SampleRate * durationMs / 1000.0);
         var dataSize = numSamples * Channels * (BitsPerSample / 8);
+
+        // Determine which channel(s) to play on
+        bool playLeft = true;
+        bool playRight = true;
+
+        if (!string.IsNullOrEmpty(channelName))
+        {
+            // Map channel names to left/right playback
+            playLeft = IsLeftChannel(channelName);
+            playRight = IsRightChannel(channelName);
+        }
 
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
@@ -159,15 +176,41 @@ public class ToneGeneratorService
             // Convert to 16-bit signed integer
             short sampleInt = (short)(sample * short.MaxValue * 0.8);  // 80% volume to avoid clipping
 
-            // Write sample for each channel (stereo)
-            for (int ch = 0; ch < Channels; ch++)
-            {
-                writer.Write(sampleInt);
-            }
+            // Write sample for left channel
+            writer.Write(playLeft ? sampleInt : (short)0);
+
+            // Write sample for right channel
+            writer.Write(playRight ? sampleInt : (short)0);
         }
 
         return ms.ToArray();
     }
+
+    /// <summary>
+    /// Determine if a channel name represents a left channel.
+    /// </summary>
+    private static bool IsLeftChannel(string channelName) => channelName switch
+    {
+        "front-left" => true,
+        "rear-left" => true,
+        "side-left" => true,
+        "front-center" => true,  // Center plays on both
+        "lfe" => true,  // LFE plays on both
+        _ => false
+    };
+
+    /// <summary>
+    /// Determine if a channel name represents a right channel.
+    /// </summary>
+    private static bool IsRightChannel(string channelName) => channelName switch
+    {
+        "front-right" => true,
+        "rear-right" => true,
+        "side-right" => true,
+        "front-center" => true,  // Center plays on both
+        "lfe" => true,  // LFE plays on both
+        _ => false
+    };
 
     /// <summary>
     /// Play a WAV file through paplay to a specific sink.
