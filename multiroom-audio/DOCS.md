@@ -114,39 +114,69 @@ streaming. No additional port configuration is required.
 
 ## 12V Trigger Control (Optional)
 
-This add-on supports 12V trigger control via Denkovi USB 8-channel relay boards
-(FT245RL chip). This allows automatic power-on/off of amplifiers when playback
-starts and stops.
+This add-on supports 12V trigger control via USB relay boards. This allows
+automatic power-on/off of amplifiers when playback starts and stops.
 
 ### Supported Hardware
 
+**FTDI Relay Boards:**
+
 - Denkovi USB 8 Relay Board (DAE0006K or similar with FT245RL chip)
-- Any FTDI FT245RL-based relay board
+- Any FTDI FT245RL-based relay board (1-16 channels)
+
+**USB HID Relay Boards:**
+
+- DCT Tech / ucreatefun USB relay boards (1, 2, 4, or 8 channels)
+- Any USB HID relay with VID 0x16C0, PID 0x05DF
+- Channel count is auto-detected from product name (e.g., "USBRelay8")
 
 ### Setup (Docker)
 
-For standalone Docker deployments, enable USB passthrough:
+For standalone Docker deployments, enable USB passthrough in your `docker-compose.yml`:
 
 ```yaml
 services:
   multiroom-audio:
     devices:
+      # Required for both FTDI and USB HID relay boards
       - /dev/bus/usb:/dev/bus/usb
     cap_add:
+      # Optional: Only needed if ftdi_sio kernel driver claims your FTDI device
+      # Not required for USB HID boards
       - SYS_RAWIO
+```
+
+**Alternative: Pass through specific devices only:**
+
+```yaml
+    devices:
+      # For USB HID relay boards (find your hidraw device with 'ls /dev/hidraw*')
+      - /dev/hidraw0:/dev/hidraw0
+      # For specific USB device (find path with 'lsusb')
+      - /dev/bus/usb/001/002:/dev/bus/usb/001/002
 ```
 
 ### Setup (Home Assistant OS)
 
-FTDI relay boards should work automatically when connected via USB. If not
-detected, ensure the USB device is visible in Home Assistant's hardware settings.
+USB relay boards should work automatically when connected via USB. If not
+detected:
+1. Ensure the USB device is visible in Home Assistant's hardware settings
+2. Restart the add-on after connecting the relay board
 
 ### Trigger Configuration
 
 1. Open Settings > 12V Triggers in the web interface
 2. Enable the trigger feature
-3. Assign relay channels to custom sinks
-4. Configure off-delay (time before relay turns off after playback stops)
+3. Click "Add Relay Board" and select your detected board
+4. Assign relay channels to custom sinks
+5. Configure off-delay (time before relay turns off after playback stops)
+
+### Multiple Boards
+
+You can configure multiple relay boards simultaneously. Each board maintains its
+own channel assignments. Boards are identified by:
+- **Serial number** (preferred) - Stable across reboots and USB port changes
+- **USB port path** (fallback) - For boards without unique serial numbers
 
 ## Known Limitations
 
