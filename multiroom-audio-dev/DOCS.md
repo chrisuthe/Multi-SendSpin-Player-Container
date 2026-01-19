@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-738de36
+## Development Build: sha-32d0b35
 
 **Current Dev Build Changes** (recent)
 
+- chore: remove outdated nextgen.md implementation plan
 - Add AppArmor profile to dev add-on for improved security
 - Extract BackgroundTaskExecutor utility from PlayerManagerService
 - Refactor long methods in PlayerManagerService for improved readability
@@ -14,7 +15,6 @@
 - Add structured error handling and audio system documentation
 - Refactor controllers: move batch logic to service, standardize patterns
 - Extract StartupDiagnosticsService and add UpdateDeviceProperty helper
-- Update all user-facing references from "Initial Volume" to "Startup Volume"
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
