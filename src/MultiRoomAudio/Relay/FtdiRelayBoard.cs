@@ -18,7 +18,7 @@ namespace MultiRoomAudio.Relay;
 /// kernel driver without requiring manual host configuration.
 /// On Linux, requires libftdi1 and libusb-1.0 to be installed.
 /// </remarks>
-public sealed class FtdiRelayBoard : IDisposable
+public sealed class FtdiRelayBoard : IRelayBoard
 {
     private IntPtr _context = IntPtr.Zero;
     private ushort _currentState;  // 16-bit state for up to 16 relays

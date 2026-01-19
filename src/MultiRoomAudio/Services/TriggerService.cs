@@ -32,7 +32,7 @@ public class TriggerService : IHostedService, IAsyncDisposable
     private readonly object _configLock = new();
     private readonly object _stateLock = new();
 
-    private FtdiRelayBoard? _relayBoard;
+    private IRelayBoard? _relayBoard;
     private TriggerFeatureConfiguration _config = new();
     private TriggerFeatureState _state = TriggerFeatureState.Disabled;
     private string? _errorMessage;
@@ -380,6 +380,20 @@ public class TriggerService : IHostedService, IAsyncDisposable
     /// </summary>
     public List<FtdiDeviceInfo> GetAvailableDevices()
     {
+        // Return mock device in mock hardware mode
+        if (_environment.IsMockHardware)
+        {
+            return new List<FtdiDeviceInfo>
+            {
+                new FtdiDeviceInfo(
+                    Index: 0,
+                    SerialNumber: "MOCK001",
+                    Description: "Mock 8-Channel Relay Board",
+                    IsOpen: false
+                )
+            };
+        }
+
         if (!FtdiRelayBoard.IsLibraryAvailable())
         {
             return new List<FtdiDeviceInfo>();
@@ -472,6 +486,17 @@ public class TriggerService : IHostedService, IAsyncDisposable
             _relayBoard?.Dispose();
             _relayBoard = null;
             _errorMessage = null;
+
+            // Use mock relay board in mock hardware mode
+            if (_environment.IsMockHardware)
+            {
+                _relayBoard = new MockRelayBoard(_loggerFactory.CreateLogger<MockRelayBoard>());
+                _relayBoard.Open();
+                _state = TriggerFeatureState.Connected;
+                _errorMessage = null;
+                _logger.LogInformation("Connected to mock relay board (MOCK_HARDWARE mode)");
+                return true;
+            }
 
             if (!FtdiRelayBoard.IsLibraryAvailable())
             {
