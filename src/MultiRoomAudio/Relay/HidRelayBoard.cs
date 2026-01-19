@@ -1,3 +1,4 @@
+using System.Linq;
 using HidSharp;
 using MultiRoomAudio.Models;
 
@@ -187,9 +188,11 @@ public sealed class HidRelayBoard : IRelayBoard
         // Read current state from device
         RefreshState();
 
-        return (_currentState & (1 << (channel - 1))) != 0
-            ? RelayState.On
-            : RelayState.Off;
+        var isOn = (_currentState & (1 << (channel - 1))) != 0;
+        var result = isOn ? RelayState.On : RelayState.Off;
+        _logger?.LogDebug("GetRelay({Channel}): currentState=0x{State:X2}, bit={Bit}, mask=0x{Mask:X2}, result={Result}",
+            channel, _currentState, channel - 1, 1 << (channel - 1), result);
+        return result;
     }
 
     public bool AllOff()
@@ -216,7 +219,11 @@ public sealed class HidRelayBoard : IRelayBoard
             var report = new byte[9];
             report[0] = 0;
             _stream.GetFeature(report);
+            var oldState = _currentState;
             _currentState = report[7];
+            _logger?.LogDebug("RefreshState: read report bytes [{Bytes}], state byte[7]={StateByte:X2}, currentState changed {Old:X2}->{New:X2}",
+                string.Join(",", report.Select(b => $"0x{b:X2}")),
+                report[7], oldState, _currentState);
         }
         catch (Exception ex)
         {
