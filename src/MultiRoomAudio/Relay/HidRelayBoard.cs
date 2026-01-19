@@ -155,12 +155,13 @@ public sealed class HidRelayBoard : IRelayBoard
         try
         {
             // DCTTECH protocol: [report_id, cmd, relay_num, 0, 0, 0, 0, 0, 0]
+            // These boards use feature reports for control, not output reports
             var report = new byte[9];
             report[0] = 0;  // Report ID
             report[1] = on ? CMD_ON : CMD_OFF;
             report[2] = (byte)channel;
 
-            _stream.Write(report);
+            _stream.SetFeature(report);
 
             // Update local state tracking
             if (on)
