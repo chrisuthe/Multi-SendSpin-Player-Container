@@ -13,17 +13,16 @@ arch:
 
 # Hardware access
 audio: true
-full_access: true
 host_network: true
 udev: true
-# TODO: Remove if full_access: true is sufficient for audio access
+# Explicit device mapping for audio access
 devices:
   - "/dev/snd:/dev/snd"
 
 # Permissions for audio processing
 privileged:
   - SYS_NICE
-apparmor: false
+apparmor: true
 
 # Storage mapping
 map:
