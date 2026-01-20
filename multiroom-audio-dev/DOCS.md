@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-edf5036
+## Development Build: sha-d41de60
 
 **Current Dev Build Changes** (recent)
 
+- Refactor exception handling to use typed exceptions
 - Merge pull request #82 from scyto/feature/12v-trigger-plus-mock-hardware
 - Add logging when pactl process fails to start in diagnostics
 - Fix null coalescing operator precedence bug in SetDeviceMaxVolume
@@ -14,7 +15,6 @@
 - Fix test tone routing for multi-channel devices
 - Fix test tone routing for remap sinks, reduce tone volume
 - Add configurable mock hardware via YAML
-- Refactor relay mock hardware to use DI abstractions
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
