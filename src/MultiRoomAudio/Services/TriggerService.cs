@@ -1002,9 +1002,9 @@ public class TriggerService : IHostedService, IAsyncDisposable
                 if (string.IsNullOrWhiteSpace(yaml))
                     return new TriggerFeatureConfiguration();
 
-                #pragma warning disable CS0618 // Obsolete properties are for migration only
+#pragma warning disable CS0618 // Obsolete properties are for migration only
                 var config = _deserializer.Deserialize<TriggerFeatureConfiguration>(yaml);
-                #pragma warning restore CS0618
+#pragma warning restore CS0618
 
                 if (config == null)
                     return new TriggerFeatureConfiguration();

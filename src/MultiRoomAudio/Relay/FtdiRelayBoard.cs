@@ -210,8 +210,10 @@ public sealed class FtdiRelayBoard : IRelayBoard
     private static string? GetNullTerminatedString(byte[] buffer)
     {
         int len = Array.IndexOf(buffer, (byte)0);
-        if (len < 0) len = buffer.Length;
-        if (len == 0) return null;
+        if (len < 0)
+            len = buffer.Length;
+        if (len == 0)
+            return null;
         return Encoding.ASCII.GetString(buffer, 0, len);
     }
 

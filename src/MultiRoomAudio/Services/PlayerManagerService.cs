@@ -6,13 +6,13 @@ using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Hubs;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Utilities;
-using static MultiRoomAudio.Utilities.BackgroundTaskExecutor;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Client;
 using Sendspin.SDK.Connection;
 using Sendspin.SDK.Discovery;
 using Sendspin.SDK.Models;
 using Sendspin.SDK.Synchronization;
+using static MultiRoomAudio.Utilities.BackgroundTaskExecutor;
 
 namespace MultiRoomAudio.Services;
 
