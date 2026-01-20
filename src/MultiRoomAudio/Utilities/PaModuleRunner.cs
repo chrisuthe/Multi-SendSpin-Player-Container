@@ -71,20 +71,23 @@ public partial class PaModuleRunner : IPaModuleRunner
 
     /// <summary>
     /// Sanitizes a description string for use in device.description property.
-    /// Handles special characters that could cause issues in PulseAudio property values.
+    /// Since we use Process.ArgumentList (not shell), we don't need shell escaping.
+    /// We only need to remove characters that could cause issues in PulseAudio property values.
+    /// The description is wrapped in single quotes for pactl, so we must remove single quotes.
     /// </summary>
     private static string SanitizeDescription(string description)
     {
         if (string.IsNullOrWhiteSpace(description))
             return description;
 
-        // Sanitize for PulseAudio property values (single-quoted strings)
-        // Escape single quotes: ' -> '\'' (end quote, escaped quote, start quote)
+        // Sanitize for PulseAudio property values
+        // Since we use ArgumentList, .NET handles process argument escaping - no shell escaping needed
+        // We only remove characters that could break PulseAudio's property parsing
+        // Single quotes must be removed because the description is wrapped in single quotes for pactl
         return description
             .Replace("\\", "")      // Remove backslashes
-            .Replace("'", @"'\''")  // Escape single quotes for shell-style quoting
-            .Replace("\"", "")      // Remove double quotes
-            .Replace("`", "")       // Remove backticks (command substitution)
+            .Replace("'", "")       // Remove single quotes (description is wrapped in single quotes)
+            .Replace("\"", "")      // Remove double quotes (could break property parsing)
             .Replace("\n", " ")     // Replace newlines with spaces
             .Replace("\r", "")      // Remove carriage returns
             .Replace("\0", "")      // Remove null chars
