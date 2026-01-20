@@ -13,6 +13,17 @@ public interface IRelayBoard : IDisposable
     bool IsConnected { get; }
 
     /// <summary>
+    /// The board's serial number/identifier (if available).
+    /// May be null for boards without a serial number.
+    /// </summary>
+    string? SerialNumber { get; }
+
+    /// <summary>
+    /// Number of relay channels on this board.
+    /// </summary>
+    int ChannelCount { get; }
+
+    /// <summary>
     /// Open connection to the first available device.
     /// </summary>
     bool Open();

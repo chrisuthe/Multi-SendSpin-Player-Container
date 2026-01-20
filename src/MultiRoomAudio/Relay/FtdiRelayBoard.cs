@@ -25,6 +25,8 @@ public sealed class FtdiRelayBoard : IRelayBoard
     private bool _disposed;
     private readonly ILogger<FtdiRelayBoard>? _logger;
     private readonly object _lock = new();
+    private string? _serialNumber;
+    private int _channelCount = 8; // Default to 8 channels
 
     // FTDI USB IDs
     private const int FTDI_VENDOR_ID = 0x0403;
@@ -219,6 +221,17 @@ public sealed class FtdiRelayBoard : IRelayBoard
     public bool IsConnected => _context != IntPtr.Zero;
 
     /// <summary>
+    /// The board's serial number (if available).
+    /// </summary>
+    public string? SerialNumber => _serialNumber;
+
+    /// <summary>
+    /// Number of relay channels on this board.
+    /// FTDI boards typically have 8 channels, but 16-channel boards exist.
+    /// </summary>
+    public int ChannelCount => _channelCount;
+
+    /// <summary>
     /// Current relay states as an int (bit 0 = relay 1, supports up to 16 relays).
     /// </summary>
     public int CurrentState
@@ -378,6 +391,9 @@ public sealed class FtdiRelayBoard : IRelayBoard
                     Close();
                     return false;
                 }
+
+                // Store the serial number
+                _serialNumber = serialNumber;
 
                 _logger?.LogInformation("FTDI relay board opened (serial: {Serial})", serialNumber);
                 return true;

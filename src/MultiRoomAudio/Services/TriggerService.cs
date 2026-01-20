@@ -18,7 +18,8 @@ public class TriggerService : IHostedService, IAsyncDisposable
     private readonly ILogger<TriggerService> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly CustomSinksService _sinksService;
-    private readonly EnvironmentService _environment;
+    private readonly IRelayDeviceEnumerator _deviceEnumerator;
+    private readonly IRelayBoardFactory _boardFactory;
     private readonly string _configPath;
     private readonly IDeserializer _deserializer;
     private readonly ISerializer _serializer;
@@ -51,12 +52,15 @@ public class TriggerService : IHostedService, IAsyncDisposable
         ILogger<TriggerService> logger,
         ILoggerFactory loggerFactory,
         CustomSinksService sinksService,
-        EnvironmentService environment)
+        EnvironmentService environment,
+        IRelayDeviceEnumerator deviceEnumerator,
+        IRelayBoardFactory boardFactory)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
         _sinksService = sinksService;
-        _environment = environment;
+        _deviceEnumerator = deviceEnumerator;
+        _boardFactory = boardFactory;
         _configPath = Path.Combine(environment.ConfigPath, "triggers.yaml");
 
         _deserializer = new DeserializerBuilder()
@@ -546,39 +550,7 @@ public class TriggerService : IHostedService, IAsyncDisposable
     /// </summary>
     public List<FtdiDeviceInfo> GetAvailableDevices()
     {
-        // Return mock devices in mock hardware mode
-        if (_environment.IsMockHardware)
-        {
-            return new List<FtdiDeviceInfo>
-            {
-                new FtdiDeviceInfo(
-                    Index: 0,
-                    SerialNumber: "MOCK001",
-                    Description: "Mock 8-Channel FTDI Relay Board",
-                    IsOpen: _relayBoards.ContainsKey("MOCK001")
-                ),
-                new FtdiDeviceInfo(
-                    Index: 1,
-                    SerialNumber: "MOCK002",
-                    Description: "Mock 8-Channel FTDI Relay Board",
-                    IsOpen: _relayBoards.ContainsKey("MOCK002")
-                ),
-                new FtdiDeviceInfo(
-                    Index: 2,
-                    SerialNumber: null,
-                    Description: "Mock FTDI Board (No Serial)",
-                    IsOpen: false,
-                    UsbPath: "1-2.3"
-                )
-            };
-        }
-
-        if (!FtdiRelayBoard.IsLibraryAvailable())
-        {
-            return new List<FtdiDeviceInfo>();
-        }
-
-        return FtdiRelayBoard.EnumerateDevices();
+        return _deviceEnumerator.GetFtdiDevices();
     }
 
     /// <summary>
@@ -586,84 +558,11 @@ public class TriggerService : IHostedService, IAsyncDisposable
     /// </summary>
     public List<RelayDeviceInfo> GetAllAvailableDevices()
     {
-        var result = new List<RelayDeviceInfo>();
+        // Get devices from the enumerator
+        var devices = _deviceEnumerator.GetAllDevices();
 
-        // Return mock devices in mock hardware mode
-        if (_environment.IsMockHardware)
-        {
-            result.Add(new RelayDeviceInfo(
-                BoardId: "MOCK001",
-                BoardType: RelayBoardType.Ftdi,
-                SerialNumber: "MOCK001",
-                Description: "Mock 8-Channel FTDI Relay Board",
-                ChannelCount: 8,
-                IsInUse: _relayBoards.ContainsKey("MOCK001"),
-                UsbPath: null,
-                IsPathBased: false
-            ));
-            result.Add(new RelayDeviceInfo(
-                BoardId: "MOCK002",
-                BoardType: RelayBoardType.Ftdi,
-                SerialNumber: "MOCK002",
-                Description: "Mock 8-Channel FTDI Relay Board",
-                ChannelCount: 8,
-                IsInUse: _relayBoards.ContainsKey("MOCK002"),
-                UsbPath: null,
-                IsPathBased: false
-            ));
-            // HID board with detectable channel count (product name "USBRelay4")
-            result.Add(new RelayDeviceInfo(
-                BoardId: "HID:QAAMZ",
-                BoardType: RelayBoardType.UsbHid,
-                SerialNumber: "QAAMZ",
-                Description: "USBRelay4",  // Channel count detectable from name
-                ChannelCount: 4,
-                IsInUse: _relayBoards.ContainsKey("HID:QAAMZ"),
-                UsbPath: null,
-                IsPathBased: false,
-                ChannelCountDetected: true  // Auto-detected - don't allow editing
-            ));
-            // HID board without detectable channel count (generic product name)
-            result.Add(new RelayDeviceInfo(
-                BoardId: "HID:ABCDE",
-                BoardType: RelayBoardType.UsbHid,
-                SerialNumber: "ABCDE",
-                Description: "Generic HID Relay",  // Can't detect channel count from name
-                ChannelCount: 8,  // Default guess
-                IsInUse: _relayBoards.ContainsKey("HID:ABCDE"),
-                UsbPath: null,
-                IsPathBased: false,
-                ChannelCountDetected: false  // User must configure
-            ));
-            return result;
-        }
-
-        // Enumerate FTDI devices
-        if (FtdiRelayBoard.IsLibraryAvailable())
-        {
-            foreach (var ftdi in FtdiRelayBoard.EnumerateDevices())
-            {
-                result.Add(RelayDeviceInfo.FromFtdi(ftdi));
-            }
-        }
-
-        // Enumerate USB HID relay devices
-        foreach (var hid in HidRelayBoard.EnumerateDevices(_logger))
-        {
-            result.Add(new RelayDeviceInfo(
-                BoardId: hid.GetBoardId(),
-                BoardType: RelayBoardType.UsbHid,
-                SerialNumber: hid.SerialNumber,
-                Description: hid.ProductName ?? "USB HID Relay Board",
-                ChannelCount: hid.ChannelCount,
-                IsInUse: _relayBoards.ContainsKey(hid.GetBoardId()),
-                UsbPath: hid.DevicePath,
-                IsPathBased: hid.IsPathBased,
-                ChannelCountDetected: hid.ChannelCountDetected
-            ));
-        }
-
-        return result;
+        // Update IsInUse flag based on which boards are currently connected
+        return devices.Select(d => d with { IsInUse = _relayBoards.ContainsKey(d.BoardId) }).ToList();
     }
 
     #endregion
@@ -789,183 +688,116 @@ public class TriggerService : IHostedService, IAsyncDisposable
                 _channelStates.TryAdd((boardId, i), new TriggerChannelState());
             }
 
-            // Use mock relay board in mock hardware mode
-            if (_environment.IsMockHardware)
+            // Determine board type from ID if not set
+            var boardType = boardConfig.BoardType;
+            if (boardType == RelayBoardType.Unknown)
             {
-                var mockBoard = new MockRelayBoard(_loggerFactory.CreateLogger<MockRelayBoard>());
-                mockBoard.Open();
-                _relayBoards[boardId] = mockBoard;
+                boardType = boardId.StartsWith("HID:") ? RelayBoardType.UsbHid : RelayBoardType.Ftdi;
+            }
+
+            // Check if the factory can create this board type
+            if (!_boardFactory.CanCreate(boardId, boardType))
+            {
+                _boardStates[boardId] = TriggerFeatureState.Error;
+                _boardErrors[boardId] = $"Cannot create {boardType} board - required library not available.";
+                _logger.LogWarning("Cannot create {BoardType} board '{BoardId}' - library not available", boardType, boardId);
+                return false;
+            }
+
+            // Create the board using the factory
+            var board = _boardFactory.CreateBoard(boardId, boardType);
+
+            // Connect to the board
+            var serial = GetSerialFromBoardId(boardId);
+            bool connected;
+
+            if (string.IsNullOrEmpty(serial) || boardId.StartsWith("USB:"))
+            {
+                // Port-based board or no serial - open first available
+                connected = board.Open();
+            }
+            else
+            {
+                // Serial-based board
+                connected = board.OpenBySerial(serial);
+            }
+
+            if (connected)
+            {
+                _relayBoards[boardId] = board;
                 _boardStates[boardId] = TriggerFeatureState.Connected;
                 _boardErrors[boardId] = null;
+
+                // Update board type if it was Unknown
+                if (boardConfig.BoardType == RelayBoardType.Unknown)
+                {
+                    boardConfig.BoardType = boardType;
+                    SaveConfiguration();
+                }
+
+                // Update channel count if it was auto-detected and different from config
+                if (board.ChannelCount != boardConfig.ChannelCount && board.ChannelCount > 0)
+                {
+                    _logger.LogInformation("Board '{BoardId}' reports {Detected} channels, config had {Config}",
+                        boardId, board.ChannelCount, boardConfig.ChannelCount);
+                    boardConfig.ChannelCount = board.ChannelCount;
+                    SaveConfiguration();
+                }
 
                 // Apply startup behavior or restore previous state
                 if (applyStartupBehavior)
                 {
-                    ApplyStartupBehavior(mockBoard, boardConfig);
+                    ApplyStartupBehavior(board, boardConfig);
                 }
                 else if (previousState.HasValue)
                 {
-                    // Restore previous relay state on manual reconnect
-                    for (int i = 1; i <= boardConfig.ChannelCount; i++)
-                    {
-                        bool wasOn = (previousState.Value & (1 << (i - 1))) != 0;
-                        mockBoard.SetRelay(i, wasOn);
-                    }
-                    _logger.LogInformation("Board '{BoardId}': Restored previous relay state 0x{State:X2} (manual reconnect)", boardId, previousState.Value);
+                    RestorePreviousState(board, boardConfig, previousState.Value);
+                }
+                else
+                {
+                    _logger.LogInformation("Board '{BoardId}': Skipping startup behavior (manual reconnect, no previous state)", boardId);
                 }
 
-                _logger.LogInformation("Connected to mock relay board '{BoardId}' (MOCK_HARDWARE mode)", boardId);
+                _logger.LogInformation("Connected to {BoardType} relay board '{BoardId}' (Serial: {Serial}, {Channels} channels, startup: {Startup})",
+                    boardType, boardId, board.SerialNumber ?? "(none)", board.ChannelCount,
+                    applyStartupBehavior ? boardConfig.StartupBehavior.ToString() : "skipped");
                 return true;
             }
-
-            // Determine board type and connect accordingly
-            if (boardId.StartsWith("HID:") || boardConfig.BoardType == RelayBoardType.UsbHid)
-            {
-                return ConnectHidBoard(boardId, boardConfig, applyStartupBehavior, previousState);
-            }
             else
             {
-                return ConnectFtdiBoard(boardId, boardConfig, applyStartupBehavior, previousState);
+                _boardStates[boardId] = TriggerFeatureState.Disconnected;
+                _boardErrors[boardId] = $"Failed to connect to {boardType} relay board. Check USB connection.";
+                board.Dispose();
+                _logger.LogWarning("Failed to connect to {BoardType} relay board '{BoardId}'", boardType, boardId);
+                return false;
             }
         }
     }
 
-    private bool ConnectHidBoard(string boardId, TriggerBoardConfiguration boardConfig, bool applyStartupBehavior = true, int? previousState = null)
+    /// <summary>
+    /// Extract the serial number from a board ID.
+    /// Handles HID:serial and USB:path formats.
+    /// </summary>
+    private static string? GetSerialFromBoardId(string boardId)
     {
-        var hidBoard = new HidRelayBoard(_loggerFactory.CreateLogger<HidRelayBoard>());
-
-        // Extract serial from board ID (format: "HID:SERIAL" or "HID:XXXXXXXX" for path-based)
-        var serial = boardId.StartsWith("HID:") ? boardId.Substring(4) : boardId;
-
-        bool connected = hidBoard.OpenBySerial(serial);
-
-        if (connected)
-        {
-            _relayBoards[boardId] = hidBoard;
-            _boardStates[boardId] = TriggerFeatureState.Connected;
-            _boardErrors[boardId] = null;
-
-            // Update channel count if it was auto-detected and different from config
-            if (hidBoard.ChannelCount != boardConfig.ChannelCount)
-            {
-                _logger.LogInformation("HID board '{BoardId}' reports {Detected} channels, config had {Config}",
-                    boardId, hidBoard.ChannelCount, boardConfig.ChannelCount);
-                boardConfig.ChannelCount = hidBoard.ChannelCount;
-                SaveConfiguration();
-            }
-
-            // Ensure board type is set
-            if (boardConfig.BoardType != RelayBoardType.UsbHid)
-            {
-                boardConfig.BoardType = RelayBoardType.UsbHid;
-                SaveConfiguration();
-            }
-
-            // Apply startup behavior or restore previous state on manual reconnect
-            if (applyStartupBehavior)
-            {
-                ApplyStartupBehavior(hidBoard, boardConfig);
-            }
-            else if (previousState.HasValue)
-            {
-                // Restore previous relay state on manual reconnect
-                for (int i = 1; i <= boardConfig.ChannelCount; i++)
-                {
-                    bool wasOn = (previousState.Value & (1 << (i - 1))) != 0;
-                    hidBoard.SetRelay(i, wasOn);
-                }
-                _logger.LogInformation("Board '{BoardId}': Restored previous relay state 0x{State:X2} (manual reconnect)", boardId, previousState.Value);
-            }
-            else
-            {
-                _logger.LogInformation("Board '{BoardId}': Skipping startup behavior (manual reconnect, no previous state)", boardConfig.BoardId);
-            }
-
-            _logger.LogInformation("Connected to USB HID relay board '{BoardId}' (Serial: {Serial}, {Channels} channels, startup: {Startup})",
-                boardId, hidBoard.SerialNumber, hidBoard.ChannelCount, applyStartupBehavior ? boardConfig.StartupBehavior.ToString() : "skipped");
-            return true;
-        }
-        else
-        {
-            _boardStates[boardId] = TriggerFeatureState.Disconnected;
-            _boardErrors[boardId] = "Failed to connect to USB HID relay board. Check USB connection.";
-            hidBoard.Dispose();
-            _logger.LogWarning("Failed to connect to USB HID relay board '{BoardId}'", boardId);
-            return false;
-        }
-    }
-
-    private bool ConnectFtdiBoard(string boardId, TriggerBoardConfiguration boardConfig, bool applyStartupBehavior = true, int? previousState = null)
-    {
-        if (!FtdiRelayBoard.IsLibraryAvailable())
-        {
-            _boardStates[boardId] = TriggerFeatureState.Error;
-            _boardErrors[boardId] = "FTDI library (libftd2xx) not available. Install the FTDI D2XX driver.";
-            _logger.LogWarning("FTDI library not available for board '{BoardId}'", boardId);
-            return false;
-        }
-
-        var ftdiBoard = new FtdiRelayBoard(_loggerFactory.CreateLogger<FtdiRelayBoard>());
-
-        bool connected;
+        if (boardId.StartsWith("HID:"))
+            return boardId.Substring(4);
         if (boardId.StartsWith("USB:"))
-        {
-            // Port-based board - need to find by USB path
-            // For now, just try to open the first available device
-            // TODO: Implement USB path-based device matching
-            connected = ftdiBoard.Open();
-        }
-        else
-        {
-            // Serial-based board
-            connected = ftdiBoard.OpenBySerial(boardId);
-        }
+            return null; // Port-based, no serial
+        return boardId; // Assume the ID is the serial itself (FTDI)
+    }
 
-        if (connected)
+    /// <summary>
+    /// Restore previous relay state on manual reconnect.
+    /// </summary>
+    private void RestorePreviousState(IRelayBoard board, TriggerBoardConfiguration config, int previousState)
+    {
+        for (int i = 1; i <= config.ChannelCount; i++)
         {
-            _relayBoards[boardId] = ftdiBoard;
-            _boardStates[boardId] = TriggerFeatureState.Connected;
-            _boardErrors[boardId] = null;
-
-            // Ensure board type is set
-            if (boardConfig.BoardType != RelayBoardType.Ftdi)
-            {
-                boardConfig.BoardType = RelayBoardType.Ftdi;
-                SaveConfiguration();
-            }
-
-            // Apply startup behavior or restore previous state on manual reconnect
-            if (applyStartupBehavior)
-            {
-                ApplyStartupBehavior(ftdiBoard, boardConfig);
-            }
-            else if (previousState.HasValue)
-            {
-                // Restore previous relay state on manual reconnect
-                for (int i = 1; i <= boardConfig.ChannelCount; i++)
-                {
-                    bool wasOn = (previousState.Value & (1 << (i - 1))) != 0;
-                    ftdiBoard.SetRelay(i, wasOn);
-                }
-                _logger.LogInformation("Board '{BoardId}': Restored previous relay state 0x{State:X2} (manual reconnect)", boardId, previousState.Value);
-            }
-            else
-            {
-                _logger.LogInformation("Board '{BoardId}': Skipping startup behavior (manual reconnect, no previous state)", boardConfig.BoardId);
-            }
-
-            _logger.LogInformation("Connected to FTDI relay board '{BoardId}' (startup: {Startup})",
-                boardId, applyStartupBehavior ? boardConfig.StartupBehavior.ToString() : "skipped");
-            return true;
+            bool wasOn = (previousState & (1 << (i - 1))) != 0;
+            board.SetRelay(i, wasOn);
         }
-        else
-        {
-            _boardStates[boardId] = TriggerFeatureState.Disconnected;
-            _boardErrors[boardId] = "Failed to connect to FTDI relay board. Check USB connection.";
-            ftdiBoard.Dispose();
-            _logger.LogWarning("Failed to connect to FTDI relay board '{BoardId}'", boardId);
-            return false;
-        }
+        _logger.LogInformation("Board '{BoardId}': Restored previous relay state 0x{State:X2} (manual reconnect)", config.BoardId, previousState);
     }
 
     /// <summary>
