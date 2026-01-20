@@ -380,12 +380,14 @@ public class ToneGeneratorService
         psi.ArgumentList.Add($"--device={sinkName}");
         if (!string.IsNullOrEmpty(channelMap))
         {
+            psi.ArgumentList.Add("--no-remix");
             psi.ArgumentList.Add($"--channel-map={channelMap}");
         }
         psi.ArgumentList.Add(wavFile);
 
-        _logger.LogDebug("Running: paplay --device={Sink}{ChannelMap} {File}",
+        _logger.LogDebug("Running: paplay --device={Sink}{NoRemix}{ChannelMap} {File}",
             sinkName,
+            !string.IsNullOrEmpty(channelMap) ? " --no-remix" : "",
             !string.IsNullOrEmpty(channelMap) ? $" --channel-map={channelMap}" : "",
             wavFile);
 
