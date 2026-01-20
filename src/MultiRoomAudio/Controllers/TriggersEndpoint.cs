@@ -178,7 +178,7 @@ public static class TriggersEndpoint
                     $"Channel count must be one of: {string.Join(", ", ValidChannelCounts.Values)}"));
             }
 
-            var success = service.UpdateBoard(boardId, request.DisplayName, request.ChannelCount);
+            var success = service.UpdateBoard(boardId, request.DisplayName, request.ChannelCount, request.StartupBehavior, request.ShutdownBehavior);
             if (success)
             {
                 var boardStatus = service.GetBoardStatus(boardId);
@@ -190,7 +190,7 @@ public static class TriggersEndpoint
             }
         })
         .WithName("UpdateBoard")
-        .WithDescription("Update a relay board's settings");
+        .WithDescription("Update a relay board's settings (including startup behavior)");
 
         // DELETE /api/triggers/boards/{boardId} - Remove a board
         group.MapDelete("/boards/{boardId}", (

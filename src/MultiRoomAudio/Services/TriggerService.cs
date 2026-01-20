@@ -97,7 +97,7 @@ public class TriggerService : IHostedService, IAsyncDisposable
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("TriggerService stopping - turning off all relays...");
+        _logger.LogInformation("TriggerService stopping...");
 
         // Cancel all pending off timers
         foreach (var kvp in _channelStates)
@@ -107,11 +107,14 @@ public class TriggerService : IHostedService, IAsyncDisposable
             kvp.Value.OffDelayTimer = null;
         }
 
-        // Turn off all relays and dispose all boards
-        foreach (var board in _relayBoards.Values)
+        // Apply shutdown behavior for each board and dispose
+        foreach (var boardConfig in _config.Boards)
         {
-            board.AllOff();
-            board.Dispose();
+            if (_relayBoards.TryGetValue(boardConfig.BoardId, out var board))
+            {
+                ApplyShutdownBehavior(board, boardConfig);
+                board.Dispose();
+            }
         }
         _relayBoards.Clear();
         _boardStates.Clear();
@@ -210,7 +213,9 @@ public class TriggerService : IHostedService, IAsyncDisposable
             IsPortBased: isPortBased,
             ErrorMessage: errorMessage,
             Triggers: triggers,
-            CurrentRelayStates: relayBoard?.CurrentState ?? 0
+            CurrentRelayStates: relayBoard?.CurrentState ?? 0,
+            StartupBehavior: boardConfig.StartupBehavior,
+            ShutdownBehavior: boardConfig.ShutdownBehavior
         );
     }
 
@@ -359,7 +364,7 @@ public class TriggerService : IHostedService, IAsyncDisposable
     /// <summary>
     /// Update a board's settings.
     /// </summary>
-    public bool UpdateBoard(string boardId, string? displayName, int? channelCount)
+    public bool UpdateBoard(string boardId, string? displayName, int? channelCount, RelayStartupBehavior? startupBehavior = null, RelayStartupBehavior? shutdownBehavior = null)
     {
         lock (_configLock)
         {
@@ -402,6 +407,18 @@ public class TriggerService : IHostedService, IAsyncDisposable
                 }
             }
 
+            if (startupBehavior.HasValue)
+            {
+                boardConfig.StartupBehavior = startupBehavior.Value;
+                _logger.LogInformation("Board '{BoardId}' startup behavior set to {Behavior}", boardId, startupBehavior.Value);
+            }
+
+            if (shutdownBehavior.HasValue)
+            {
+                boardConfig.ShutdownBehavior = shutdownBehavior.Value;
+                _logger.LogInformation("Board '{BoardId}' shutdown behavior set to {Behavior}", boardId, shutdownBehavior.Value);
+            }
+
             SaveConfiguration();
             return true;
         }
@@ -419,7 +436,8 @@ public class TriggerService : IHostedService, IAsyncDisposable
             return false;
         }
 
-        return ConnectBoard(boardId);
+        // Don't apply startup behavior on manual reconnect - preserve current relay state
+        return ConnectBoard(boardId, applyStartupBehavior: false);
     }
 
     #endregion
@@ -745,13 +763,15 @@ public class TriggerService : IHostedService, IAsyncDisposable
 
     #region Private Methods - Board Connection
 
-    private bool ConnectBoard(string boardId)
+    private bool ConnectBoard(string boardId, bool applyStartupBehavior = true)
     {
         lock (_stateLock)
         {
-            // Dispose existing connection if any
+            // Save existing state before disposing (for reconnect scenarios)
+            int? previousState = null;
             if (_relayBoards.TryGetValue(boardId, out var existingBoard))
             {
+                previousState = existingBoard.CurrentState;
                 existingBoard.Dispose();
                 _relayBoards.Remove(boardId);
             }
@@ -777,6 +797,23 @@ public class TriggerService : IHostedService, IAsyncDisposable
                 _relayBoards[boardId] = mockBoard;
                 _boardStates[boardId] = TriggerFeatureState.Connected;
                 _boardErrors[boardId] = null;
+
+                // Apply startup behavior or restore previous state
+                if (applyStartupBehavior)
+                {
+                    ApplyStartupBehavior(mockBoard, boardConfig);
+                }
+                else if (previousState.HasValue)
+                {
+                    // Restore previous relay state on manual reconnect
+                    for (int i = 1; i <= boardConfig.ChannelCount; i++)
+                    {
+                        bool wasOn = (previousState.Value & (1 << (i - 1))) != 0;
+                        mockBoard.SetRelay(i, wasOn);
+                    }
+                    _logger.LogInformation("Board '{BoardId}': Restored previous relay state 0x{State:X2} (manual reconnect)", boardId, previousState.Value);
+                }
+
                 _logger.LogInformation("Connected to mock relay board '{BoardId}' (MOCK_HARDWARE mode)", boardId);
                 return true;
             }
@@ -784,16 +821,16 @@ public class TriggerService : IHostedService, IAsyncDisposable
             // Determine board type and connect accordingly
             if (boardId.StartsWith("HID:") || boardConfig.BoardType == RelayBoardType.UsbHid)
             {
-                return ConnectHidBoard(boardId, boardConfig);
+                return ConnectHidBoard(boardId, boardConfig, applyStartupBehavior, previousState);
             }
             else
             {
-                return ConnectFtdiBoard(boardId, boardConfig);
+                return ConnectFtdiBoard(boardId, boardConfig, applyStartupBehavior, previousState);
             }
         }
     }
 
-    private bool ConnectHidBoard(string boardId, TriggerBoardConfiguration boardConfig)
+    private bool ConnectHidBoard(string boardId, TriggerBoardConfiguration boardConfig, bool applyStartupBehavior = true, int? previousState = null)
     {
         var hidBoard = new HidRelayBoard(_loggerFactory.CreateLogger<HidRelayBoard>());
 
@@ -824,8 +861,28 @@ public class TriggerService : IHostedService, IAsyncDisposable
                 SaveConfiguration();
             }
 
-            _logger.LogInformation("Connected to USB HID relay board '{BoardId}' (Serial: {Serial}, {Channels} channels)",
-                boardId, hidBoard.SerialNumber, hidBoard.ChannelCount);
+            // Apply startup behavior or restore previous state on manual reconnect
+            if (applyStartupBehavior)
+            {
+                ApplyStartupBehavior(hidBoard, boardConfig);
+            }
+            else if (previousState.HasValue)
+            {
+                // Restore previous relay state on manual reconnect
+                for (int i = 1; i <= boardConfig.ChannelCount; i++)
+                {
+                    bool wasOn = (previousState.Value & (1 << (i - 1))) != 0;
+                    hidBoard.SetRelay(i, wasOn);
+                }
+                _logger.LogInformation("Board '{BoardId}': Restored previous relay state 0x{State:X2} (manual reconnect)", boardId, previousState.Value);
+            }
+            else
+            {
+                _logger.LogInformation("Board '{BoardId}': Skipping startup behavior (manual reconnect, no previous state)", boardConfig.BoardId);
+            }
+
+            _logger.LogInformation("Connected to USB HID relay board '{BoardId}' (Serial: {Serial}, {Channels} channels, startup: {Startup})",
+                boardId, hidBoard.SerialNumber, hidBoard.ChannelCount, applyStartupBehavior ? boardConfig.StartupBehavior.ToString() : "skipped");
             return true;
         }
         else
@@ -838,7 +895,7 @@ public class TriggerService : IHostedService, IAsyncDisposable
         }
     }
 
-    private bool ConnectFtdiBoard(string boardId, TriggerBoardConfiguration boardConfig)
+    private bool ConnectFtdiBoard(string boardId, TriggerBoardConfiguration boardConfig, bool applyStartupBehavior = true, int? previousState = null)
     {
         if (!FtdiRelayBoard.IsLibraryAvailable())
         {
@@ -877,7 +934,28 @@ public class TriggerService : IHostedService, IAsyncDisposable
                 SaveConfiguration();
             }
 
-            _logger.LogInformation("Connected to FTDI relay board '{BoardId}'", boardId);
+            // Apply startup behavior or restore previous state on manual reconnect
+            if (applyStartupBehavior)
+            {
+                ApplyStartupBehavior(ftdiBoard, boardConfig);
+            }
+            else if (previousState.HasValue)
+            {
+                // Restore previous relay state on manual reconnect
+                for (int i = 1; i <= boardConfig.ChannelCount; i++)
+                {
+                    bool wasOn = (previousState.Value & (1 << (i - 1))) != 0;
+                    ftdiBoard.SetRelay(i, wasOn);
+                }
+                _logger.LogInformation("Board '{BoardId}': Restored previous relay state 0x{State:X2} (manual reconnect)", boardId, previousState.Value);
+            }
+            else
+            {
+                _logger.LogInformation("Board '{BoardId}': Skipping startup behavior (manual reconnect, no previous state)", boardConfig.BoardId);
+            }
+
+            _logger.LogInformation("Connected to FTDI relay board '{BoardId}' (startup: {Startup})",
+                boardId, applyStartupBehavior ? boardConfig.StartupBehavior.ToString() : "skipped");
             return true;
         }
         else
@@ -887,6 +965,58 @@ public class TriggerService : IHostedService, IAsyncDisposable
             ftdiBoard.Dispose();
             _logger.LogWarning("Failed to connect to FTDI relay board '{BoardId}'", boardId);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Apply the configured startup behavior to a newly connected relay board.
+    /// </summary>
+    private void ApplyStartupBehavior(IRelayBoard board, TriggerBoardConfiguration config)
+    {
+        switch (config.StartupBehavior)
+        {
+            case RelayStartupBehavior.AllOff:
+                board.AllOff();
+                _logger.LogInformation("Board '{BoardId}': All relays set to OFF (startup behavior)", config.BoardId);
+                break;
+
+            case RelayStartupBehavior.AllOn:
+                for (int i = 1; i <= config.ChannelCount; i++)
+                {
+                    board.SetRelay(i, true);
+                }
+                _logger.LogInformation("Board '{BoardId}': All relays set to ON (startup behavior)", config.BoardId);
+                break;
+
+            case RelayStartupBehavior.NoChange:
+                _logger.LogInformation("Board '{BoardId}': Relay state preserved (startup behavior)", config.BoardId);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Apply the configured shutdown behavior when the service is stopping.
+    /// </summary>
+    private void ApplyShutdownBehavior(IRelayBoard board, TriggerBoardConfiguration config)
+    {
+        switch (config.ShutdownBehavior)
+        {
+            case RelayStartupBehavior.AllOff:
+                board.AllOff();
+                _logger.LogInformation("Board '{BoardId}': All relays set to OFF (shutdown behavior)", config.BoardId);
+                break;
+
+            case RelayStartupBehavior.AllOn:
+                for (int i = 1; i <= config.ChannelCount; i++)
+                {
+                    board.SetRelay(i, true);
+                }
+                _logger.LogInformation("Board '{BoardId}': All relays set to ON (shutdown behavior)", config.BoardId);
+                break;
+
+            case RelayStartupBehavior.NoChange:
+                _logger.LogInformation("Board '{BoardId}': Relay state preserved (shutdown behavior)", config.BoardId);
+                break;
         }
     }
 

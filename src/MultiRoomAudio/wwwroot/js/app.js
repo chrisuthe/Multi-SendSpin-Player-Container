@@ -2774,9 +2774,21 @@ async function refreshTriggersState() {
     }
 }
 
+// Track which accordion boards are expanded (persists across loadTriggers calls)
+let expandedBoardsState = new Set();
+
 // Load triggers status and custom sinks from API
 async function loadTriggers() {
     const container = document.getElementById('triggersContainer');
+
+    // Save expanded boards state BEFORE replacing with loading spinner
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
     container.innerHTML = `
         <div class="text-center py-4">
             <div class="spinner-border text-primary" role="status">
@@ -2831,6 +2843,29 @@ function renderTriggers() {
     const errorDiv = document.getElementById('triggersError');
     const errorText = document.getElementById('triggersErrorText');
     const totalChannelsSpan = document.getElementById('triggersTotalChannels');
+
+    // Save scroll position of modal body before re-rendering
+    const modalBody = document.querySelector('#triggersModal .modal-body');
+    const scrollTop = modalBody ? modalBody.scrollTop : 0;
+
+    // Save which accordion items are currently expanded (by boardId)
+    // First check the current DOM, then fall back to the global state (for when DOM was cleared by loading spinner)
+    const expandedBoards = new Set();
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        // Extract boardId from the element id (format: board-{boardIdSafe})
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoards.add(match[1]);
+        }
+    });
+
+    // If no expanded boards found in DOM, use the global saved state
+    if (expandedBoards.size === 0 && expandedBoardsState.size > 0) {
+        expandedBoardsState.forEach(id => expandedBoards.add(id));
+    }
+
+    // Update global state to match current state (for next loadTriggers call)
+    expandedBoardsState = new Set(expandedBoards);
 
     if (!triggersData) {
         container.innerHTML = '<div class="text-center py-4 text-muted">No trigger data available</div>';
@@ -2911,7 +2946,8 @@ function renderTriggers() {
     const accordionHtml = triggersData.boards.map((board, index) => {
         const boardId = escapeHtml(board.boardId);
         const boardIdSafe = board.boardId.replace(/[^a-zA-Z0-9]/g, '_');
-        const isExpanded = index === 0;
+        // Preserve expanded state: if we have saved state, use it; otherwise default to first item expanded
+        const isExpanded = expandedBoards.size > 0 ? expandedBoards.has(boardIdSafe) : index === 0;
         const controlsDisabled = noHardware || !triggersData.enabled;
         const testButtonsDisabled = controlsDisabled || !board.isConnected;
 
@@ -2955,7 +2991,7 @@ function renderTriggers() {
                             <span class="input-group-text">s</span>
                         </div>
                     </td>
-                    <td class="text-end">
+                    <td class="text-end" style="white-space: nowrap;">
                         <button class="${onBtnClass}"
                                 onclick="testTrigger('${boardId}', ${trigger.channel}, true)"
                                 title="Turn relay ON"
@@ -3005,6 +3041,33 @@ function renderTriggers() {
                                 </button>
                             </div>
                         </div>
+                        <div class="d-flex align-items-center mb-2 small flex-wrap gap-2">
+                            <div class="d-flex align-items-center">
+                                <label class="text-muted me-2" for="startup-${boardIdSafe}">
+                                    <i class="fas fa-power-off me-1"></i>Startup:
+                                </label>
+                                <select id="startup-${boardIdSafe}" class="form-select form-select-sm" style="width: auto;"
+                                        onchange="updateBoardBehavior('${boardId}', 'startupBehavior', this.value)">
+                                    <option value="AllOff" ${board.startupBehavior === 'AllOff' ? 'selected' : ''}>All OFF</option>
+                                    <option value="AllOn" ${board.startupBehavior === 'AllOn' ? 'selected' : ''}>All ON</option>
+                                    <option value="NoChange" ${board.startupBehavior === 'NoChange' ? 'selected' : ''}>No Change</option>
+                                </select>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <label class="text-muted me-2" for="shutdown-${boardIdSafe}">
+                                    <i class="fas fa-stop-circle me-1"></i>Shutdown:
+                                </label>
+                                <select id="shutdown-${boardIdSafe}" class="form-select form-select-sm" style="width: auto;"
+                                        onchange="updateBoardBehavior('${boardId}', 'shutdownBehavior', this.value)">
+                                    <option value="AllOff" ${board.shutdownBehavior === 'AllOff' ? 'selected' : ''}>All OFF</option>
+                                    <option value="AllOn" ${board.shutdownBehavior === 'AllOn' ? 'selected' : ''}>All ON</option>
+                                    <option value="NoChange" ${board.shutdownBehavior === 'NoChange' ? 'selected' : ''}>No Change</option>
+                                </select>
+                            </div>
+                            <span class="text-muted" title="Startup: when service starts. Shutdown: when service stops gracefully.">
+                                <i class="fas fa-question-circle"></i>
+                            </span>
+                        </div>
                         ${board.errorMessage ? `<div class="alert alert-warning small mb-2"><i class="fas fa-exclamation-triangle me-1"></i>${escapeHtml(board.errorMessage)}</div>` : ''}
                         <table class="table table-sm table-hover mb-0">
                             <thead>
@@ -3012,7 +3075,7 @@ function renderTriggers() {
                                     <th>Channel</th>
                                     <th>Sink</th>
                                     <th>Off Delay</th>
-                                    <th class="text-end">Test</th>
+                                    <th class="text-end" style="white-space: nowrap;"><span style="display: inline-block; width: 38px; text-align: center;">On</span><span style="display: inline-block; width: 38px; text-align: center;">Off</span></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -3037,6 +3100,13 @@ function renderTriggers() {
             }
         });
     });
+
+    // Restore scroll position after DOM update
+    if (modalBody && scrollTop > 0) {
+        requestAnimationFrame(() => {
+            modalBody.scrollTop = scrollTop;
+        });
+    }
 }
 
 // Toggle triggers enabled
@@ -3234,8 +3304,51 @@ async function editBoard(boardId) {
     }
 }
 
+// Update board startup or shutdown behavior
+async function updateBoardBehavior(boardId, behaviorType, value) {
+    const isStartup = behaviorType === 'startupBehavior';
+    const typeName = isStartup ? 'Startup' : 'Shutdown';
+
+    try {
+        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [behaviorType]: value })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || `Failed to update ${typeName.toLowerCase()} behavior`);
+        }
+
+        // Update local data
+        const board = triggersData?.boards?.find(b => b.boardId === boardId);
+        if (board) {
+            board[behaviorType] = value;
+        }
+
+        const label = value === 'AllOff' ? 'All OFF' :
+                      value === 'AllOn' ? 'All ON' : 'No Change';
+        showAlert(`${typeName} behavior set to "${label}"`, 'success');
+    } catch (error) {
+        console.error(`Error updating ${typeName.toLowerCase()} behavior:`, error);
+        showAlert(`Failed to update ${typeName.toLowerCase()} behavior: ${error.message}`, 'danger');
+        // Revert the dropdown by reloading
+        await loadTriggers();
+    }
+}
+
 // Reconnect a specific board
 async function reconnectBoard(boardId) {
+    // Save expanded state before any async operations
+    const container = document.getElementById('triggersContainer');
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
     try {
         const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}/reconnect`, {
             method: 'POST'
@@ -3315,6 +3428,15 @@ async function updateTriggerDelay(boardId, channel, delay) {
 
 // Test a trigger relay (multi-board)
 async function testTrigger(boardId, channel, on) {
+    // Save expanded state before any async operations
+    const container = document.getElementById('triggersContainer');
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
     try {
         const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}/test`, {
             method: 'POST',

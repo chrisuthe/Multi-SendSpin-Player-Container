@@ -46,6 +46,19 @@ public enum RelayBoardType
 }
 
 /// <summary>
+/// What to do with relays when the board connects on startup.
+/// </summary>
+public enum RelayStartupBehavior
+{
+    /// <summary>Turn all relays OFF on startup (safest default).</summary>
+    AllOff,
+    /// <summary>Turn all relays ON on startup.</summary>
+    AllOn,
+    /// <summary>Don't change relay state on startup (preserve hardware state).</summary>
+    NoChange
+}
+
+/// <summary>
 /// Valid channel count options for relay boards.
 /// </summary>
 public static class ValidChannelCounts
@@ -131,6 +144,18 @@ public class TriggerBoardConfiguration
     /// Only used when board has no unique serial number.
     /// </summary>
     public string? UsbPath { get; set; }
+
+    /// <summary>
+    /// What to do with relays when the board connects on startup.
+    /// Default is AllOff for safety - amplifiers won't unexpectedly power on.
+    /// </summary>
+    public RelayStartupBehavior StartupBehavior { get; set; } = RelayStartupBehavior.AllOff;
+
+    /// <summary>
+    /// What to do with relays when the service shuts down (graceful stop).
+    /// Default is AllOff for safety - amplifiers will power off when container stops.
+    /// </summary>
+    public RelayStartupBehavior ShutdownBehavior { get; set; } = RelayStartupBehavior.AllOff;
 
     /// <summary>
     /// Configuration for each trigger channel on this board.
@@ -250,7 +275,9 @@ public record TriggerBoardResponse(
     bool IsPortBased,
     string? ErrorMessage,
     List<TriggerResponse> Triggers,
-    int CurrentRelayStates
+    int CurrentRelayStates,
+    RelayStartupBehavior StartupBehavior,
+    RelayStartupBehavior ShutdownBehavior
 );
 
 /// <summary>
@@ -320,6 +347,16 @@ public class UpdateBoardRequest
     /// Number of relay channels on the board (1, 2, 4, 8, or 16).
     /// </summary>
     public int? ChannelCount { get; set; }
+
+    /// <summary>
+    /// What to do with relays when the board connects on startup.
+    /// </summary>
+    public RelayStartupBehavior? StartupBehavior { get; set; }
+
+    /// <summary>
+    /// What to do with relays when the service shuts down.
+    /// </summary>
+    public RelayStartupBehavior? ShutdownBehavior { get; set; }
 }
 
 /// <summary>
