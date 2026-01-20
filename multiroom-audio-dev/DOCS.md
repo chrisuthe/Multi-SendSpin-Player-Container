@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-c9ef218
+## Development Build: sha-a4df6fb
 
 **Current Dev Build Changes** (recent)
 
+- Fix code formatting (dotnet format)
+- Fix: Read mock_hardware from HAOS options.json for DI registration
 - Add HAOS config options and mock hardware toggle
 - Add 12V trigger documentation and README feature mention
 - Fix UI relay test for Modbus boards with slashes in ID
@@ -13,8 +15,6 @@
 - Merge pull request #82 from scyto/feature/12v-trigger-plus-mock-hardware
 - Add logging when pactl process fails to start in diagnostics
 - Fix null coalescing operator precedence bug in SetDeviceMaxVolume
-- Update SinksEndpoint to use --channel-map, remove dead code
-- Add --no-remix flag to prevent PulseAudio channel upmixing
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
