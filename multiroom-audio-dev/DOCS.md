@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-d41de60
+## Development Build: sha-71a9d9e
 
 **Current Dev Build Changes** (recent)
 
+- Add Modbus ASCII relay board support for CH340/CH341 devices
 - Refactor exception handling to use typed exceptions
 - Merge pull request #82 from scyto/feature/12v-trigger-plus-mock-hardware
 - Add logging when pactl process fails to start in diagnostics
@@ -14,7 +15,6 @@
 - Use paplay --channel-map for multi-channel test tones
 - Fix test tone routing for multi-channel devices
 - Fix test tone routing for remap sinks, reduce tone volume
-- Add configurable mock hardware via YAML
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
