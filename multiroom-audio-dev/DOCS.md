@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-71a9d9e
+## Development Build: sha-3dc0774
 
 **Current Dev Build Changes** (recent)
 
+- Fix UI relay test for Modbus boards with slashes in ID
 - Add Modbus ASCII relay board support for CH340/CH341 devices
 - Refactor exception handling to use typed exceptions
 - Merge pull request #82 from scyto/feature/12v-trigger-plus-mock-hardware
@@ -14,7 +15,6 @@
 - Add --no-remix flag to prevent PulseAudio channel upmixing
 - Use paplay --channel-map for multi-channel test tones
 - Fix test tone routing for multi-channel devices
-- Fix test tone routing for remap sinks, reduce tone volume
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
