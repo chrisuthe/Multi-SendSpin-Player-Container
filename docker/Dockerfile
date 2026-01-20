@@ -18,14 +18,25 @@ EXPOSE 8096
 # - pulseaudio: Audio daemon (used for both HAOS and Docker modes)
 # - libasound2: ALSA library (required for PulseAudio's ALSA output backend)
 # - libasound2-plugins: ALSA plugins including PulseAudio bridge
+# FTDI relay board dependencies:
+# - libftdi1-2: libftdi1 library for FTDI USB device control
+# - libusb-1.0-0: USB library required by libftdi
+# USB HID relay board dependencies:
+# - libudev1: Required by HidSharp for USB HID device enumeration
+# CH340/Modbus serial relay board dependencies:
+# - dialout group membership for serial port access (added below)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pulseaudio \
     libasound2 \
     libasound2-plugins \
     curl \
+    libftdi1-2 \
+    libusb-1.0-0 \
+    libudev1 \
     && rm -rf /var/lib/apt/lists/* \
     && usermod -a -G audio pulse 2>/dev/null || true \
-    && usermod -a -G audio root 2>/dev/null || true
+    && usermod -a -G audio root 2>/dev/null || true \
+    && usermod -a -G dialout root 2>/dev/null || true
 
 # Build stage - using Debian SDK for consistent glibc builds
 FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS build

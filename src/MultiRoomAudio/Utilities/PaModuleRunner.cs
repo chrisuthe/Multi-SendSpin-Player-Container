@@ -7,7 +7,7 @@ namespace MultiRoomAudio.Utilities;
 /// Runs PulseAudio (pactl) commands for loading/unloading audio modules.
 /// Provides secure command execution to prevent shell injection attacks.
 /// </summary>
-public partial class PaModuleRunner
+public partial class PaModuleRunner : IPaModuleRunner
 {
     private readonly ILogger<PaModuleRunner> _logger;
 

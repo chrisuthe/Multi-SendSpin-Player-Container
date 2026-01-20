@@ -271,10 +271,80 @@ public class DeviceMatchingService
     }
 
     /// <summary>
+    /// Get a single device by ID, enriched with alias and hidden status.
+    /// Returns null if the device is not found.
+    /// </summary>
+    public AudioDevice? GetEnrichedDevice(string deviceId)
+    {
+        var device = _backend.GetDevice(deviceId);
+        if (device != null)
+        {
+            return EnrichWithConfig(device);
+        }
+
+        // Check if it's a custom sink
+        var customSink = _customSinks.GetSink(deviceId);
+        if (customSink != null)
+        {
+            var customDevice = new AudioDevice(
+                Index: 1000,
+                Id: customSink.Name,
+                Name: customSink.Description ?? customSink.Name,
+                MaxChannels: customSink.Channels ?? 2,
+                DefaultSampleRate: 48000,
+                DefaultLowLatencyMs: 20,
+                DefaultHighLatencyMs: 100,
+                IsDefault: false,
+                Capabilities: new DeviceCapabilities(
+                    SupportedSampleRates: new[] { 44100, 48000, 96000, 192000 },
+                    SupportedBitDepths: new[] { 16, 24, 32 },
+                    MaxChannels: customSink.Channels ?? 2,
+                    PreferredSampleRate: 48000,
+                    PreferredBitDepth: 24
+                ),
+                Identifiers: new DeviceIdentifiers(
+                    Serial: null,
+                    BusPath: null,
+                    VendorId: null,
+                    ProductId: null,
+                    AlsaLongCardName: $"Custom {customSink.Type} Sink"
+                )
+            );
+            return EnrichWithConfig(customDevice);
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Get all output devices enriched with their aliases and hidden status.
+    /// Includes both hardware devices and custom sinks.
     /// </summary>
     public IEnumerable<AudioDevice> GetEnrichedDevices()
     {
-        return _backend.GetOutputDevices().Select(EnrichWithConfig);
+        // Get hardware devices
+        var hardwareDevices = _backend.GetOutputDevices().Select(EnrichWithConfig);
+
+        // Get custom sinks and convert to AudioDevice format
+        var customSinksResponse = _customSinks.GetAllSinks();
+        var customSinkDevices = customSinksResponse.Sinks
+            .Where(sink => sink.State == CustomSinkState.Loaded && !string.IsNullOrEmpty(sink.PulseAudioSinkName))
+            .Select(sink => new AudioDevice(
+                Index: -1,  // Custom sinks don't have an index
+                Id: sink.PulseAudioSinkName!,
+                Name: sink.Name,
+                MaxChannels: sink.Channels ?? 2,  // Default to stereo if not specified
+                DefaultSampleRate: 48000,  // Standard sample rate for custom sinks
+                DefaultLowLatencyMs: 0,
+                DefaultHighLatencyMs: 0,
+                IsDefault: false,
+                Capabilities: null,
+                Identifiers: null,
+                Alias: sink.Description ?? sink.Name,  // Use description as alias, fallback to name
+                Hidden: false
+            ));
+
+        // Combine and return
+        return hardwareDevices.Concat(customSinkDevices);
     }
 }

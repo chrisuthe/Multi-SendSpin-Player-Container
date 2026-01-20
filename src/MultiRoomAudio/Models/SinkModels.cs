@@ -295,4 +295,27 @@ public static class PulseAudioChannels
     {
         return AllChannels.Contains(channel, StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Get the physical channel index for a channel name in 7.1 surround layout.
+    /// Returns -1 if channel name is not recognized.
+    /// </summary>
+    /// <remarks>
+    /// Standard PulseAudio channel ordering for 7.1 surround:
+    /// 0=front-left, 1=front-right, 2=front-center, 3=lfe,
+    /// 4=rear-left, 5=rear-right, 6=side-left, 7=side-right
+    /// </remarks>
+    public static int GetChannelIndex(string channelName) => channelName.ToLowerInvariant() switch
+    {
+        "front-left" => 0,
+        "front-right" => 1,
+        "front-center" => 2,
+        "lfe" => 3,
+        "rear-left" => 4,
+        "rear-right" => 5,
+        "side-left" => 6,
+        "side-right" => 7,
+        "mono" => 0,
+        _ => -1
+    };
 }

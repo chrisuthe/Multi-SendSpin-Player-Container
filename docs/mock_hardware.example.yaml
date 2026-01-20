@@ -1,0 +1,313 @@
+# Mock Hardware Configuration Example
+# Copy this file to config/mock_hardware.yaml and customize as needed.
+# When present, this file completely replaces hardcoded defaults.
+#
+# See docs/MOCK_HARDWARE.md for full documentation.
+
+# =============================================================================
+# AUDIO DEVICES
+# Simulates PulseAudio sinks (audio outputs)
+# =============================================================================
+audio_devices:
+  # Intel HDA onboard audio (PCI device) - the default device
+  - id: alsa_output.pci-0000_00_1f.3.analog-stereo
+    enabled: true
+    name: "Built-in Audio Analog Stereo"
+    description: "Built-in Audio"
+    vendor_id: "8086"
+    product_id: "a170"
+    bus_path: "/devices/pci0000:00/0000:00:1f.3/sound/card0"
+    is_default: true
+    max_channels: 2
+    index: 0
+
+  # ASUS Xonar DX 7.1 (PCI device)
+  - id: alsa_output.pci-0000_05_04.0.analog-surround-71
+    enabled: true
+    name: "Xonar DX Analog Surround 7.1"
+    description: "CMI8788 [Oxygen HD Audio]"
+    vendor_id: "1043"
+    product_id: "8275"
+    bus_path: "/devices/pci0000:00/0000:00:1c.4/0000:05:04.0/sound/card1"
+    max_channels: 8
+    index: 1
+
+  # Schiit Modi 3 USB DAC
+  - id: alsa_output.usb-Schiit_Audio_Schiit_Modi_3-00.analog-stereo
+    enabled: true
+    name: "Schiit Modi 3 Analog Stereo"
+    description: "Schiit Modi 3"
+    vendor_id: "30be"
+    product_id: "0101"
+    bus_path: "/devices/pci0000:00/0000:00:14.0/usb1/1-2/1-2:1.0/sound/card2"
+    serial: "0001"
+    max_channels: 2
+    index: 2
+
+  # Focusrite Scarlett 2i2 USB audio interface
+  - id: alsa_output.usb-Focusrite_Scarlett_2i2_USB-00.analog-stereo
+    enabled: true
+    name: "Scarlett 2i2 USB Analog Stereo"
+    description: "Scarlett 2i2 USB"
+    vendor_id: "1235"
+    product_id: "8210"
+    bus_path: "/devices/pci0000:00/0000:00:14.0/usb1/1-3/1-3:1.0/sound/card3"
+    serial: "Y7XXXXXX00XXXX"
+    max_channels: 2
+    index: 3
+
+  # JBL Flip 5 Bluetooth speaker
+  - id: bluez_sink.00_1A_7D_DA_71_13.a2dp_sink
+    enabled: true
+    name: "JBL Flip 5"
+    description: "JBL Flip 5"
+    serial: "00:1A:7D:DA:71:13"
+    max_channels: 2
+    index: 4
+
+  # Sony WH-1000XM4 Bluetooth headphones
+  - id: bluez_sink.38_18_4C_E9_85_B2.a2dp_sink
+    enabled: true
+    name: "WH-1000XM4"
+    description: "WH-1000XM4"
+    serial: "38:18:4C:E9:85:B2"
+    max_channels: 2
+    index: 5
+
+  # NVIDIA HDMI audio (PCI device - GPU)
+  - id: alsa_output.pci-0000_01_00.1.hdmi-stereo
+    enabled: true
+    name: "HDA NVidia Digital Stereo (HDMI)"
+    description: "HDA NVidia"
+    vendor_id: "10de"
+    product_id: "0fb9"
+    bus_path: "/devices/pci0000:00/0000:00:01.0/0000:01:00.1/sound/card6"
+    max_channels: 2
+    index: 6
+
+# =============================================================================
+# AUDIO CARDS
+# Simulates PulseAudio sound cards with profiles
+# =============================================================================
+audio_cards:
+  # Intel HDA onboard audio
+  - name: alsa_card.pci-0000_00_1f.3
+    enabled: true
+    description: "Built-in Audio"
+    driver: "module-alsa-card.c"
+    index: 0
+    profiles:
+      - name: "output:analog-stereo+input:analog-stereo"
+        description: "Analog Stereo Duplex"
+        sinks: 1
+        priority: 6565
+        is_default: true
+      - name: "output:analog-stereo"
+        description: "Analog Stereo Output"
+        sinks: 1
+        priority: 6500
+      - name: "output:hdmi-stereo"
+        description: "Digital Stereo (HDMI)"
+        sinks: 1
+        priority: 5900
+      - name: "output:hdmi-stereo-extra1"
+        description: "Digital Stereo (HDMI 2)"
+        sinks: 1
+        priority: 5700
+      - name: "off"
+        description: "Off"
+        sinks: 0
+        priority: 0
+
+  # ASUS Xonar DX
+  - name: alsa_card.pci-0000_05_04.0
+    enabled: true
+    description: "Xonar DX"
+    driver: "module-alsa-card.c"
+    index: 1
+    profiles:
+      - name: "output:analog-surround-71+input:analog-stereo"
+        description: "Analog Surround 7.1 Output + Analog Stereo Input"
+        sinks: 1
+        priority: 7171
+        is_default: true
+      - name: "output:analog-surround-71"
+        description: "Analog Surround 7.1 Output"
+        sinks: 1
+        priority: 7100
+      - name: "output:analog-surround-51"
+        description: "Analog Surround 5.1 Output"
+        sinks: 1
+        priority: 6100
+      - name: "output:analog-stereo+input:analog-stereo"
+        description: "Analog Stereo Duplex"
+        sinks: 1
+        priority: 6065
+      - name: "output:analog-stereo"
+        description: "Analog Stereo Output"
+        sinks: 1
+        priority: 6000
+      - name: "output:iec958-stereo+input:analog-stereo"
+        description: "Digital Stereo (S/PDIF) Output + Analog Stereo Input"
+        sinks: 1
+        priority: 5565
+      - name: "output:iec958-stereo"
+        description: "Digital Stereo (S/PDIF) Output"
+        sinks: 1
+        priority: 5500
+      - name: "off"
+        description: "Off"
+        sinks: 0
+        priority: 0
+
+  # Schiit Modi 3
+  - name: alsa_card.usb-Schiit_Audio_Schiit_Modi_3-00
+    enabled: true
+    description: "Schiit Modi 3"
+    driver: "module-alsa-card.c"
+    index: 2
+    profiles:
+      - name: "output:analog-stereo"
+        description: "Analog Stereo Output"
+        sinks: 1
+        priority: 6500
+        is_default: true
+      - name: "output:iec958-stereo"
+        description: "Digital Stereo (IEC958) Output"
+        sinks: 1
+        priority: 5500
+      - name: "off"
+        description: "Off"
+        sinks: 0
+        priority: 0
+
+  # Focusrite Scarlett 2i2
+  - name: alsa_card.usb-Focusrite_Scarlett_2i2_USB-00
+    enabled: true
+    description: "Scarlett 2i2 USB"
+    driver: "module-alsa-card.c"
+    index: 3
+    profiles:
+      - name: "output:analog-surround-71"
+        description: "Analog Surround 7.1 Output"
+        sinks: 1
+        priority: 7100
+        is_default: true
+      - name: "output:analog-surround-51"
+        description: "Analog Surround 5.1 Output"
+        sinks: 1
+        priority: 6100
+      - name: "output:analog-stereo"
+        description: "Analog Stereo Output"
+        sinks: 1
+        priority: 6000
+      - name: "off"
+        description: "Off"
+        sinks: 0
+        priority: 0
+
+  # JBL Flip 5 Bluetooth
+  - name: bluez_card.00_1A_7D_DA_71_13
+    enabled: true
+    description: "JBL Flip 5"
+    driver: "module-bluez5-device.c"
+    index: 4
+    profiles:
+      - name: "a2dp-sink"
+        description: "High Fidelity Playback (A2DP Sink)"
+        sinks: 1
+        priority: 40
+        is_default: true
+      - name: "headset-head-unit"
+        description: "Headset Head Unit (HSP/HFP)"
+        sinks: 1
+        priority: 30
+      - name: "off"
+        description: "Off"
+        sinks: 0
+        priority: 0
+
+  # Sony WH-1000XM4 Bluetooth
+  - name: bluez_card.38_18_4C_E9_85_B2
+    enabled: true
+    description: "WH-1000XM4"
+    driver: "module-bluez5-device.c"
+    index: 5
+    profiles:
+      - name: "a2dp-sink"
+        description: "High Fidelity Playback (A2DP Sink)"
+        sinks: 1
+        priority: 40
+        is_default: true
+      - name: "headset-head-unit"
+        description: "Headset Head Unit (HSP/HFP)"
+        sinks: 1
+        priority: 30
+      - name: "off"
+        description: "Off"
+        sinks: 0
+        priority: 0
+
+  # NVIDIA HDMI
+  - name: alsa_card.pci-0000_01_00.1
+    enabled: true
+    description: "HDA NVidia"
+    driver: "module-alsa-card.c"
+    index: 6
+    profiles:
+      - name: "output:hdmi-stereo"
+        description: "Digital Stereo (HDMI)"
+        sinks: 1
+        priority: 5900
+        is_default: true
+      - name: "output:hdmi-surround"
+        description: "Digital Surround 5.1 (HDMI)"
+        sinks: 1
+        priority: 5800
+      - name: "output:hdmi-surround71"
+        description: "Digital Surround 7.1 (HDMI)"
+        sinks: 1
+        priority: 5700
+      - name: "off"
+        description: "Off"
+        sinks: 0
+        priority: 0
+
+# =============================================================================
+# RELAY BOARDS
+# Simulates FTDI and USB HID relay boards for 12V trigger control
+# =============================================================================
+relay_boards:
+  # FTDI 8-channel board
+  - board_id: "MOCK001"
+    enabled: true
+    board_type: ftdi
+    serial_number: "MOCK001"
+    description: "Mock 8-Channel FTDI Relay Board"
+    channel_count: 8
+
+  # Second FTDI board
+  - board_id: "MOCK002"
+    enabled: true
+    board_type: ftdi
+    serial_number: "MOCK002"
+    description: "Mock 8-Channel FTDI Relay Board"
+    channel_count: 8
+
+  # USB HID 4-channel board (channel count auto-detected from product name)
+  - board_id: "HID:QAAMZ"
+    enabled: true
+    board_type: usb_hid
+    serial_number: "QAAMZ"
+    description: "USBRelay4 - 4 Channel USB HID Relay"
+    channel_count: 4
+    channel_count_detected: true
+
+  # USB HID 8-channel board (generic - channel count manually configured)
+  - board_id: "HID:MOCK8"
+    enabled: true
+    board_type: usb_hid
+    serial_number: "MOCK8"
+    description: "Generic 8-Channel USB HID Relay"
+    channel_count: 8
+    channel_count_detected: true

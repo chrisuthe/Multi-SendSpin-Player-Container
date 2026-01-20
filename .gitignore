@@ -70,6 +70,7 @@ logs/*
 !logs/.gitkeep
 config/*
 !config/players.yaml.example
+test-config/
 
 # Fork-specific workflow files (not for upstream)
 FORK_WORKFLOW.md

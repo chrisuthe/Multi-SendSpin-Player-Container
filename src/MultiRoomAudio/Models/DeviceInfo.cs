@@ -78,7 +78,8 @@ public record AudioDevice(
     DeviceCapabilities? Capabilities = null,
     DeviceIdentifiers? Identifiers = null,
     string? Alias = null,
-    bool Hidden = false
+    bool Hidden = false,
+    string[]? ChannelMap = null  // Channel names in device order, e.g., ["front-left", "front-right", "rear-left", ...]
 );
 
 /// <summary>

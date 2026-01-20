@@ -22,6 +22,27 @@ public static class SinksEndpoint
 
     #endregion
 
+    /// <summary>
+    /// Registers custom PulseAudio sink management API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/sinks - List all custom sinks</item>
+    /// <item>GET /api/sinks/channels - Get available channel names</item>
+    /// <item>GET /api/sinks/{name} - Get specific sink</item>
+    /// <item>GET /api/sinks/{name}/status - Check if sink is loaded</item>
+    /// <item>GET /api/sinks/import/scan - Scan default.pa for importable sinks</item>
+    /// <item>GET /api/sinks/import/status - Check default.pa availability</item>
+    /// <item>POST /api/sinks/combine - Create combine-sink</item>
+    /// <item>POST /api/sinks/remap - Create remap-sink</item>
+    /// <item>POST /api/sinks/import - Import sinks from default.pa</item>
+    /// <item>POST /api/sinks/{name}/reload - Reload a sink</item>
+    /// <item>POST /api/sinks/{name}/test-tone - Play test tone through sink</item>
+    /// <item>DELETE /api/sinks/{name} - Delete sink</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapSinksEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/sinks")
@@ -29,9 +50,9 @@ public static class SinksEndpoint
             .WithOpenApi();
 
         // GET /api/sinks - List all custom sinks
-        group.MapGet("/", (CustomSinksService service, ILoggerFactory lf) =>
+        group.MapGet("/", (CustomSinksService service, ILoggerFactory loggerFactory) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: GET /api/sinks");
             var response = service.GetAllSinks();
             logger.LogDebug("API: Returning {SinkCount} custom sinks", response.Count);
@@ -56,9 +77,9 @@ public static class SinksEndpoint
         .WithDescription("Get available PulseAudio channel names for remap-sink configuration");
 
         // GET /api/sinks/{name} - Get specific sink
-        group.MapGet("/{name}", (string name, CustomSinksService service, ILoggerFactory lf) =>
+        group.MapGet("/{name}", (string name, CustomSinksService service, ILoggerFactory loggerFactory) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: GET /api/sinks/{SinkName}", name);
             var sink = service.GetSink(name);
             if (sink == null)
@@ -73,35 +94,17 @@ public static class SinksEndpoint
         group.MapPost("/combine", async (
             CombineSinkCreateRequest request,
             CustomSinksService service,
-            ILoggerFactory lf,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: POST /api/sinks/combine - Creating {SinkName}", request.Name);
-            try
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var sink = await service.CreateCombineSinkAsync(request, ct);
                 logger.LogInformation("API: Combine-sink {SinkName} created successfully", sink.Name);
                 return Results.Created($"/api/sinks/{sink.Name}", sink);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
-            {
-                logger.LogWarning("API: Sink creation conflict - {Message}", ex.Message);
-                return Results.Conflict(new ErrorResponse(false, ex.Message));
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogWarning("API: Sink creation bad request - {Message}", ex.Message);
-                return Results.BadRequest(new ErrorResponse(false, ex.Message));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to create combine-sink {SinkName}", request.Name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to create combine-sink");
-            }
+            }, logger, "create combine-sink", request.Name);
         })
         .WithName("CreateCombineSink")
         .WithDescription("Create a combine-sink to merge multiple audio outputs");
@@ -110,35 +113,17 @@ public static class SinksEndpoint
         group.MapPost("/remap", async (
             RemapSinkCreateRequest request,
             CustomSinksService service,
-            ILoggerFactory lf,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: POST /api/sinks/remap - Creating {SinkName}", request.Name);
-            try
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var sink = await service.CreateRemapSinkAsync(request, ct);
                 logger.LogInformation("API: Remap-sink {SinkName} created successfully", sink.Name);
                 return Results.Created($"/api/sinks/{sink.Name}", sink);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
-            {
-                logger.LogWarning("API: Sink creation conflict - {Message}", ex.Message);
-                return Results.Conflict(new ErrorResponse(false, ex.Message));
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogWarning("API: Sink creation bad request - {Message}", ex.Message);
-                return Results.BadRequest(new ErrorResponse(false, ex.Message));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to create remap-sink {SinkName}", request.Name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to create remap-sink");
-            }
+            }, logger, "create remap-sink", request.Name);
         })
         .WithName("CreateRemapSink")
         .WithDescription("Create a remap-sink to extract channels from a multi-channel device");
@@ -147,14 +132,18 @@ public static class SinksEndpoint
         group.MapDelete("/{name}", async (
             string name,
             CustomSinksService service,
-            ILoggerFactory lf,
+            TriggerService triggerService,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: DELETE /api/sinks/{SinkName}", name);
             var deleted = await service.DeleteSinkAsync(name, ct);
             if (!deleted)
                 return SinkNotFoundResult(name, logger, "delete");
+
+            // Notify trigger service to unassign any triggers using this sink
+            triggerService.OnSinkDeleted(name);
 
             logger.LogInformation("API: Sink {SinkName} deleted successfully", name);
             return Results.Ok(new SuccessResponse(true, $"Sink '{name}' deleted"));
@@ -166,10 +155,10 @@ public static class SinksEndpoint
         group.MapGet("/{name}/status", async (
             string name,
             CustomSinksService service,
-            ILoggerFactory lf,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: GET /api/sinks/{SinkName}/status", name);
             var sink = service.GetSink(name);
             if (sink == null)
@@ -191,10 +180,10 @@ public static class SinksEndpoint
         group.MapPost("/{name}/reload", async (
             string name,
             CustomSinksService service,
-            ILoggerFactory lf,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: POST /api/sinks/{SinkName}/reload", name);
             var sink = await service.ReloadSinkAsync(name, ct);
             if (sink == null)
@@ -212,34 +201,76 @@ public static class SinksEndpoint
             TestToneRequest? request,
             CustomSinksService service,
             ToneGeneratorService toneGenerator,
-            ILoggerFactory lf,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: POST /api/sinks/{SinkName}/test-tone", name);
-
-            var sink = service.GetSink(name);
-            if (sink == null)
-                return SinkNotFoundResult(name, logger, "test-tone");
-
-            if (sink.State != CustomSinkState.Loaded)
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
-                logger.LogWarning("API: Cannot play test tone - sink {SinkName} is not loaded (state: {State})", name, sink.State);
-                return Results.BadRequest(new ErrorResponse(false, $"Sink '{name}' is not loaded (state: {sink.State})"));
-            }
+                var sink = service.GetSink(name);
+                if (sink == null)
+                    return SinkNotFoundResult(name, logger, "test-tone");
 
-            if (string.IsNullOrEmpty(sink.PulseAudioSinkName))
-            {
-                logger.LogWarning("API: Cannot play test tone - sink {SinkName} has no PulseAudio sink name", name);
-                return Results.BadRequest(new ErrorResponse(false, $"Sink '{name}' has no PulseAudio sink name"));
-            }
+                if (sink.State != CustomSinkState.Loaded)
+                {
+                    logger.LogWarning("API: Cannot play test tone - sink {SinkName} is not loaded (state: {State})", name, sink.State);
+                    return Results.BadRequest(new ErrorResponse(false, $"Sink '{name}' is not loaded (state: {sink.State})"));
+                }
 
-            try
-            {
+                if (string.IsNullOrEmpty(sink.PulseAudioSinkName))
+                {
+                    logger.LogWarning("API: Cannot play test tone - sink {SinkName} has no PulseAudio sink name", name);
+                    return Results.BadRequest(new ErrorResponse(false, $"Sink '{name}' has no PulseAudio sink name"));
+                }
+
+                // For remap sinks with a specific channel, play directly to master device
+                // This ensures only the target channel on the master device plays the tone,
+                // rather than playing to the remap sink which would broadcast to all channels
+                if (sink.Type == CustomSinkType.Remap &&
+                    !string.IsNullOrEmpty(request?.ChannelName) &&
+                    !string.IsNullOrEmpty(sink.MasterSink) &&
+                    sink.ChannelMappings != null)
+                {
+                    // Find the mapping for this output channel
+                    var mapping = sink.ChannelMappings.FirstOrDefault(m =>
+                        m.OutputChannel.Equals(request.ChannelName, StringComparison.OrdinalIgnoreCase));
+
+                    if (mapping != null)
+                    {
+                        // Get the master channel this output maps to
+                        var masterChannel = mapping.MasterChannel;
+
+                        logger.LogInformation(
+                            "Remap sink test: Playing to master '{Master}' channel {ChannelName} via --channel-map",
+                            sink.MasterSink, masterChannel);
+
+                        await toneGenerator.PlayChannelToneAsync(
+                            sink.MasterSink,
+                            masterChannel,
+                            request.FrequencyHz ?? 1000,
+                            request.DurationMs ?? 1500,
+                            ct);
+
+                        return Results.Ok(new
+                        {
+                            success = true,
+                            message = "Test tone played successfully",
+                            sinkName = name,
+                            masterSink = sink.MasterSink,
+                            masterChannel = masterChannel,
+                            frequencyHz = request.FrequencyHz ?? 1000,
+                            durationMs = request.DurationMs ?? 1500
+                        });
+                    }
+                }
+
+                // Fall back to original behavior for non-remap sinks or whole-sink tests
                 await toneGenerator.PlayTestToneAsync(
                     sink.PulseAudioSinkName,
                     frequencyHz: request?.FrequencyHz ?? 1000,
                     durationMs: request?.DurationMs ?? 1500,
+                    channelName: request?.ChannelName,
                     ct: ct);
 
                 return Results.Ok(new
@@ -249,37 +280,18 @@ public static class SinksEndpoint
                     sinkName = name,
                     pulseAudioSinkName = sink.PulseAudioSinkName,
                     frequencyHz = request?.FrequencyHz ?? 1000,
-                    durationMs = request?.DurationMs ?? 1500
+                    durationMs = request?.DurationMs ?? 1500,
+                    channelName = request?.ChannelName
                 });
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("already playing"))
-            {
-                return Results.Conflict(new ErrorResponse(false, ex.Message));
-            }
-            catch (TimeoutException ex)
-            {
-                logger.LogWarning(ex, "Test tone playback timed out for sink {SinkName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 504,
-                    title: "Test tone playback timed out");
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to play test tone on sink {SinkName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to play test tone");
-            }
+            }, logger, "play test tone", name);
         })
         .WithName("PlaySinkTestTone")
         .WithDescription("Play a test tone through a custom sink for identification");
 
         // GET /api/sinks/import/scan - Scan default.pa for importable sinks
-        group.MapGet("/import/scan", (DefaultPaParser parser, ILoggerFactory lf) =>
+        group.MapGet("/import/scan", (DefaultPaParser parser, ILoggerFactory loggerFactory) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: GET /api/sinks/import/scan");
 
             if (!parser.IsAvailable())
@@ -321,10 +333,10 @@ public static class SinksEndpoint
             ImportSinksRequest request,
             DefaultPaParser parser,
             CustomSinksService service,
-            ILoggerFactory lf,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var logger = lf.CreateLogger("SinksEndpoint");
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
             logger.LogDebug("API: POST /api/sinks/import - Importing {Count} sinks", request.LineNumbers.Count);
 
             if (!parser.IsAvailable())

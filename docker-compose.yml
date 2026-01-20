@@ -9,10 +9,27 @@ services:
     restart: unless-stopped
     ports:
       - "8096:8096"
-    # Audio devices (Linux only - comment out for Windows development)
+
+    # ============================================
+    # USB Device Passthrough (Linux only)
+    # ============================================
+    # Uncomment the 'devices:' section below to enable hardware access.
+    #
+    # For AUDIO DEVICES:
+    #   - /dev/snd:/dev/snd
+    #
+    # For USB RELAY BOARDS (12V trigger control):
+    #   Both FTDI and USB HID relay boards require USB passthrough:
+    #   - /dev/bus/usb:/dev/bus/usb
+    #
+    # You can also pass through specific devices only:
+    #   - /dev/hidraw0:/dev/hidraw0   # Specific HID relay board
+    #   - /dev/bus/usb/001/002:/dev/bus/usb/001/002  # Specific USB device
+    #
     # devices:
-      # Pass through all audio devices (only if /dev/snd exists)
-      # - /dev/snd:/dev/snd
+    #   - /dev/snd:/dev/snd
+    #   - /dev/bus/usb:/dev/bus/usb
+
     volumes:
       # Persistent configuration storage
       - ./config:/app/config
@@ -27,7 +44,15 @@ services:
     network_mode: host
     privileged: false
     cap_add:
-      - SYS_NICE
+      - SYS_NICE    # Required for audio thread priority
+      # ============================================
+      # Optional: SYS_RAWIO for FTDI relay boards
+      # ============================================
+      # If the ftdi_sio kernel driver claims your FTDI device before
+      # libftdi can access it, uncomment SYS_RAWIO to allow libftdi
+      # to detach the kernel driver automatically.
+      # This is NOT needed for USB HID relay boards.
+      # - SYS_RAWIO
     group_add:
       - audio
     user: "0:29"  # root user, audio group

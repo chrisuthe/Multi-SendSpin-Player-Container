@@ -1,0 +1,56 @@
+#include <tunables/global>
+
+profile multiroom-audio flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Capabilities needed for audio processing
+  capability sys_nice,
+  capability dac_read_search,
+
+  # Basic file operations
+  file,
+  signal (send) set=(kill,term,int,hup,cont),
+
+  # S6-Overlay / container init
+  /init ix,
+  /bin/** ix,
+  /usr/bin/** ix,
+  /run/{s6,s6-rc*,service}/** ix,
+
+  # Bashio
+  /usr/lib/bashio/** ix,
+  /tmp/** rwk,
+
+  # Add-on data directories
+  /data/** rw,
+  /config/** rw,
+  /share/** rw,
+
+  # Audio device access (PulseAudio)
+  /dev/snd/** rw,
+  /dev/audio* rw,
+
+  # PulseAudio runtime
+  /run/pulse/** rw,
+  /var/run/pulse/** rw,
+  /etc/pulse/** r,
+
+  # Proc/sys filesystem for audio enumeration
+  @{PROC}/asound/** r,
+  /sys/class/sound/** r,
+  /sys/devices/**/sound/** r,
+
+  # Network for mDNS discovery and audio streaming
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+
+  # .NET runtime
+  /usr/share/dotnet/** mr,
+  /app/** mr,
+
+  # Deny sensitive files
+  deny /etc/shadow r,
+  deny /etc/passwd w,
+}

@@ -102,8 +102,29 @@ builder.Services.AddSingleton<ToneGeneratorService>();
 builder.Services.AddSingleton<OnboardingService>();
 
 // Add PulseAudio utilities (no startup dependency)
-builder.Services.AddSingleton<PaModuleRunner>();
+// Use mock implementations when MOCK_HARDWARE is enabled
+var isMockHardware = Environment.GetEnvironmentVariable("MOCK_HARDWARE")?.ToLower() == "true";
+if (isMockHardware)
+{
+    // Mock hardware configuration service - loads from mock_hardware.yaml if present
+    builder.Services.AddSingleton<MultiRoomAudio.Services.MockHardwareConfigService>();
+
+    builder.Services.AddSingleton<MultiRoomAudio.Utilities.IPaModuleRunner, MultiRoomAudio.Audio.Mock.MockPaModuleRunner>();
+    // Relay hardware abstractions - mock implementations
+    builder.Services.AddSingleton<MultiRoomAudio.Relay.IRelayDeviceEnumerator, MultiRoomAudio.Relay.MockRelayDeviceEnumerator>();
+    builder.Services.AddSingleton<MultiRoomAudio.Relay.IRelayBoardFactory, MultiRoomAudio.Relay.MockRelayBoardFactory>();
+}
+else
+{
+    builder.Services.AddSingleton<MultiRoomAudio.Utilities.IPaModuleRunner, MultiRoomAudio.Utilities.PaModuleRunner>();
+    // Relay hardware abstractions - real implementations
+    builder.Services.AddSingleton<MultiRoomAudio.Relay.IRelayDeviceEnumerator, MultiRoomAudio.Relay.RealRelayDeviceEnumerator>();
+    builder.Services.AddSingleton<MultiRoomAudio.Relay.IRelayBoardFactory, MultiRoomAudio.Relay.RealRelayBoardFactory>();
+}
 builder.Services.AddSingleton<DefaultPaParser>();
+
+// Startup diagnostics service
+builder.Services.AddSingleton<StartupDiagnosticsService>();
 
 // IMPORTANT: Hosted services start in registration order.
 // Correct order: CardProfiles → CustomSinks → Players
@@ -121,6 +142,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<CustomSinksService
 // 3. PlayerManagerService - autostart players LAST (depends on sinks existing)
 builder.Services.AddSingleton<PlayerManagerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PlayerManagerService>());
+
+// 4. TriggerService - 12V relay trigger control (depends on sinks for mapping)
+builder.Services.AddSingleton<TriggerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TriggerService>());
 
 // Static files are served via UseStaticFiles() middleware below
 
@@ -149,6 +174,16 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
+
+// Wire up mock hardware config service to static enumerators if in mock mode
+if (isMockHardware)
+{
+    var mockConfigService = app.Services.GetService<MultiRoomAudio.Services.MockHardwareConfigService>();
+    if (mockConfigService != null)
+    {
+        MultiRoomAudio.Audio.Mock.MockCardEnumerator.SetConfigService(mockConfigService);
+    }
+}
 
 // Configure middleware pipeline
 app.UseCors("AllowAll");
@@ -214,6 +249,7 @@ app.MapSinksEndpoints();
 app.MapOnboardingEndpoints();
 app.MapCardsEndpoints();
 app.MapLogsEndpoints();
+app.MapTriggersEndpoints();
 
 // Root endpoint redirects to index.html or shows API info
 app.MapGet("/api", () => Results.Ok(new
@@ -231,6 +267,7 @@ app.MapGet("/api", () => Results.Ok(new
         sinks = "/api/sinks",
         cards = "/api/cards",
         logs = "/api/logs",
+        triggers = "/api/triggers",
         swagger = "/docs"
     }
 }))
@@ -278,104 +315,14 @@ logger.LogInformation("Config path: {ConfigPath}", environmentService.ConfigPath
 logger.LogInformation("Log path: {LogPath}", environmentService.LogPath);
 logger.LogInformation("Audio backend: {AudioBackend}", environmentService.AudioBackend);
 
-if (environmentService.IsHaos)
-{
-    logger.LogInformation("Running as Home Assistant add-on");
-    logger.LogDebug("Supervisor token present: {HasToken}",
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SUPERVISOR_TOKEN")));
-
-    // Log PulseAudio diagnostic info
-    var pulseServer = Environment.GetEnvironmentVariable("PULSE_SERVER");
-    logger.LogInformation("PULSE_SERVER: {PulseServer}", pulseServer ?? "(not set)");
-
-    // Check for PulseAudio socket
-    var pulseSocketPaths = new[] { "/run/pulse", "/var/run/pulse", "/tmp/pulse" };
-    foreach (var path in pulseSocketPaths)
-    {
-        if (Directory.Exists(path))
-        {
-            try
-            {
-                var files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
-                logger.LogInformation("PulseAudio socket directory {Path}: {FileCount} files", path, files.Length);
-                foreach (var file in files.Take(5))
-                {
-                    logger.LogDebug("  {File}", file);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning("Could not enumerate {Path}: {Error}", path, ex.Message);
-            }
-        }
-    }
-
-    // Try to run pactl info for diagnostics
-    try
-    {
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "pactl",
-            Arguments = "info",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        using var process = System.Diagnostics.Process.Start(psi);
-        if (process != null)
-        {
-            var output = process.StandardOutput.ReadToEnd();
-            var error = process.StandardError.ReadToEnd();
-            process.WaitForExit(5000);
-
-            if (process.ExitCode == 0)
-            {
-                logger.LogInformation("PulseAudio connected successfully");
-                // Log key info lines
-                foreach (var line in output.Split('\n').Where(l =>
-                    l.StartsWith("Server Name:") ||
-                    l.StartsWith("Default Sink:") ||
-                    l.StartsWith("Default Source:")))
-                {
-                    logger.LogInformation("  {Line}", line.Trim());
-                }
-            }
-            else
-            {
-                logger.LogWarning("PulseAudio connection failed: {Error}", error.Trim());
-            }
-        }
-
-        // Also list available sinks
-        psi.Arguments = "list sinks short";
-        using var sinkProcess = System.Diagnostics.Process.Start(psi);
-        if (sinkProcess != null)
-        {
-            var sinkOutput = sinkProcess.StandardOutput.ReadToEnd();
-            sinkProcess.WaitForExit(5000);
-
-            if (sinkProcess.ExitCode == 0 && !string.IsNullOrWhiteSpace(sinkOutput))
-            {
-                logger.LogInformation("PulseAudio sinks available:");
-                foreach (var line in sinkOutput.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)))
-                {
-                    logger.LogInformation("  {Sink}", line.Trim());
-                }
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning("Could not run pactl diagnostics: {Error}", ex.Message);
-    }
-}
-else
-{
-    logger.LogInformation("Running in standalone Docker mode");
-}
+// Run PulseAudio diagnostics (logs environment-specific info)
+var diagnosticsService = app.Services.GetRequiredService<StartupDiagnosticsService>();
+diagnosticsService.RunPulseAudioDiagnostics();
 
 logger.LogInformation("API documentation available at /docs");
 logger.LogInformation("========================================");
 
 app.Run();
+
+// Make Program class accessible for WebApplicationFactory in tests
+public partial class Program { }

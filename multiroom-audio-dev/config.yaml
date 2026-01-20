@@ -13,17 +13,18 @@ arch:
 
 # Hardware access
 audio: true
-full_access: true
 host_network: true
 udev: true
-# TODO: Remove if full_access: true is sufficient for audio access
+uart: true
+usb: true
+# Explicit device mapping for audio access
 devices:
   - "/dev/snd:/dev/snd"
 
 # Permissions for audio processing
 privileged:
   - SYS_NICE
-apparmor: false
+apparmor: true
 
 # Storage mapping
 map:
@@ -39,9 +40,16 @@ panel_title: Multi-Room Audio (Dev)
 # User-configurable options
 options:
   log_level: info
+  relay_serial_port: null
+  relay_devices: []
+  mock_hardware: false
 
 schema:
   log_level: list(debug|info|warning|error)
+  relay_serial_port: device(subsystem=tty)?
+  relay_devices:
+    - str?
+  mock_hardware: bool?
 
 # Watchdog - auto-restart if health check fails
 watchdog: http://[HOST]:[PORT:8096]/api/health

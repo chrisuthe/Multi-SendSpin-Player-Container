@@ -1,5 +1,6 @@
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Services;
+using MultiRoomAudio.Utilities;
 
 namespace MultiRoomAudio.Controllers;
 
@@ -22,6 +23,32 @@ public static class PlayersEndpoint
 
     #endregion
 
+    /// <summary>
+    /// Registers all player management API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/players - List all players</item>
+    /// <item>GET /api/players/{name} - Get specific player</item>
+    /// <item>GET /api/players/{name}/stats - Get real-time audio diagnostics</item>
+    /// <item>POST /api/players - Create new player</item>
+    /// <item>PUT /api/players/{name} - Update player configuration</item>
+    /// <item>DELETE /api/players/{name} - Delete player</item>
+    /// <item>POST /api/players/{name}/stop - Stop player</item>
+    /// <item>POST /api/players/{name}/start - Start stopped player</item>
+    /// <item>POST /api/players/{name}/restart - Restart player</item>
+    /// <item>PUT /api/players/{name}/volume - Set volume (0-100)</item>
+    /// <item>PUT /api/players/{name}/startup-volume - Set startup volume</item>
+    /// <item>PUT /api/players/{name}/mute - Set mute state</item>
+    /// <item>PUT /api/players/{name}/offset - Set delay offset (-10000 to 10000ms)</item>
+    /// <item>PUT /api/players/{name}/device - Switch audio device</item>
+    /// <item>PUT /api/players/{name}/rename - Rename player</item>
+    /// <item>POST /api/players/{name}/pause - Pause playback</item>
+    /// <item>POST /api/players/{name}/resume - Resume playback</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapPlayersEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/players")
@@ -29,8 +56,9 @@ public static class PlayersEndpoint
             .WithOpenApi();
 
         // GET /api/players - List all players
-        group.MapGet("/", (PlayerManagerService manager, ILogger<PlayerManagerService> logger) =>
+        group.MapGet("/", (PlayerManagerService manager, ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: GET /api/players");
             var response = manager.GetAllPlayers();
             logger.LogDebug("API: Returning {PlayerCount} players", response.Count);
@@ -40,8 +68,9 @@ public static class PlayersEndpoint
         .WithDescription("Get all active players");
 
         // GET /api/players/{name} - Get specific player
-        group.MapGet("/{name}", (string name, PlayerManagerService manager, ILogger<PlayerManagerService> logger) =>
+        group.MapGet("/{name}", (string name, PlayerManagerService manager, ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: GET /api/players/{PlayerName}", name);
             var player = manager.GetPlayer(name);
             if (player == null)
@@ -53,8 +82,9 @@ public static class PlayersEndpoint
         .WithDescription("Get details of a specific player");
 
         // GET /api/players/{name}/stats - Get real-time player stats (Stats for Nerds)
-        group.MapGet("/{name}/stats", (string name, PlayerManagerService manager, ILogger<PlayerManagerService> logger) =>
+        group.MapGet("/{name}/stats", (string name, PlayerManagerService manager, ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: GET /api/players/{PlayerName}/stats", name);
             var stats = manager.GetPlayerStats(name);
             if (stats == null)
@@ -69,34 +99,17 @@ public static class PlayersEndpoint
         group.MapPost("/", async (
             PlayerCreateRequest request,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: POST /api/players - Creating player {PlayerName}", request.Name);
-            try
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var player = await manager.CreatePlayerAsync(request, ct);
                 logger.LogInformation("API: Player {PlayerName} created successfully", player.Name);
                 return Results.Created($"/api/players/{player.Name}", player);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
-            {
-                logger.LogWarning("API: Player creation conflict - {Message}", ex.Message);
-                return Results.Conflict(new ErrorResponse(false, ex.Message));
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogWarning("API: Player creation bad request - {Message}", ex.Message);
-                return Results.BadRequest(new ErrorResponse(false, ex.Message));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to create player {PlayerName}", request.Name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to create player");
-            }
+            }, logger, "create player", request.Name);
         })
         .WithName("CreatePlayer")
         .WithDescription("Create and start a new player");
@@ -105,8 +118,9 @@ public static class PlayersEndpoint
         group.MapDelete("/{name}", async (
             string name,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger) =>
+            ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: DELETE /api/players/{PlayerName}", name);
             var deleted = await manager.DeletePlayerAsync(name);
             if (!deleted)
@@ -122,8 +136,9 @@ public static class PlayersEndpoint
         group.MapPost("/{name}/stop", async (
             string name,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger) =>
+            ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: POST /api/players/{PlayerName}/stop", name);
             var stopped = await manager.StopPlayerAsync(name);
             if (!stopped)
@@ -139,11 +154,12 @@ public static class PlayersEndpoint
         group.MapPost("/{name}/start", async (
             string name,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: POST /api/players/{PlayerName}/start", name);
-            try
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var player = await manager.StartPlayerAsync(name, ct);
                 if (player == null)
@@ -151,15 +167,7 @@ public static class PlayersEndpoint
 
                 logger.LogInformation("API: Player {PlayerName} started successfully", name);
                 return Results.Ok(player);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to start player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to start player");
-            }
+            }, logger, "start player", name);
         })
         .WithName("StartPlayer")
         .WithDescription("Start a stopped player");
@@ -168,11 +176,12 @@ public static class PlayersEndpoint
         group.MapPost("/{name}/restart", async (
             string name,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: POST /api/players/{PlayerName}/restart", name);
-            try
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var player = await manager.RestartPlayerAsync(name, ct);
                 if (player == null)
@@ -180,15 +189,7 @@ public static class PlayersEndpoint
 
                 logger.LogInformation("API: Player {PlayerName} restarted successfully", name);
                 return Results.Ok(player);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to restart player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to restart player");
-            }
+            }, logger, "restart player", name);
         })
         .WithName("RestartPlayer")
         .WithDescription("Stop and restart a player");
@@ -198,12 +199,13 @@ public static class PlayersEndpoint
             string name,
             DeviceSwitchRequest request,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: PUT /api/players/{PlayerName}/device to {Device}",
                 name, request.Device ?? "(default)");
-            try
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var success = await manager.SwitchDeviceAsync(name, request.Device, ct);
                 if (!success)
@@ -212,20 +214,7 @@ public static class PlayersEndpoint
                 logger.LogInformation("API: Player {PlayerName} switched to device {Device}",
                     name, request.Device ?? "(default)");
                 return Results.Ok(new SuccessResponse(true, $"Device switched to '{request.Device ?? "default"}'"));
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogWarning("API: Device switch bad request - {Message}", ex.Message);
-                return Results.BadRequest(new ErrorResponse(false, ex.Message));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to switch device for player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to switch device");
-            }
+            }, logger, "switch device", name);
         })
         .WithName("SwitchDevice")
         .WithDescription("Hot-switch audio device without stopping playback");
@@ -235,41 +224,33 @@ public static class PlayersEndpoint
             string name,
             VolumeRequest request,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogInformation("VOLUME [API] PUT /api/players/{Name}/volume: {Volume}%", name, request.Volume);
-            try
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var success = await manager.SetVolumeAsync(name, request.Volume, ct);
                 if (!success)
                     return PlayerNotFoundResult(name, logger, "volume change");
 
                 return Results.Ok(new SuccessResponse(true, $"Volume set to {request.Volume}"));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to set volume for player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to set volume");
-            }
+            }, logger, "set volume", name);
         })
         .WithName("SetVolume")
         .WithDescription("Set player volume (0-100)");
 
         // PUT /api/players/{name}/startup-volume - Set startup volume
-        group.MapPut("/{name}/startup-volume", async (
+        group.MapPut("/{name}/startup-volume", (
             string name,
             VolumeRequest request,
-            PlayerManagerService manager,
             ConfigurationService config,
-            ILogger<PlayerManagerService> logger,
-            CancellationToken ct) =>
+            ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogInformation("VOLUME [API] PUT /api/players/{Name}/startup-volume: {Volume}%", name, request.Volume);
-            try
+            return ApiExceptionHandler.Execute(() =>
             {
                 // Update persisted config only
                 if (!config.Players.TryGetValue(name, out var playerConfig))
@@ -283,15 +264,7 @@ public static class PlayersEndpoint
 
                 return Results.Ok(new SuccessResponse(true,
                     $"Startup volume set to {request.Volume}% (takes effect on next restart)"));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to set startup volume for player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to set startup volume");
-            }
+            }, logger, "set startup volume", name);
         })
         .WithName("SetStartupVolume")
         .WithDescription("Set player startup volume (0-100) - takes effect on restart");
@@ -301,8 +274,9 @@ public static class PlayersEndpoint
             string name,
             MuteRequest request,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger) =>
+            ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: PUT /api/players/{PlayerName}/mute to {Muted}", name, request.Muted);
             var success = manager.SetMuted(name, request.Muted);
             if (!success)
@@ -319,8 +293,9 @@ public static class PlayersEndpoint
             OffsetRequest request,
             PlayerManagerService manager,
             ConfigurationService config,
-            ILogger<PlayerManagerService> logger) =>
+            ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: PUT /api/players/{PlayerName}/offset to {DelayMs}ms", name, request.DelayMs);
 
             // Apply to running player (affects clock sync timing immediately)
@@ -339,10 +314,11 @@ public static class PlayersEndpoint
         group.MapPost("/{name}/pause", (
             string name,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger) =>
+            ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: POST /api/players/{PlayerName}/pause", name);
-            try
+            return ApiExceptionHandler.Execute(() =>
             {
                 var player = manager.GetPlayer(name);
                 if (player == null)
@@ -350,15 +326,7 @@ public static class PlayersEndpoint
 
                 manager.PausePlayer(name);
                 return Results.Ok(new SuccessResponse(true, "Playback paused"));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to pause player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to pause player");
-            }
+            }, logger, "pause player", name);
         })
         .WithName("PausePlayer")
         .WithDescription("Pause player playback");
@@ -367,10 +335,11 @@ public static class PlayersEndpoint
         group.MapPost("/{name}/resume", (
             string name,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger) =>
+            ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: POST /api/players/{PlayerName}/resume", name);
-            try
+            return ApiExceptionHandler.Execute(() =>
             {
                 var player = manager.GetPlayer(name);
                 if (player == null)
@@ -378,15 +347,7 @@ public static class PlayersEndpoint
 
                 manager.ResumePlayer(name);
                 return Results.Ok(new SuccessResponse(true, "Playback resumed"));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to resume player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to resume player");
-            }
+            }, logger, "resume player", name);
         })
         .WithName("ResumePlayer")
         .WithDescription("Resume player playback");
@@ -397,18 +358,18 @@ public static class PlayersEndpoint
             PlayerUpdateRequest request,
             PlayerManagerService manager,
             ConfigurationService config,
-            ILogger<PlayerManagerService> logger,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: PUT /api/players/{PlayerName}", name);
-
-            // Check player exists
-            var player = manager.GetPlayer(name);
-            if (player == null)
-                return PlayerNotFoundResult(name, logger, "update");
-
-            try
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
+                // Check player exists
+                var player = manager.GetPlayer(name);
+                if (player == null)
+                    return PlayerNotFoundResult(name, logger, "update");
+
                 var needsRestart = false;
                 var currentName = name;
 
@@ -475,25 +436,7 @@ public static class PlayersEndpoint
                     needsRestart,
                     playerName = currentName
                 });
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
-            {
-                logger.LogWarning("API: Player update conflict - {Message}", ex.Message);
-                return Results.Conflict(new ErrorResponse(false, ex.Message));
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogWarning("API: Player update bad request - {Message}", ex.Message);
-                return Results.BadRequest(new ErrorResponse(false, ex.Message));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to update player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to update player");
-            }
+            }, logger, "update player", name);
         })
         .WithName("UpdatePlayer")
         .WithDescription("Update player configuration. Returns whether restart is needed for changes to take effect.");
@@ -503,10 +446,11 @@ public static class PlayersEndpoint
             string name,
             RenameRequest request,
             PlayerManagerService manager,
-            ILogger<PlayerManagerService> logger) =>
+            ILoggerFactory loggerFactory) =>
         {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: PUT /api/players/{PlayerName}/rename to {NewName}", name, request.NewName);
-            try
+            return ApiExceptionHandler.Execute(() =>
             {
                 var success = manager.RenamePlayer(name, request.NewName);
                 if (!success)
@@ -524,25 +468,7 @@ public static class PlayersEndpoint
                     RestartRequired: true,
                     RestartHint: "Restart the player for the name change to appear in Music Assistant."
                 ));
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
-            {
-                logger.LogWarning("API: Player rename conflict - {Message}", ex.Message);
-                return Results.Conflict(new ErrorResponse(false, ex.Message));
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogWarning("API: Player rename bad request - {Message}", ex.Message);
-                return Results.BadRequest(new ErrorResponse(false, ex.Message));
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "API: Failed to rename player {PlayerName}", name);
-                return Results.Problem(
-                    detail: ex.Message,
-                    statusCode: 500,
-                    title: "Failed to rename player");
-            }
+            }, logger, "rename player", name);
         })
         .WithName("RenamePlayer")
         .WithDescription("Rename a player to a new name. Note: Restart the player for the name change to appear in Music Assistant.");

@@ -389,13 +389,18 @@ const Wizard = {
             const activeProfile = availableProfiles.find(p => p.name === card.activeProfile);
             const activeDesc = activeProfile?.description || card.activeProfile;
 
+            // Get bus type icon for the card
+            const busType = getCardBusType(card.name, card.activeProfile);
+            const busIcon = getBusTypeIcon(busType);
+            const busLabel = getBusTypeLabel(busType);
+
             return `
                 <div class="card mb-3" id="card-${card.index}">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <div>
                                 <h6 class="mb-1">
-                                    <i class="fas fa-sd-card text-primary me-2"></i>
+                                    <i class="${busIcon} text-primary me-2" title="${busLabel}"></i>
                                     ${escapeHtml(card.description || card.name)}
                                 </h6>
                                 <small class="text-muted">${escapeHtml(card.driver)}</small>
@@ -758,17 +763,33 @@ const Wizard = {
                                     <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">Left Channel</label>
-                                            <select class="form-select" id="wizardRemapLeft">
-                                                <option value="front-left">Front Left</option>
-                                                <option value="front-right">Front Right</option>
-                                            </select>
+                                            <div class="d-flex align-items-center">
+                                                <select class="form-select" id="wizardRemapLeft">
+                                                    <option value="front-left">Front Left</option>
+                                                    <option value="front-right">Front Right</option>
+                                                </select>
+                                                <button class="btn btn-outline-primary btn-sm ms-2"
+                                                        id="wizardRemapLeftTestBtn"
+                                                        onclick="Wizard.playRemapChannelTestTone('left')"
+                                                        title="Play test tone">
+                                                    <i class="fas fa-volume-up"></i>
+                                                </button>
+                                            </div>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Right Channel</label>
-                                            <select class="form-select" id="wizardRemapRight">
-                                                <option value="front-left">Front Left</option>
-                                                <option value="front-right" selected>Front Right</option>
-                                            </select>
+                                            <div class="d-flex align-items-center">
+                                                <select class="form-select" id="wizardRemapRight">
+                                                    <option value="front-left">Front Left</option>
+                                                    <option value="front-right" selected>Front Right</option>
+                                                </select>
+                                                <button class="btn btn-outline-primary btn-sm ms-2"
+                                                        id="wizardRemapRightTestBtn"
+                                                        onclick="Wizard.playRemapChannelTestTone('right')"
+                                                        title="Play test tone">
+                                                    <i class="fas fa-volume-up"></i>
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1292,6 +1313,49 @@ const Wizard = {
         } finally {
             btn.innerHTML = originalContent;
             btn.disabled = false;
+        }
+    },
+
+    // Play test tone for a specific channel in wizard remap sink
+    async playRemapChannelTestTone(channel) {
+        const masterSelect = document.getElementById('wizardRemapMaster');
+        const channelSelect = document.getElementById(channel === 'left' ? 'wizardRemapLeft' : 'wizardRemapRight');
+        const btn = document.getElementById(channel === 'left' ? 'wizardRemapLeftTestBtn' : 'wizardRemapRightTestBtn');
+
+        if (!masterSelect.value) {
+            showAlert('Please select a master device first', 'warning');
+            return;
+        }
+
+        if (!btn) return;
+
+        const originalContent = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        btn.disabled = true;
+        btn.classList.add('playing');
+
+        try {
+            const response = await fetch(`./api/devices/${encodeURIComponent(masterSelect.value)}/test-tone`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    frequencyHz: 1000,
+                    durationMs: 1500,
+                    channelName: channelSelect.value
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to play test tone');
+            }
+        } catch (error) {
+            console.error('Failed to play channel test tone:', error);
+            showAlert(`Test tone failed: ${error.message}`, 'danger');
+        } finally {
+            btn.innerHTML = originalContent;
+            btn.disabled = false;
+            btn.classList.remove('playing');
         }
     },
 

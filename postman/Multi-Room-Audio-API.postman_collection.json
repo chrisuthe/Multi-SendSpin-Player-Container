@@ -71,7 +71,7 @@
 							"host": ["{{baseUrl}}"],
 							"path": ["api", "players"]
 						},
-						"description": "Create a new Sendspin player for Music Assistant.\n\nParameters:\n- name: Display name for the player\n- device: PortAudio device index (use /api/devices to list)\n- volume: Initial volume (0-100)\n- delayMs: Audio delay offset in milliseconds"
+						"description": "Create a new Sendspin player for Music Assistant.\n\nParameters:\n- name: Display name for the player\n- device: PortAudio device index (use /api/devices to list)\n- volume: Startup volume (0-100)\n- delayMs: Audio delay offset in milliseconds"
 					}
 				},
 				{

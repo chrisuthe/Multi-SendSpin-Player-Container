@@ -156,3 +156,51 @@ public class PlayerConfig
     public int Volume { get; set; } = 75;
     public bool IsMuted { get; set; }
 }
+
+/// <summary>
+/// Request for batch player creation.
+/// </summary>
+public record BatchCreatePlayersRequest(List<BatchPlayerRequest>? Players);
+
+/// <summary>
+/// Single player creation request for batch operations.
+/// </summary>
+public record BatchPlayerRequest(
+    string Name,
+    string? Device = null,
+    int? Volume = null,
+    bool? Autostart = null);
+
+/// <summary>
+/// Represents a failed player creation in a batch operation.
+/// </summary>
+public record BatchPlayerFailure(string Name, string Error);
+
+/// <summary>
+/// Result of a batch player creation operation.
+/// </summary>
+public record BatchCreatePlayersResult(
+    List<string> Created,
+    List<string> Started,
+    List<BatchPlayerFailure> Failed)
+{
+    /// <summary>
+    /// Whether all requested players were created successfully.
+    /// </summary>
+    public bool Success => Failed.Count == 0;
+
+    /// <summary>
+    /// The total number of players that were created (saved to config).
+    /// </summary>
+    public int CreatedCount => Created.Count;
+
+    /// <summary>
+    /// The total number of players that were started successfully.
+    /// </summary>
+    public int StartedCount => Started.Count;
+
+    /// <summary>
+    /// The total number of players that failed to create.
+    /// </summary>
+    public int FailedCount => Failed.Count;
+}

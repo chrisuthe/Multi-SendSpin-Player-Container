@@ -13,6 +13,14 @@ services:
     ports:
       - "8096:8096"
     # No audio devices mapped - container will use virtual/null devices
+    # devices:
+      # FTDI USB Relay Board (optional - for 12V trigger control)
+      # Uncomment the following to enable FTDI relay board support:
+      # - /dev/bus/usb:/dev/bus/usb
+    # cap_add:
+      # FTDI USB Relay Board (optional - for 12V trigger control)
+      # Uncomment the following to allow libftdi to detach kernel drivers:
+      # - SYS_RAWIO
     volumes:
       # Persistent configuration storage
       - ./config:/app/config

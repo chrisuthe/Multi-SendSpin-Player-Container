@@ -9,6 +9,19 @@ namespace MultiRoomAudio.Controllers;
 /// </summary>
 public static class HealthEndpoint
 {
+    /// <summary>
+    /// Registers health check and service status API endpoints with the application.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints:
+    /// <list type="bullet">
+    /// <item>GET /api/health - Basic health check</item>
+    /// <item>GET /api/health/ready - Readiness check for container orchestration</item>
+    /// <item>GET /api/health/live - Liveness check for container orchestration</item>
+    /// <item>GET /api/status - Detailed service status with player/device counts</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="app">The WebApplication to register endpoints on.</param>
     public static void MapHealthEndpoints(this WebApplication app)
     {
         // GET /api/health - Basic health check
