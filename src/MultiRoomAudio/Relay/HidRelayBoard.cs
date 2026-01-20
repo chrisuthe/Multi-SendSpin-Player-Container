@@ -49,7 +49,8 @@ public sealed class HidRelayBoard : IRelayBoard
 
     public bool Open()
     {
-        if (_disposed) return false;
+        if (_disposed)
+            return false;
 
         try
         {
@@ -71,7 +72,8 @@ public sealed class HidRelayBoard : IRelayBoard
 
     public bool OpenBySerial(string serialNumber)
     {
-        if (_disposed) return false;
+        if (_disposed)
+            return false;
 
         try
         {
@@ -133,8 +135,12 @@ public sealed class HidRelayBoard : IRelayBoard
 
         if (_stream != null)
         {
-            try { _stream.Close(); } catch { }
-            try { _stream.Dispose(); } catch { }
+            try
+            { _stream.Close(); }
+            catch { }
+            try
+            { _stream.Dispose(); }
+            catch { }
             _stream = null;
         }
 
@@ -221,7 +227,8 @@ public sealed class HidRelayBoard : IRelayBoard
     /// </summary>
     private void RefreshState()
     {
-        if (_stream == null) return;
+        if (_stream == null)
+            return;
 
         try
         {
@@ -408,7 +415,8 @@ public sealed class HidRelayBoard : IRelayBoard
 
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
         _disposed = true;
         Close();
     }

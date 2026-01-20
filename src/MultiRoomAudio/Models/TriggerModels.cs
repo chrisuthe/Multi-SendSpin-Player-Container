@@ -71,10 +71,14 @@ public static class ValidChannelCounts
 
     public static int Clamp(int count)
     {
-        if (count <= 1) return 1;
-        if (count <= 2) return 2;
-        if (count <= 4) return 4;
-        if (count <= 8) return 8;
+        if (count <= 1)
+            return 1;
+        if (count <= 2)
+            return 2;
+        if (count <= 4)
+            return 4;
+        if (count <= 8)
+            return 8;
         return 16;
     }
 }
@@ -216,9 +220,9 @@ public class TriggerFeatureConfiguration
     {
         get
         {
-            #pragma warning disable CS0618 // Obsolete - intentional for migration check
+#pragma warning disable CS0618 // Obsolete - intentional for migration check
             return FtdiSerialNumber != null || (Triggers != null && Triggers.Count > 0);
-            #pragma warning restore CS0618
+#pragma warning restore CS0618
         }
     }
 
@@ -227,9 +231,10 @@ public class TriggerFeatureConfiguration
     /// </summary>
     public void MigrateFromLegacy()
     {
-        if (!NeedsMigration) return;
+        if (!NeedsMigration)
+            return;
 
-        #pragma warning disable CS0618 // Obsolete - intentional for migration
+#pragma warning disable CS0618 // Obsolete - intentional for migration
         var legacyBoard = new TriggerBoardConfiguration
         {
             BoardId = FtdiSerialNumber ?? "LEGACY",
@@ -245,7 +250,7 @@ public class TriggerFeatureConfiguration
         DevicePath = null;
         ChannelCount = null;
         Triggers = null;
-        #pragma warning restore CS0618
+#pragma warning restore CS0618
     }
 }
 

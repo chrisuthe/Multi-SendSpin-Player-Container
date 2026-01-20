@@ -77,7 +77,8 @@ public sealed class ModbusRelayBoard : IRelayBoard
     /// <inheritdoc />
     public bool Open()
     {
-        if (_disposed) return false;
+        if (_disposed)
+            return false;
 
         // Find the first available CH340 serial port
         var ports = GetAvailableSerialPorts();
@@ -103,7 +104,8 @@ public sealed class ModbusRelayBoard : IRelayBoard
     /// <inheritdoc />
     public bool OpenBySerial(string serialNumber)
     {
-        if (_disposed) return false;
+        if (_disposed)
+            return false;
 
         // For Modbus boards, the "serial" is actually the port name or a port identifier
         // Format can be: /dev/ttyUSB0, COM3, or MODBUS:/dev/ttyUSB0
@@ -541,7 +543,8 @@ public sealed class ModbusRelayBoard : IRelayBoard
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
         _disposed = true;
         Close();
     }
