@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-32d0b35
+## Development Build: sha-5420907
 
 **Current Dev Build Changes** (recent)
 
+- Fix null coalescing operator precedence bug in SetDeviceMaxVolume
 - chore: remove outdated nextgen.md implementation plan
 - Add AppArmor profile to dev add-on for improved security
 - Extract BackgroundTaskExecutor utility from PlayerManagerService
@@ -14,7 +15,6 @@
 - Add AppArmor profile and improve HAOS security rating
 - Add structured error handling and audio system documentation
 - Refactor controllers: move batch logic to service, standardize patterns
-- Extract StartupDiagnosticsService and add UpdateDeviceProperty helper
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
