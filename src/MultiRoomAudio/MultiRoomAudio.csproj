@@ -18,6 +18,7 @@
   <ItemGroup>
     <!-- Core SDK for Sendspin protocol -->
     <PackageReference Include="SendSpin.SDK" Version="5.2.0" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.2" />
 
     <!-- Configuration -->
     <PackageReference Include="YamlDotNet" Version="16.3.0" />

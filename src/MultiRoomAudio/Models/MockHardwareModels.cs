@@ -181,7 +181,7 @@ public class MockRelayBoardConfig
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// Board type: "ftdi" or "usb_hid".
+    /// Board type: "ftdi", "usb_hid", or "modbus".
     /// Required.
     /// </summary>
     public string BoardType { get; set; } = "ftdi";
@@ -222,6 +222,7 @@ public class MockRelayBoardConfig
         {
             "ftdi" => RelayBoardType.Ftdi,
             "usb_hid" or "usbhid" or "hid" => RelayBoardType.UsbHid,
+            "modbus" or "ch340" or "ch341" or "serial" => RelayBoardType.Modbus,
             "mock" => RelayBoardType.Mock,
             _ => RelayBoardType.Unknown
         };

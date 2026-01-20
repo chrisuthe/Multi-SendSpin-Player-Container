@@ -561,6 +561,15 @@ public class MockHardwareConfigService
                 Description = "Generic 8-Channel USB HID Relay",
                 ChannelCount = 8,
                 ChannelCountDetected = true
+            },
+            new()
+            {
+                BoardId = "MODBUS:/dev/ttyUSB0",
+                BoardType = "modbus",
+                Description = "Sainsmart 16-Channel Modbus Relay",
+                ChannelCount = 16,
+                ChannelCountDetected = false,
+                UsbPath = "/dev/ttyUSB0"
             }
         };
     }

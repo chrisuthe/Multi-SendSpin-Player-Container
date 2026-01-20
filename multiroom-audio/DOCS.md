@@ -130,6 +130,14 @@ automatic power-on/off of amplifiers when playback starts and stops.
 - Any USB HID relay with VID 0x16C0, PID 0x05DF
 - Channel count is auto-detected from product name (e.g., "USBRelay8")
 
+**Modbus/Serial Relay Boards (CH340/CH341):**
+
+- Sainsmart 16-channel USB relay boards
+- Any CH340/CH341-based Modbus ASCII relay board (4, 8, or 16 channels)
+- VID 0x1A86, PID 0x7523
+- Channel count must be configured manually (cannot be auto-detected)
+- Appears as `/dev/ttyUSB*` on Linux, `COM*` on Windows
+
 ### Setup (Docker)
 
 For standalone Docker deployments, enable USB passthrough in your `docker-compose.yml`:
@@ -138,11 +146,13 @@ For standalone Docker deployments, enable USB passthrough in your `docker-compos
 services:
   multiroom-audio:
     devices:
-      # Required for both FTDI and USB HID relay boards
+      # Required for FTDI and USB HID relay boards
       - /dev/bus/usb:/dev/bus/usb
+      # Required for CH340/Modbus relay boards (serial port)
+      - /dev/ttyUSB0:/dev/ttyUSB0
     cap_add:
       # Optional: Only needed if ftdi_sio kernel driver claims your FTDI device
-      # Not required for USB HID boards
+      # Not required for USB HID or CH340 boards
       - SYS_RAWIO
 ```
 
@@ -154,6 +164,8 @@ services:
       - /dev/hidraw0:/dev/hidraw0
       # For specific USB device (find path with 'lsusb')
       - /dev/bus/usb/001/002:/dev/bus/usb/001/002
+      # For CH340/Modbus relay boards
+      - /dev/ttyUSB0:/dev/ttyUSB0
 ```
 
 ### Setup (Home Assistant OS)
@@ -162,6 +174,7 @@ USB relay boards should work automatically when connected via USB. If not
 detected:
 1. Ensure the USB device is visible in Home Assistant's hardware settings
 2. Restart the add-on after connecting the relay board
+3. For CH340/Modbus boards, check that the serial port appears in hardware settings
 
 ### Trigger Configuration
 

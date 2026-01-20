@@ -37,10 +37,12 @@ public enum RelayBoardType
 {
     /// <summary>Unknown board type.</summary>
     Unknown,
-    /// <summary>FTDI-based relay board (Denkovi, etc.) - uses serial protocol.</summary>
+    /// <summary>FTDI-based relay board (Denkovi, etc.) - uses bitbang protocol.</summary>
     Ftdi,
     /// <summary>USB HID relay board (DCT Tech, ucreatefun, etc.) - uses HID protocol.</summary>
     UsbHid,
+    /// <summary>Modbus ASCII relay board (Sainsmart, etc.) - uses serial protocol over CH340/CH341.</summary>
+    Modbus,
     /// <summary>Mock board for testing.</summary>
     Mock
 }
@@ -118,6 +120,7 @@ public class TriggerBoardConfiguration
     /// Unique identifier for this board.
     /// For FTDI: serial number or "USB:{path}".
     /// For HID: "HID:{serial}" or "HID:{path-hash}".
+    /// For Modbus: "MODBUS:{port}" (e.g., "MODBUS:/dev/ttyUSB0").
     /// </summary>
     [Required]
     public string BoardId { get; set; } = string.Empty;
@@ -310,6 +313,7 @@ public class AddBoardRequest
     /// Board identifier.
     /// For FTDI: serial number or "USB:{path}".
     /// For HID: "HID:{serial}" (auto-generated from device enumeration).
+    /// For Modbus: "MODBUS:{port}" (e.g., "MODBUS:/dev/ttyUSB0").
     /// </summary>
     [Required]
     public string BoardId { get; set; } = string.Empty;

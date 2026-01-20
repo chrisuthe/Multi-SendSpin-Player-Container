@@ -4,7 +4,7 @@ namespace MultiRoomAudio.Relay;
 
 /// <summary>
 /// Real implementation of relay device enumeration.
-/// Discovers actual FTDI and HID relay boards connected to the system.
+/// Discovers actual FTDI, HID, and Modbus relay boards connected to the system.
 /// </summary>
 public class RealRelayDeviceEnumerator : IRelayDeviceEnumerator
 {
@@ -17,7 +17,9 @@ public class RealRelayDeviceEnumerator : IRelayDeviceEnumerator
 
     /// <inheritdoc />
     public bool IsHardwareAvailable =>
-        FtdiRelayBoard.IsLibraryAvailable() || HidRelayBoard.EnumerateDevices(_logger).Count > 0;
+        FtdiRelayBoard.IsLibraryAvailable() ||
+        HidRelayBoard.EnumerateDevices(_logger).Count > 0 ||
+        ModbusRelayBoard.GetAvailableSerialPorts().Count > 0;
 
     /// <inheritdoc />
     public List<FtdiDeviceInfo> GetFtdiDevices()
@@ -83,6 +85,29 @@ public class RealRelayDeviceEnumerator : IRelayDeviceEnumerator
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error enumerating HID relay devices");
+        }
+
+        // Enumerate Modbus serial relay devices (CH340/CH341)
+        try
+        {
+            foreach (var modbus in ModbusRelayBoard.EnumerateDevices(_logger))
+            {
+                result.Add(new RelayDeviceInfo(
+                    BoardId: modbus.GetBoardId(),
+                    BoardType: RelayBoardType.Modbus,
+                    SerialNumber: null, // Modbus boards don't have serial numbers
+                    Description: modbus.Description,
+                    ChannelCount: 16, // Default - user must configure manually
+                    IsInUse: false,
+                    UsbPath: modbus.PortName,
+                    IsPathBased: true, // Serial ports are always path-based
+                    ChannelCountDetected: false // Modbus boards can't auto-detect channel count
+                ));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error enumerating Modbus relay devices");
         }
 
         _logger.LogDebug("Found {Count} total relay devices", result.Count);

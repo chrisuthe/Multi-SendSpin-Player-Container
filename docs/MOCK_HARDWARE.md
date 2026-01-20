@@ -91,23 +91,24 @@ audio_cards:
 
 ### Relay Boards
 
-Simulates FTDI and USB HID relay boards.
+Simulates FTDI, USB HID, and Modbus relay boards.
 
 ```yaml
 relay_boards:
-  - board_id: string        # Required. Unique identifier (e.g., "MOCK001" or "HID:SERIAL")
+  - board_id: string        # Required. Unique identifier (e.g., "MOCK001", "HID:SERIAL", or "MODBUS:/dev/ttyUSB0")
     enabled: boolean        # Optional. Default: true
-    board_type: string      # Required. "ftdi" or "usb_hid"
+    board_type: string      # Required. "ftdi", "usb_hid", or "modbus"
     serial_number: string   # Optional. Board serial number
     description: string     # Optional. Board description
     channel_count: integer  # Required. Number of relay channels (1-16)
     channel_count_detected: boolean  # Optional. True if channels auto-detected
-    usb_path: string        # Optional. USB port path (e.g., "1-2.3")
+    usb_path: string        # Optional. USB port path (e.g., "1-2.3") or serial port (e.g., "/dev/ttyUSB0")
 ```
 
 **Board ID Format:**
 - FTDI: Use serial number directly (e.g., `MOCK001`)
 - HID: Prefix with `HID:` (e.g., `HID:QAAMZ`)
+- Modbus: Prefix with `MODBUS:` and port path (e.g., `MODBUS:/dev/ttyUSB0`)
 
 ## Complete Example
 
@@ -197,6 +198,14 @@ relay_boards:
     description: "Zone Relays"
     channel_count: 4
     channel_count_detected: true
+
+  # 16-channel Modbus relay board (Sainsmart style)
+  - board_id: "MODBUS:/dev/ttyUSB0"
+    enabled: true
+    board_type: modbus
+    description: "Sainsmart 16-Channel Relay"
+    channel_count: 16
+    usb_path: "/dev/ttyUSB0"
 ```
 
 ## Default Devices
@@ -215,7 +224,7 @@ When no `mock_hardware.yaml` exists, the following defaults are used:
 | WH-1000XM4 | Bluetooth | 2 | No |
 | HDA NVidia Digital Stereo (HDMI) | HDMI | 2 | No |
 
-### Relay Boards (4)
+### Relay Boards (5)
 
 | Board ID | Type | Channels | Description |
 |----------|------|----------|-------------|
@@ -223,6 +232,7 @@ When no `mock_hardware.yaml` exists, the following defaults are used:
 | MOCK002 | FTDI | 8 | Mock 8-Channel FTDI Relay Board |
 | HID:QAAMZ | USB HID | 4 | USBRelay4 - 4 Channel USB HID Relay |
 | HID:MOCK8 | USB HID | 8 | Generic 8-Channel USB HID Relay |
+| MODBUS:/dev/ttyUSB0 | Modbus | 16 | Sainsmart 16-Channel Modbus Relay |
 
 ## Tips
 

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Services;
 
@@ -69,7 +70,7 @@ public static class TriggersEndpoint
         .WithName("ListFtdiDevices")
         .WithDescription("List available FTDI devices for relay board connection (legacy - use /devices/all for both FTDI and HID)");
 
-        // GET /api/triggers/devices/all - List all available relay devices (FTDI and HID)
+        // GET /api/triggers/devices/all - List all available relay devices (FTDI, HID, and Modbus)
         group.MapGet("/devices/all", (TriggerService service, ILoggerFactory lf) =>
         {
             var logger = lf.CreateLogger("TriggersEndpoint");
@@ -81,11 +82,12 @@ public static class TriggersEndpoint
                 devices,
                 count = devices.Count,
                 ftdiCount = devices.Count(d => d.BoardType == RelayBoardType.Ftdi),
-                hidCount = devices.Count(d => d.BoardType == RelayBoardType.UsbHid)
+                hidCount = devices.Count(d => d.BoardType == RelayBoardType.UsbHid),
+                modbusCount = devices.Count(d => d.BoardType == RelayBoardType.Modbus)
             });
         })
         .WithName("ListAllRelayDevices")
-        .WithDescription("List all available relay devices (both FTDI and USB HID)");
+        .WithDescription("List all available relay devices (FTDI, USB HID, and Modbus)");
 
         // ============================================
         // Board Management Endpoints
@@ -337,7 +339,56 @@ public static class TriggersEndpoint
         .WithName("UnassignBoardTrigger")
         .WithDescription("Unassign a trigger channel on a specific board");
 
-        // POST /api/triggers/boards/{boardId}/{channel}/test - Manual relay test
+        // POST /api/triggers/boards/test - Manual relay test (query params for boardId with slashes)
+        // Using query params because boardId may contain slashes (e.g., MODBUS:/dev/ttyUSB0)
+        group.MapPost("/boards/test", (
+            [FromQuery(Name = "boardId")] string boardId,
+            [FromQuery(Name = "channel")] int channel,
+            RelayManualControlRequest request,
+            TriggerService service,
+            ILoggerFactory lf) =>
+        {
+            var logger = lf.CreateLogger("TriggersEndpoint");
+            logger.LogDebug("API: POST /api/triggers/boards/test?boardId={BoardId}&channel={Channel} - {On}", boardId, channel, request.On);
+
+            var boardStatus = service.GetBoardStatus(boardId);
+            if (boardStatus == null)
+            {
+                return Results.NotFound(new ErrorResponse(false, $"Board '{boardId}' not found"));
+            }
+
+            if (boardStatus.State != TriggerFeatureState.Connected)
+            {
+                return Results.BadRequest(new ErrorResponse(false,
+                    $"Board not connected (state: {boardStatus.State})"));
+            }
+
+            try
+            {
+                var success = service.ManualControl(boardId, channel, request.On);
+                if (success)
+                {
+                    return Results.Ok(new SuccessResponse(true,
+                        $"Relay {boardId}/{channel} set to {(request.On ? "ON" : "OFF")}"));
+                }
+                else
+                {
+                    return Results.Problem(
+                        detail: "Failed to control relay",
+                        statusCode: 500,
+                        title: "Relay control failed");
+                }
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(false, ex.Message));
+            }
+        })
+        .WithName("TestBoardRelayQuery")
+        .WithDescription("Manually control a relay for testing (query params - use for board IDs with slashes)");
+
+        // POST /api/triggers/boards/{boardId}/{channel}/test - Manual relay test (path params)
+        // For boards without slashes in ID (FTDI, HID) - backward compatible
         group.MapPost("/boards/{boardId}/{channel:int}/test", (
             string boardId,
             int channel,
@@ -382,7 +433,7 @@ public static class TriggersEndpoint
             }
         })
         .WithName("TestBoardRelay")
-        .WithDescription("Manually control a relay for testing on a specific board");
+        .WithDescription("Manually control a relay for testing on a specific board (path params)");
 
         // ============================================
         // Legacy Endpoints (for backwards compatibility)

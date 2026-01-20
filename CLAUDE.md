@@ -354,6 +354,7 @@ The trigger system supports USB relay boards for automatic amplifier power contr
 | ---- | ------- | ---------------- | ----------------- |
 | **USB HID** | `0x16C0:0x05DF` | DCT Tech, ucreatefun | Auto-detected from product name (e.g., "USBRelay8") |
 | **FTDI** | `0x0403:0x6001` | Denkovi DAE0006K | Manual configuration required |
+| **Modbus/CH340** | `0x1A86:0x7523` | Sainsmart 16-channel | Manual configuration required |
 
 ### Board Identification
 
@@ -361,6 +362,7 @@ Boards are identified in priority order:
 
 1. **Serial Number** (preferred) - Stable across reboots and USB port changes
 2. **USB Port Path** (fallback) - For boards without unique serial numbers, format: `USB:1-2.3`
+3. **Serial Port** (Modbus boards) - Format: `MODBUS:/dev/ttyUSB0`
 
 ### HID Protocol Details
 
@@ -376,6 +378,18 @@ Boards are identified in priority order:
 - State written as single byte bitmask (bit 0 = channel 1, etc.)
 - Requires `libftdi1` library
 
+### Modbus/CH340 Protocol Details
+
+- Uses Modbus ASCII protocol over serial (9600 baud, 8N1)
+- USB-to-serial chip: CH340/CH341 (appears as `/dev/ttyUSB*` on Linux)
+- Device address: 0xFE (254)
+- Function code 0x05: Write single coil
+- Relay addresses: 0x00-0x0F for channels 1-16
+- ON value: 0xFF00, OFF value: 0x0000
+- Command format: `:FE05XXXXYYYYCC\r\n` where CC is LRC checksum
+- Board echoes commands back as acknowledgment (no separate response)
+- Requires `dialout` group membership for serial port access
+
 ### Key Implementation Files
 
 | File | Purpose |
@@ -383,6 +397,7 @@ Boards are identified in priority order:
 | `src/MultiRoomAudio/Relay/IRelayBoard.cs` | Common interface for all relay board types |
 | `src/MultiRoomAudio/Relay/HidRelayBoard.cs` | USB HID relay implementation using HidApi.Net |
 | `src/MultiRoomAudio/Relay/FtdiRelayBoard.cs` | FTDI relay implementation using libftdi1 |
+| `src/MultiRoomAudio/Relay/ModbusRelayBoard.cs` | Modbus ASCII relay implementation using System.IO.Ports |
 | `src/MultiRoomAudio/Relay/MockRelayBoard.cs` | Mock implementation for testing |
 | `src/MultiRoomAudio/Services/TriggerService.cs` | Multi-board management, player↔channel mapping |
 | `src/MultiRoomAudio/Models/TriggerModels.cs` | Data models, enums, request/response types |

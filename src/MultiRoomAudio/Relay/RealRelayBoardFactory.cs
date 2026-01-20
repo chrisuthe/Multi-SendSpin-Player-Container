@@ -3,7 +3,7 @@ using MultiRoomAudio.Models;
 namespace MultiRoomAudio.Relay;
 
 /// <summary>
-/// Factory for creating real relay board instances (FTDI and HID).
+/// Factory for creating real relay board instances (FTDI, HID, and Modbus).
 /// </summary>
 public class RealRelayBoardFactory : IRelayBoardFactory
 {
@@ -25,8 +25,21 @@ public class RealRelayBoardFactory : IRelayBoardFactory
         {
             RelayBoardType.UsbHid => new HidRelayBoard(_loggerFactory.CreateLogger<HidRelayBoard>()),
             RelayBoardType.Ftdi => new FtdiRelayBoard(_loggerFactory.CreateLogger<FtdiRelayBoard>()),
+            RelayBoardType.Modbus => CreateModbusBoard(boardId),
             _ => throw new ArgumentException($"Unsupported board type: {boardType}", nameof(boardType))
         };
+    }
+
+    /// <summary>
+    /// Create a Modbus relay board, extracting channel count from board ID if specified.
+    /// </summary>
+    private IRelayBoard CreateModbusBoard(string boardId)
+    {
+        // Default to 16 channels for Modbus boards (most common is Sainsmart 16-channel)
+        // User can override in board settings after creation
+        int channelCount = 16;
+
+        return new ModbusRelayBoard(_loggerFactory.CreateLogger<ModbusRelayBoard>(), channelCount);
     }
 
     /// <inheritdoc />
@@ -36,6 +49,7 @@ public class RealRelayBoardFactory : IRelayBoardFactory
         {
             RelayBoardType.UsbHid => true, // HID is always available via HidSharp
             RelayBoardType.Ftdi => FtdiRelayBoard.IsLibraryAvailable(),
+            RelayBoardType.Modbus => true, // Serial ports are always available via System.IO.Ports
             RelayBoardType.Mock => false, // Real factory doesn't create mock boards
             _ => false
         };

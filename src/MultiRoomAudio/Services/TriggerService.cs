@@ -283,7 +283,12 @@ public class TriggerService : IHostedService, IAsyncDisposable
         // Infer board type from ID if not specified
         if (boardType == RelayBoardType.Unknown)
         {
-            boardType = boardId.StartsWith("HID:") ? RelayBoardType.UsbHid : RelayBoardType.Ftdi;
+            if (boardId.StartsWith("HID:", StringComparison.OrdinalIgnoreCase))
+                boardType = RelayBoardType.UsbHid;
+            else if (boardId.StartsWith("MODBUS:", StringComparison.OrdinalIgnoreCase))
+                boardType = RelayBoardType.Modbus;
+            else
+                boardType = RelayBoardType.Ftdi;
         }
 
         lock (_configLock)
@@ -692,7 +697,12 @@ public class TriggerService : IHostedService, IAsyncDisposable
             var boardType = boardConfig.BoardType;
             if (boardType == RelayBoardType.Unknown)
             {
-                boardType = boardId.StartsWith("HID:") ? RelayBoardType.UsbHid : RelayBoardType.Ftdi;
+                if (boardId.StartsWith("HID:", StringComparison.OrdinalIgnoreCase))
+                    boardType = RelayBoardType.UsbHid;
+                else if (boardId.StartsWith("MODBUS:", StringComparison.OrdinalIgnoreCase))
+                    boardType = RelayBoardType.Modbus;
+                else
+                    boardType = RelayBoardType.Ftdi;
             }
 
             // Check if the factory can create this board type
@@ -776,14 +786,16 @@ public class TriggerService : IHostedService, IAsyncDisposable
 
     /// <summary>
     /// Extract the serial number from a board ID.
-    /// Handles HID:serial and USB:path formats.
+    /// Handles HID:serial, USB:path, and MODBUS:port formats.
     /// </summary>
     private static string? GetSerialFromBoardId(string boardId)
     {
-        if (boardId.StartsWith("HID:"))
+        if (boardId.StartsWith("HID:", StringComparison.OrdinalIgnoreCase))
             return boardId.Substring(4);
-        if (boardId.StartsWith("USB:"))
+        if (boardId.StartsWith("USB:", StringComparison.OrdinalIgnoreCase))
             return null; // Port-based, no serial
+        if (boardId.StartsWith("MODBUS:", StringComparison.OrdinalIgnoreCase))
+            return boardId; // Modbus uses the full ID including port path
         return boardId; // Assume the ID is the serial itself (FTDI)
     }
 
