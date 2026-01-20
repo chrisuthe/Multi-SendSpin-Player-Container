@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using MultiRoomAudio.Exceptions;
 
 namespace MultiRoomAudio.Services;
 
@@ -48,7 +49,7 @@ public class ToneGeneratorService
         if (!await _playbackLock.WaitAsync(0, ct))
         {
             _logger.LogDebug("Test tone already playing, skipping request");
-            throw new InvalidOperationException("A test tone is already playing");
+            throw new OperationInProgressException("Test tone playback");
         }
 
         try
@@ -131,7 +132,7 @@ public class ToneGeneratorService
         if (!await _playbackLock.WaitAsync(0, ct))
         {
             _logger.LogDebug("Test tone already playing, skipping request");
-            throw new InvalidOperationException("A test tone is already playing");
+            throw new OperationInProgressException("Test tone playback");
         }
 
         try

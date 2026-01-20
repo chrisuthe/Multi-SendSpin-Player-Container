@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using MultiRoomAudio.Audio;
+using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Hubs;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Utilities;
@@ -728,7 +729,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             if (!_players.TryAdd(request.Name, context))
             {
                 await HandleRegistrationFailureAsync(request.Name, context, request.Persist);
-                throw new InvalidOperationException($"Player '{request.Name}' already exists");
+                throw new EntityAlreadyExistsException("Player", request.Name);
             }
 
             // Phase 6: Initialize and start connection
@@ -1443,7 +1444,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             // Check if new name already exists
             if (_players.ContainsKey(newName))
             {
-                throw new InvalidOperationException($"A player named '{newName}' already exists");
+                throw new EntityAlreadyExistsException("Player", newName);
             }
 
             // Get the player context
@@ -2220,7 +2221,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             _logger.LogInformation("Player '{Name}' reconnected successfully after {Attempts} attempt(s)",
                 name, state.RetryCount);
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
+        catch (EntityAlreadyExistsException)
         {
             // Player was created by another path, remove from queue
             _pendingReconnections.TryRemove(name, out _);

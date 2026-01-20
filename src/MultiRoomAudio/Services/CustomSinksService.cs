@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Utilities;
 using YamlDotNet.Serialization;
@@ -145,7 +146,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         // Check if sink name already exists in PulseAudio before we try to add locally
         if (await _moduleRunner.SinkExistsAsync(request.Name, cancellationToken))
         {
-            throw new InvalidOperationException($"A PulseAudio sink with name '{request.Name}' already exists.");
+            throw new EntityAlreadyExistsException("PulseAudio sink", request.Name);
         }
 
         var config = new CustomSinkConfiguration
@@ -164,7 +165,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         // TryAdd is atomic - if another thread added the same name, we fail gracefully
         if (!_sinks.TryAdd(request.Name, context))
         {
-            throw new InvalidOperationException($"Sink '{request.Name}' already exists.");
+            throw new EntityAlreadyExistsException("Sink", request.Name);
         }
 
         // Use try-finally to ensure cleanup on any failure path
@@ -237,7 +238,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         // Check if sink name already exists in PulseAudio before we try to add locally
         if (await _moduleRunner.SinkExistsAsync(request.Name, cancellationToken))
         {
-            throw new InvalidOperationException($"A PulseAudio sink with name '{request.Name}' already exists.");
+            throw new EntityAlreadyExistsException("PulseAudio sink", request.Name);
         }
 
         // Build channel maps
@@ -263,7 +264,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         // TryAdd is atomic - if another thread added the same name, we fail gracefully
         if (!_sinks.TryAdd(request.Name, context))
         {
-            throw new InvalidOperationException($"Sink '{request.Name}' already exists.");
+            throw new EntityAlreadyExistsException("Sink", request.Name);
         }
 
         // Use try-finally to ensure cleanup on any failure path
@@ -333,7 +334,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
         if (_sinks.ContainsKey(detected.SinkName))
         {
-            throw new InvalidOperationException($"Sink '{detected.SinkName}' already exists in app management.");
+            throw new EntityAlreadyExistsException("Sink", detected.SinkName);
         }
 
         CustomSinkConfiguration config;

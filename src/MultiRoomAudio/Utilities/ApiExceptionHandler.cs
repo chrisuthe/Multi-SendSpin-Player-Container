@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Models;
 
 namespace MultiRoomAudio.Utilities;
@@ -27,16 +28,17 @@ public static class ApiExceptionHandler
         {
             return await operation();
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+        catch (EntityAlreadyExistsException ex)
         {
             LogWarning(logger, "conflict", operationName, entityName, ex.Message);
             return Results.Conflict(new ErrorResponse(false, ex.Message));
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("already playing", StringComparison.OrdinalIgnoreCase))
+        catch (OperationInProgressException ex)
         {
+            // Already logged at DEBUG level upstream (e.g., ToneGeneratorService)
             return Results.Conflict(new ErrorResponse(false, ex.Message));
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        catch (ArgumentException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {
             LogWarning(logger, "not found", operationName, entityName, ex.Message);
             return Results.NotFound(new ErrorResponse(false, ex.Message));
@@ -77,16 +79,17 @@ public static class ApiExceptionHandler
         {
             return operation();
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+        catch (EntityAlreadyExistsException ex)
         {
             LogWarning(logger, "conflict", operationName, entityName, ex.Message);
             return Results.Conflict(new ErrorResponse(false, ex.Message));
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("already playing", StringComparison.OrdinalIgnoreCase))
+        catch (OperationInProgressException ex)
         {
+            // Already logged at DEBUG level upstream (e.g., ToneGeneratorService)
             return Results.Conflict(new ErrorResponse(false, ex.Message));
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        catch (ArgumentException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {
             LogWarning(logger, "not found", operationName, entityName, ex.Message);
             return Results.NotFound(new ErrorResponse(false, ex.Message));
