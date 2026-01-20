@@ -103,7 +103,30 @@ builder.Services.AddSingleton<OnboardingService>();
 
 // Add PulseAudio utilities (no startup dependency)
 // Use mock implementations when MOCK_HARDWARE is enabled
+// Check both environment variable (Docker) and HAOS options file (add-on UI toggle)
 var isMockHardware = Environment.GetEnvironmentVariable("MOCK_HARDWARE")?.ToLower() == "true";
+if (!isMockHardware)
+{
+    // Check HAOS options.json for mock_hardware toggle
+    const string haosOptionsFile = "/data/options.json";
+    if (File.Exists(haosOptionsFile))
+    {
+        try
+        {
+            var json = File.ReadAllText(haosOptionsFile);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("mock_hardware", out var mockProp) &&
+                mockProp.ValueKind == System.Text.Json.JsonValueKind.True)
+            {
+                isMockHardware = true;
+            }
+        }
+        catch
+        {
+            // Ignore parsing errors - will use default (false)
+        }
+    }
+}
 if (isMockHardware)
 {
     // Mock hardware configuration service - loads from mock_hardware.yaml if present
