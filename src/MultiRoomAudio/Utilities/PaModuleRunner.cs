@@ -71,9 +71,10 @@ public partial class PaModuleRunner : IPaModuleRunner
 
     /// <summary>
     /// Sanitizes a description string for use in device.description property.
-    /// Since we use Process.ArgumentList (not shell), we don't need shell escaping.
-    /// We only need to remove characters that could cause issues in PulseAudio property values.
-    /// The description is wrapped in double quotes for pactl, so we must remove double quotes.
+    /// PulseAudio has a known bug where property values with spaces fail to parse
+    /// (see https://gitlab.freedesktop.org/pulseaudio/pulseaudio/-/issues/615).
+    /// We replace spaces with underscores as the standard workaround.
+    /// The original description with spaces is preserved in YAML/UI.
     /// </summary>
     private static string SanitizeDescription(string description)
     {
@@ -81,13 +82,16 @@ public partial class PaModuleRunner : IPaModuleRunner
             return description;
 
         // Sanitize for PulseAudio property values
-        // Since we use ArgumentList, .NET handles process argument escaping - no shell escaping needed
-        // We only remove characters that could break PulseAudio's property parsing
-        // Double quotes must be removed because the description is wrapped in double quotes for pactl
+        // PulseAudio has a bug where spaces in property values cause "Failed to parse proplist"
+        // See: https://gitlab.freedesktop.org/pulseaudio/pulseaudio/-/issues/615
+        // Replace spaces with underscores as the workaround
         return description
             .Replace("\\", "")      // Remove backslashes (escape character)
-            .Replace("\"", "")      // Remove double quotes (description is wrapped in double quotes)
-            .Replace("\n", " ")     // Replace newlines with spaces
+            .Replace("\"", "")      // Remove double quotes
+            .Replace("'", "")       // Remove single quotes
+            .Replace(" ", "_")      // Replace spaces with underscores (PulseAudio bug workaround)
+            .Replace("&", "_and_")  // Replace & with _and_ for readability
+            .Replace("\n", "_")     // Replace newlines with underscores
             .Replace("\r", "")      // Remove carriage returns
             .Replace("\0", "")      // Remove null chars
             .Trim();
@@ -142,9 +146,8 @@ public partial class PaModuleRunner : IPaModuleRunner
         if (!string.IsNullOrWhiteSpace(description))
         {
             var safeDesc = SanitizeDescription(description);
-            // Use double quotes around the description value - PulseAudio needs this for values with spaces
-            // The entire argument is one string, so ArgumentList passes it intact to pactl
-            args.Add($"sink_properties=device.description=\"{safeDesc}\"");
+            // No quotes needed - spaces are replaced with underscores due to PulseAudio bug
+            args.Add($"sink_properties=device.description={safeDesc}");
         }
 
         _logger.LogInformation("Loading combine-sink '{SinkName}' with {SlaveCount} slaves. Args: {Args}",
@@ -240,9 +243,8 @@ public partial class PaModuleRunner : IPaModuleRunner
         if (!string.IsNullOrWhiteSpace(description))
         {
             var safeDesc = SanitizeDescription(description);
-            // Use double quotes around the description value - PulseAudio needs this for values with spaces
-            // The entire argument is one string, so ArgumentList passes it intact to pactl
-            args.Add($"sink_properties=device.description=\"{safeDesc}\"");
+            // No quotes needed - spaces are replaced with underscores due to PulseAudio bug
+            args.Add($"sink_properties=device.description={safeDesc}");
         }
 
         _logger.LogInformation("Loading remap-sink '{SinkName}' from master '{Master}' with {Channels} channels. Args: {Args}",
