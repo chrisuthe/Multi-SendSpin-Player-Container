@@ -173,11 +173,14 @@ services:
     devices:
       # For USB HID relay boards (find your hidraw device with 'ls /dev/hidraw*')
       - /dev/hidraw0:/dev/hidraw0
+      - /dev/hidraw1:/dev/hidraw1
       # For specific USB device (find path with 'lsusb')
       - /dev/bus/usb/001/002:/dev/bus/usb/001/002
       # For CH340/Modbus relay boards
       - /dev/ttyUSB0:/dev/ttyUSB0
 ```
+
+> **Important:** For HID relay boards, keep the same device number on both sides of the mapping (e.g., `/dev/hidraw0:/dev/hidraw0`, not `/dev/hidraw0:/dev/hidraw3`). The hidraw numbers may change after a host reboot—check `ls /dev/hidraw*` and update your configuration if needed.
 
 ### Setup (Home Assistant OS)
 

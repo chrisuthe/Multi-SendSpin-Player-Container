@@ -47,12 +47,15 @@ services:
       - /dev/bus/usb:/dev/bus/usb
 ```
 
-Or pass through specific hidraw device:
+Or pass through specific hidraw devices:
 
 ```yaml
     devices:
       - /dev/hidraw0:/dev/hidraw0
+      - /dev/hidraw1:/dev/hidraw1
 ```
+
+> **Important:** Keep the same device number on both sides of the mapping (e.g., `/dev/hidraw0:/dev/hidraw0`, not `/dev/hidraw0:/dev/hidraw3`). The hidraw numbers may change after a host reboot—check `ls /dev/hidraw*` and update your compose.yml if needed.
 
 ### FTDI Boards
 
