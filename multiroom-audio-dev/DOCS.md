@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-95dac41
+## Development Build: sha-91f61a8
 
 **Current Dev Build Changes** (recent)
 
+- Update tested products and configuration details
 - Merge pull request #93 from scyto/dev
 - small edit
 - Merge pull request #92 from scyto/dev
@@ -14,7 +15,6 @@
 - Fix HID relay board hash stability across reboots
 - Add helpful error messages for inaccessible HID relay boards
 - Merge branch 'dev' into feature/hid-multi-board-support
-- Merge pull request #87 from scyto/dev
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
