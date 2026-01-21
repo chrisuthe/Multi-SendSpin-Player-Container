@@ -54,6 +54,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         _serializer = new SerializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
+            .WithQuotingNecessaryStrings()
             .Build();
     }
 
