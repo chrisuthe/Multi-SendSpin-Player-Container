@@ -12,9 +12,9 @@ Automatically power on/off amplifiers when audio playback starts and stops using
 
 | Type | VID:PID | Tested Products | Channel Detection |
 |------|---------|-----------------|-------------------|
-| **USB HID** | `0x16C0:0x05DF` | [ELEGOO 4-Channel USB Relay](https://www.amazon.com/dp/B07C3MQPB1) | Auto-detected from product name |
-| **FTDI** | `0x0403:0x6001` | [Denkovi DAE0006K 8-Channel](https://denkovi.com/usb-8-relay-board-dae0006k) | Manual configuration |
-| **Modbus/CH340** | `0x1A86:0x7523` | [Sainsmart 16-Channel](https://www.amazon.com/dp/B0793MZH2B) | Manual configuration |
+| **USB HID** | `0x16C0:0x05DF` | [NOYITO 4-Channel USB Relay](https://www.amazon.com/dp/B07C3MQPB1) | Auto-detected # of channels from product name |
+| **FTDI** | `0x0403:0x6001` | [Denkovi DAE0006K 8-Channel](https://denkovi.com/usb-eight-channel-relay-board-for-automation) | Manual # of channels configuration |
+| **Modbus/CH340** | `0x1A86:0x7523` | [Sainsmart 16-Channel](https://www.amazon.com/dp/B0793MZH2B) | Manual # of channels configuration |
 
 ### USB HID Relay Boards
 
