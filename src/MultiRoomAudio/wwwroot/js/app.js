@@ -441,7 +441,7 @@ async function refreshDevices() {
 }
 
 // Open the modal in Add mode
-function openAddPlayerModal() {
+async function openAddPlayerModal() {
     // Reset form
     document.getElementById('playerForm').reset();
     document.getElementById('editingPlayerName').value = '';
@@ -453,8 +453,12 @@ function openAddPlayerModal() {
     document.getElementById('playerModalSubmitIcon').className = 'fas fa-plus me-1';
     document.getElementById('playerModalSubmitText').textContent = 'Add Player';
 
-    // Refresh devices and show modal
-    refreshDevices();
+    // Refresh devices and formats
+    await refreshDevices();
+    if (advancedFormatsEnabled) {
+        await refreshFormats();
+    }
+
     const modal = new bootstrap.Modal(document.getElementById('playerModal'));
     modal.show();
 }
@@ -605,16 +609,26 @@ async function savePlayer() {
             }
         } else {
             // Add mode: Create new player
+            const payload = {
+                name,
+                device: device || null,
+                serverUrl: serverUrl || null,
+                volume,
+                persist: true
+            };
+
+            // Include advertised format if advanced formats enabled
+            if (advancedFormatsEnabled) {
+                const advertisedFormat = document.getElementById('advertisedFormat').value;
+                if (advertisedFormat && advertisedFormat !== 'all') {
+                    payload.advertisedFormat = advertisedFormat;
+                }
+            }
+
             const response = await fetch('./api/players', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name,
-                    device: device || null,
-                    serverUrl: serverUrl || null,
-                    volume,
-                    persist: true
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
