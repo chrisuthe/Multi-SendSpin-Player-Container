@@ -625,7 +625,7 @@ async function savePlayer() {
             // Include advertised format if advanced formats enabled
             if (advancedFormatsEnabled) {
                 const advertisedFormat = document.getElementById('advertisedFormat').value;
-                if (advertisedFormat && advertisedFormat !== 'all') {
+                if (advertisedFormat) {
                     payload.advertisedFormat = advertisedFormat;
                 }
             }
