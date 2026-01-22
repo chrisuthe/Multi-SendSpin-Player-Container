@@ -187,6 +187,11 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         {
             throw new ArgumentException("Audio format must have at least one channel.", nameof(buffer));
         }
+
+        _logger?.LogInformation(
+            "BufferedAudioSampleSource initialized: channels={Channels}, sampleRate={SampleRate}, " +
+            "interpolation=3-point weighted with 2-point fallback",
+            _channels, _sampleRate);
     }
 
     /// <inheritdoc/>
@@ -293,7 +298,9 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     }
 
     /// <summary>
-    /// Applies sync correction with linear interpolation to minimize audible artifacts.
+    /// Applies sync correction with interpolation to minimize audible artifacts.
+    /// Uses 3-point weighted interpolation when sufficient lookahead is available in the input buffer,
+    /// falling back to 2-point linear interpolation otherwise.
     /// </summary>
     /// <returns>Tuple of (output sample count, samples dropped, samples inserted).</returns>
     private (int OutputCount, int SamplesDropped, int SamplesInserted) ApplyCorrectionWithInterpolation(
@@ -341,18 +348,33 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
 
                 if (remainingInput >= _channels * 2)
                 {
-                    // Read both frames, output interpolated blend
                     var frameAStart = inputPos;
                     var frameBStart = inputPos + _channels;
                     var outputSpan = output.Slice(outputPos, _channels);
 
-                    // Linear interpolation: (A + B) / 2
-                    for (int i = 0; i < _channels; i++)
+                    // Use 3-point weighted interpolation if we have lookahead available
+                    if (remainingInput >= _channels * 3)
                     {
-                        outputSpan[i] = (input[frameAStart + i] + input[frameBStart + i]) * 0.5f;
+                        // 3-point weighted: A=0.25, B=0.5, C=0.25 (Gaussian-like kernel)
+                        // Smoother blend that considers the frame after the drop point
+                        var frameCStart = inputPos + _channels * 2;
+                        for (int i = 0; i < _channels; i++)
+                        {
+                            outputSpan[i] = input[frameAStart + i] * 0.25f
+                                          + input[frameBStart + i] * 0.5f
+                                          + input[frameCStart + i] * 0.25f;
+                        }
+                    }
+                    else
+                    {
+                        // Fallback: 2-point linear interpolation (A + B) / 2
+                        for (int i = 0; i < _channels; i++)
+                        {
+                            outputSpan[i] = (input[frameAStart + i] + input[frameBStart + i]) * 0.5f;
+                        }
                     }
 
-                    // Consume both input frames
+                    // Consume both input frames (A and B)
                     inputPos += _channels * 2;
 
                     // Save as last output frame
@@ -373,10 +395,24 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
                 {
                     var outputSpan = output.Slice(outputPos, _channels);
 
-                    // Interpolate with next input frame if available
-                    if (remainingInput >= _channels)
+                    // Use true lookahead if we have two frames available
+                    if (remainingInput >= _channels * 2)
                     {
-                        // Linear interpolation: (last + next) / 2
+                        // Interpolate between current and next frame (true lookahead)
+                        // Better than using stale _lastOutputFrame from previous callback
+                        var currentStart = inputPos;
+                        var nextStart = inputPos + _channels;
+                        for (int i = 0; i < _channels; i++)
+                        {
+                            outputSpan[i] = (input[currentStart + i] + input[nextStart + i]) * 0.5f;
+                        }
+
+                        // Save interpolated frame
+                        outputSpan.CopyTo(_lastOutputFrame);
+                    }
+                    else if (remainingInput >= _channels)
+                    {
+                        // Fallback: use last output frame + current input
                         for (int i = 0; i < _channels; i++)
                         {
                             outputSpan[i] = (_lastOutputFrame![i] + input[inputPos + i]) * 0.5f;

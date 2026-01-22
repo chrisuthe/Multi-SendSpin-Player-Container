@@ -171,48 +171,48 @@ But the SDK calculates sync error purely from sample counts vs wall clock time.
 
 ---
 
-## Step 4: Sync Correction (Three Tiers)
+## Step 4: Sync Correction
 
 **Purpose**: Correct timing errors when detected.
 
-### Tier 1: Deadband (No Correction)
+`BufferedAudioSampleSource` reads raw samples from the SDK buffer and applies sync correction via frame drop/insert with interpolation.
 
-If sync error is within deadband, do nothing:
+### Deadband (No Correction)
+
+If sync error is within ±5ms, no correction is applied:
 ```csharp
-EntryDeadbandMicroseconds = 5_000,  // 5ms to enter correction
-ExitDeadbandMicroseconds = 2_000,   // 2ms to exit correction
+CorrectionThresholdMicroseconds = 5_000,  // 5ms deadband
 ```
 
-### Tier 2: Rate Adjustment (Smooth Correction)
+Small errors are ignored because human ears can't perceive timing differences under 5ms, and constant micro-corrections would cause more artifacts than they fix.
 
-For errors between deadband and threshold:
+### Frame Drop/Insert (Active Correction)
+
+When sync error exceeds the deadband, `BufferedAudioSampleSource` applies frame-level corrections:
+
+**Frame DROP** (when behind schedule - positive sync error):
+- Consumes 2 input frames, outputs 1 interpolated frame
+- Uses **3-point weighted interpolation** when 3+ frames available: `0.25*A + 0.5*B + 0.25*C`
+- Falls back to **2-point linear** at buffer edge: `(A + B) / 2`
+
+**Frame INSERT** (when ahead of schedule - negative sync error):
+- Outputs 1 interpolated frame without consuming input
+- Uses **true lookahead**: `(current + next) / 2` when 2+ frames available
+- Falls back to `(lastOutput + current) / 2` at buffer edge
+
+### Correction Rate
+
+The frequency of corrections scales with error magnitude:
 ```csharp
-MaxSpeedCorrection = 0.04,  // +/-4% speed adjustment
+// Formula: interval = 500_000 / absErrorMicroseconds
+// 10ms error → correct every 50 frames
+// 50ms error → correct every 10 frames (more aggressive)
+// Clamped to range [10, 500] frames
 ```
 
-The SDK's TimedAudioBuffer handles rate adjustment internally:
-- Rate 1.04 = play 4% faster (catch up)
-- Rate 0.96 = play 4% slower (slow down)
+### Why Interpolation?
 
-### Tier 3: Frame Drop/Insert (Aggressive Correction)
-
-For very large errors (>200ms in our config):
-```csharp
-ResamplingThresholdMicroseconds = 200_000,  // 200ms
-```
-
-**We set a high threshold** to prefer smooth rate adjustment. The SDK would:
-- Drop frames to catch up
-- Insert silence/repeat frames to slow down
-
-But this causes clicks, so we rely primarily on rate adjustment.
-
-### Re-anchoring
-
-For catastrophic drift (>500ms), reset and start fresh:
-```csharp
-ReanchorThresholdMicroseconds = 500_000,  // 500ms
-```
+Abruptly dropping or duplicating a frame causes audible clicks. The 3-point weighted interpolation uses a Gaussian-like kernel that considers the frame after the drop point, producing smoother blends than simple averaging.
 
 ---
 
@@ -305,23 +305,25 @@ This shifts the effective playback schedule:
 |   +---------------------------------------------------------------------+  |
 |   |  SendSpin.SDK                                                        |  |
 |   |                                                                      |  |
-|   |  +--------------+   +-------------------+   +------------------+    |  |
-|   |  | ClockSync    |   | TimedAudioBuffer  |   | Sync Correction  |    |  |
-|   |  |              |   |                   |   |                  |    |  |
-|   |  | Offset: Xms  |<--| Stores audio with |-->| Tier 1: Deadband |    |  |
-|   |  | Drift: Yppm  |   | timestamps        |   | Tier 2: Rate Adj |    |  |
-|   |  | Converged: Y |   | Buffer: 4000ms    |   | Tier 3: Drop/Ins |    |  |
-|   |  +--------------+   +-------------------+   +--------+---------+    |  |
-|   |                                                       |              |  |
-|   +-------------------------------------------------------+--------------+  |
-|                                                           |                 |
-|                                                           | Sync-adjusted   |
-|                                                           | samples         |
-|                                                           v                 |
+|   |  +--------------+   +-------------------+                            |  |
+|   |  | ClockSync    |   | TimedAudioBuffer  |                            |  |
+|   |  |              |   |                   |                            |  |
+|   |  | Offset: Xms  |<--| Stores audio with |                            |  |
+|   |  | Drift: Yppm  |   | timestamps        |                            |  |
+|   |  | Converged: Y |   | Sync error: Zms   |                            |  |
+|   |  +--------------+   +-------------------+                            |  |
+|   |                             |                                        |  |
+|   +-----------------------------+----------------------------------------+  |
+|                                 |                                           |
+|                                 | Raw samples + sync error measurement      |
+|                                 v                                           |
 |   +---------------------------------------------------------------------+  |
 |   |  BufferedAudioSampleSource (MultiRoomAudio)                          |  |
 |   |                                                                      |  |
-|   |  Direct passthrough - bridges SDK buffer to audio player            |  |
+|   |  - Reads raw samples via ReadRaw()                                   |  |
+|   |  - Checks sync error, applies correction if outside 5ms deadband    |  |
+|   |  - Frame drop/insert with 3-point weighted interpolation            |  |
+|   |  - Notifies SDK of corrections for accurate tracking                |  |
 |   +---------------------------------------------------------------------+  |
 |        |                                                                    |
 |        | Float32 PCM at source rate                                         |

@@ -48,8 +48,8 @@ Key features:
 |                    BufferedAudioSampleSource                             |
 |                                                                          |
 |  - Bridges TimedAudioBuffer to IAudioSampleSource                        |
-|  - Provides current time for timed sample release                        |
-|  - Direct passthrough (no resampling)                                    |
+|  - Reads raw samples, applies external sync correction                   |
+|  - Frame drop/insert with 3-point weighted interpolation                 |
 +-------------------------------------+------------------------------------+
                                       |
                                       | PCM Float32 samples (source rate)
@@ -94,22 +94,31 @@ The SDK handles all network communication and synchronization:
 | `ClockSynchronization` | NTP-like clock sync between client and server |
 | `TimedAudioBuffer` | Buffer with timestamp-aware sample management and sync correction |
 
-**Sync Correction:** The SDK's `TimedAudioBuffer` handles playback rate adjustment internally via the `TargetPlaybackRateChanged` event, using tiered correction:
-- Tier 1: Deadband (no correction for small errors)
-- Tier 2: Rate adjustment (+/-4% speed correction)
-- Tier 3: Frame drop/insert (disabled in our config)
+**Sync Correction:** Handled externally by `BufferedAudioSampleSource` using frame drop/insert with interpolation. The SDK provides sync error measurement via `SmoothedSyncErrorMicroseconds`.
 
 ### 2. BufferedAudioSampleSource
 
-A simple bridge that connects the SDK's `ITimedAudioBuffer` to the audio player's `IAudioSampleSource` interface.
+Bridges the SDK's `ITimedAudioBuffer` to the audio player's `IAudioSampleSource` interface, handling external sync correction with interpolation.
 
 ```csharp
 public sealed class BufferedAudioSampleSource : IAudioSampleSource
 {
-    // Provides current time to the timed buffer for synchronized sample release
-    // Direct passthrough - no processing or resampling
+    // Reads raw samples from SDK buffer (ReadRaw - no SDK correction)
+    // Applies player-controlled sync correction via frame drop/insert
+    // Uses 3-point weighted interpolation to minimize audible artifacts
 }
 ```
+
+**Sync Correction Algorithm:**
+
+| Operation | Condition | Algorithm |
+|-----------|-----------|-----------|
+| Frame DROP | 3+ frames available | `0.25*A + 0.5*B + 0.25*C` (Gaussian kernel) |
+| Frame DROP | 2 frames available | `(A + B) / 2` (linear fallback) |
+| Frame INSERT | 2+ frames available | `(current + next) / 2` (true lookahead) |
+| Frame INSERT | 1 frame available | `(lastOutput + current) / 2` (fallback) |
+
+The 3-point weighted interpolation considers the frame after the drop point for smoother blends. Corrections are rate-limited based on sync error magnitude (10-500 frames between corrections) and only applied outside a 5ms deadband.
 
 ### 3. PulseAudioPlayer
 

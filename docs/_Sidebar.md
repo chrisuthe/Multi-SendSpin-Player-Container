@@ -13,6 +13,7 @@
 **Development**
 * [Architecture](ARCHITECTURE)
 * [Audio Pipeline](AUDIO_PIPELINE)
+* [Timing Pipeline](TIMING_PIPELINE)
 * [Code Structure](CODE_STRUCTURE)
 
 **Links**
