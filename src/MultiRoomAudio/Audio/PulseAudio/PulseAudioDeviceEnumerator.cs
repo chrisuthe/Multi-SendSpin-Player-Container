@@ -176,11 +176,19 @@ public static partial class PulseAudioDeviceEnumerator
         var sampleSpecMatch = SampleSpecRegex().Match(block);
         var sampleRate = 48000;
         var channels = 2;
+        string? sampleFormat = null;
 
         if (sampleSpecMatch.Success)
         {
             // Format: "s16le 2ch 48000Hz" or "float32le 2ch 44100Hz"
             var specParts = sampleSpecMatch.Groups[1].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            // First part is always the sample format (e.g., "s16le", "s32le", "float32le")
+            if (specParts.Length > 0)
+            {
+                sampleFormat = specParts[0];
+            }
+
             foreach (var part in specParts)
             {
                 if (part.EndsWith("ch") && int.TryParse(part[..^2], out var ch))
@@ -220,7 +228,8 @@ public static partial class PulseAudioDeviceEnumerator
             DefaultHighLatencyMs: 200, // Reasonable default for PulseAudio
             IsDefault: isDefault,
             Identifiers: identifiers,
-            ChannelMap: channelMap
+            ChannelMap: channelMap,
+            SampleFormat: sampleFormat
         );
     }
 
