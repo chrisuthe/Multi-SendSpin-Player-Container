@@ -68,10 +68,10 @@ public static class PlayersEndpoint
 
                 var formats = new List<AudioFormatOption>
                 {
-                    new("all", "All Formats", "Advertise all supported formats (default)"),
+                    new("flac-48000", "FLAC 48kHz", "CD quality lossless 48kHz (default, works with all MA builds)"),
+                    new("all", "All Formats", "Advertise all supported formats"),
                     new("flac-192000", "FLAC 192kHz", "Hi-res lossless 192kHz"),
                     new("flac-96000", "FLAC 96kHz", "Hi-res lossless 96kHz"),
-                    new("flac-48000", "FLAC 48kHz", "CD quality lossless 48kHz"),
                     new("flac-44100", "FLAC 44.1kHz", "CD quality lossless 44.1kHz"),
                     new("pcm-192000-32", "PCM 192kHz 32-bit", "Hi-res uncompressed 192kHz 32-bit"),
                     new("pcm-96000-32", "PCM 96kHz 32-bit", "Hi-res uncompressed 96kHz 32-bit"),

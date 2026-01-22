@@ -501,8 +501,8 @@ async function openEditPlayerModal(playerName) {
             // Refresh formats first to populate options
             await refreshFormats();
 
-            // Store original format for change detection
-            const originalFormat = player.advertisedFormat || 'all';
+            // Store original format for change detection (default to flac-48000 for compatibility)
+            const originalFormat = player.advertisedFormat || 'flac-48000';
             document.getElementById('playerForm').dataset.originalFormat = originalFormat;
 
             // Set dropdown value AFTER options are populated
@@ -558,13 +558,13 @@ async function savePlayer() {
             // Include advertised format if advanced formats enabled
             if (advancedFormatsEnabled) {
                 const form = document.getElementById('playerForm');
-                const originalFormat = form.dataset.originalFormat || 'all';
-                const currentFormat = document.getElementById('advertisedFormat').value || 'all';
+                const originalFormat = form.dataset.originalFormat || 'flac-48000';
+                const currentFormat = document.getElementById('advertisedFormat').value || 'flac-48000';
 
                 // Only include if changed from original
                 if (currentFormat !== originalFormat) {
-                    // Send empty string for 'all', otherwise send the specific format
-                    updatePayload.advertisedFormat = currentFormat === 'all' ? '' : currentFormat;
+                    // Send the specific format
+                    updatePayload.advertisedFormat = currentFormat;
                 }
             }
 

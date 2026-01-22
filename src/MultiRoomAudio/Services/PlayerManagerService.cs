@@ -2027,9 +2027,14 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// <returns>Filtered list containing only the preferred format, or all formats if preference is invalid.</returns>
     private List<AudioFormat> FilterFormatsByPreference(List<AudioFormat> allFormats, string? advertisedFormat)
     {
-        // If no preference or "all", return all formats
-        if (string.IsNullOrWhiteSpace(advertisedFormat) ||
-            advertisedFormat.Equals("all", StringComparison.OrdinalIgnoreCase))
+        // Default to flac-48000 for maximum compatibility with all MA builds
+        if (string.IsNullOrWhiteSpace(advertisedFormat))
+        {
+            advertisedFormat = "flac-48000";
+        }
+
+        // If explicitly set to "all", return all formats
+        if (advertisedFormat.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
             return allFormats;
         }
