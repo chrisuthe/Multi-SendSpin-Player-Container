@@ -1289,9 +1289,9 @@ function openStatsForNerds(playerName) {
     const modal = new bootstrap.Modal(document.getElementById('statsForNerdsModal'));
     modal.show();
 
-    // Start polling
+    // Start polling - reduced frequency to 2000ms (2 seconds) to minimize impact on audio pipeline
     fetchAndRenderStats();
-    statsInterval = setInterval(fetchAndRenderStats, 500);
+    statsInterval = setInterval(fetchAndRenderStats, 2000);
 
     // Stop polling when modal closes
     document.getElementById('statsForNerdsModal').addEventListener('hidden.bs.modal', () => {
