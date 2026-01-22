@@ -27,12 +27,14 @@ internal static class PlayerStatsMapper
     /// <param name="pipeline">The audio pipeline providing buffer and format stats.</param>
     /// <param name="clockSync">The clock synchronizer providing timing stats.</param>
     /// <param name="player">The audio player providing output latency.</param>
+    /// <param name="device">The audio device for hardware format info (optional).</param>
     /// <returns>Complete stats response for the UI.</returns>
     public static PlayerStatsResponse BuildStats(
         string playerName,
         IAudioPipeline pipeline,
         IClockSynchronizer clockSync,
-        IAudioPlayer player)
+        IAudioPlayer player,
+        AudioDevice? device = null)
     {
         var clockStatus = clockSync.GetStatus();
         var inputFormat = pipeline.CurrentFormat;
@@ -40,7 +42,7 @@ internal static class PlayerStatsMapper
 
         return new PlayerStatsResponse(
             PlayerName: playerName,
-            AudioFormat: BuildAudioFormatStats(inputFormat, outputFormat),
+            AudioFormat: BuildAudioFormatStats(inputFormat, outputFormat, device),
             Sync: BuildSyncStats(pipeline),
             Buffer: BuildBufferStats(pipeline),
             ClockSync: BuildClockSyncStats(clockStatus, player, clockSync),
@@ -51,11 +53,12 @@ internal static class PlayerStatsMapper
     }
 
     /// <summary>
-    /// Builds audio format statistics showing input codec and output format.
+    /// Builds audio format statistics showing input codec, output format, and hardware sink format.
     /// </summary>
     private static AudioFormatStats BuildAudioFormatStats(
         AudioFormat? inputFormat,
-        AudioFormat? outputFormat)
+        AudioFormat? outputFormat,
+        AudioDevice? device)
     {
         return new AudioFormatStats(
             InputFormat: inputFormat != null
@@ -69,7 +72,11 @@ internal static class PlayerStatsMapper
                 : "--",
             OutputSampleRate: outputFormat?.SampleRate ?? 0,
             OutputChannels: outputFormat?.Channels ?? 2,
-            OutputBitDepth: 32  // Always float32 (PulseAudio converts to device format)
+            OutputBitDepth: 32,  // Always float32 (PulseAudio converts to device format)
+            // Hardware sink format from PulseAudio (what the DAC actually receives)
+            HardwareFormat: device?.SampleFormat?.ToUpperInvariant(),
+            HardwareSampleRate: device?.DefaultSampleRate,
+            HardwareBitDepth: device?.BitDepth
         );
     }
 

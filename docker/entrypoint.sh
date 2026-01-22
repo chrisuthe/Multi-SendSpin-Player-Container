@@ -113,6 +113,20 @@ echo ""
 mkdir -p /run/pulse
 chmod 755 /run/pulse
 
+# Apply PulseAudio sample rate/format from environment variables
+# Defaults: 48000Hz, float32le (matches daemon.conf defaults)
+# Can be overridden via PA_SAMPLE_RATE and PA_SAMPLE_FORMAT env vars
+PA_SAMPLE_RATE="${PA_SAMPLE_RATE:-48000}"
+PA_SAMPLE_FORMAT="${PA_SAMPLE_FORMAT:-float32le}"
+
+if [ -f /etc/pulse/daemon.conf ]; then
+    echo "Configuring PulseAudio: ${PA_SAMPLE_FORMAT} @ ${PA_SAMPLE_RATE}Hz"
+    sed -i "s/^default-sample-rate = .*/default-sample-rate = $PA_SAMPLE_RATE/" /etc/pulse/daemon.conf
+    sed -i "s/^default-sample-format = .*/default-sample-format = $PA_SAMPLE_FORMAT/" /etc/pulse/daemon.conf
+else
+    echo "WARNING: /etc/pulse/daemon.conf not found, using PulseAudio defaults"
+fi
+
 # Start PulseAudio in system mode (daemon)
 # Using --disallow-exit to prevent auto-shutdown, --exit-idle-time=-1 to never exit
 # Note: We intentionally allow module loading (no --disallow-module-loading) to load ALSA sinks dynamically
