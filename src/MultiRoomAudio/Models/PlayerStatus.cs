@@ -39,7 +39,8 @@ public record PlayerResponse(
     DeviceCapabilities? DeviceCapabilities = null,
     bool IsPendingReconnection = false,
     int? ReconnectionAttempts = null,
-    DateTime? NextReconnectionAttempt = null
+    DateTime? NextReconnectionAttempt = null,
+    string? AdvertisedFormat = null
 );
 
 /// <summary>

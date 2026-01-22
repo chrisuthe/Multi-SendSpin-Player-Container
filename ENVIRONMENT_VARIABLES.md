@@ -78,6 +78,24 @@ AUDIO_BACKEND=alsa
 AUDIO_BACKEND=pulse
 ```
 
+### ENABLE_ADVANCED_FORMATS
+
+Enable per-player audio format selection feature (dev-only).
+
+- **Type:** Boolean
+- **Default:** `false`
+- **Valid Values:** `true`, `false`, `1`, `0`, `yes`, `no`
+- **Description:** Enables advanced audio format selection UI and API endpoints. When enabled, allows per-player format filtering (e.g., advertise only "PCM 192kHz 32-bit" instead of all formats). This is a development/testing feature not recommended for production use.
+
+**Examples:**
+```bash
+# Enable advanced formats feature
+ENABLE_ADVANCED_FORMATS=true
+
+# Disable (default)
+ENABLE_ADVANCED_FORMATS=false
+```
+
 ### CONFIG_PATH
 
 Configuration directory path.

@@ -16,6 +16,7 @@ public class EnvironmentService
     private readonly ILogger<EnvironmentService> _logger;
     private readonly bool _isHaos;
     private readonly bool _isMockHardware;
+    private readonly bool _enableAdvancedFormats;
     private readonly string _configPath;
     private readonly string _logPath;
     private readonly Dictionary<string, JsonElement>? _haosOptions;
@@ -26,6 +27,7 @@ public class EnvironmentService
     private const string HaosOptionsFile = "/data/options.json";
     private const string HaosSupervisorTokenEnv = "SUPERVISOR_TOKEN";
     private const string MockHardwareEnv = "MOCK_HARDWARE";
+    private const string AdvancedFormatsEnv = "ENABLE_ADVANCED_FORMATS";
 
     public EnvironmentService(ILogger<EnvironmentService> logger)
     {
@@ -89,6 +91,14 @@ public class EnvironmentService
         {
             _logger.LogInformation("MOCK_HARDWARE mode enabled - using simulated audio devices and relay board");
         }
+
+        // Detect advanced formats feature flag
+        _enableAdvancedFormats = DetectAdvancedFormats();
+
+        if (_enableAdvancedFormats)
+        {
+            _logger.LogInformation("ENABLE_ADVANCED_FORMATS mode enabled - per-player format selection available");
+        }
     }
 
     /// <summary>
@@ -101,6 +111,12 @@ public class EnvironmentService
     /// When true, the application uses simulated audio devices and relay boards.
     /// </summary>
     public bool IsMockHardware => _isMockHardware;
+
+    /// <summary>
+    /// Whether advanced audio formats feature is enabled (dev-only feature).
+    /// When true, the application exposes per-player format selection UI and API endpoints.
+    /// </summary>
+    public bool EnableAdvancedFormats => _enableAdvancedFormats;
 
     /// <summary>
     /// Current environment name ("haos" or "standalone").
@@ -351,6 +367,57 @@ public class EnvironmentService
             }
         }
 
+        return false;
+    }
+
+    private bool DetectAdvancedFormats()
+    {
+        // Check environment variable first (works for both Docker and HAOS)
+        var advancedFormatsValue = Environment.GetEnvironmentVariable(AdvancedFormatsEnv);
+        if (!string.IsNullOrEmpty(advancedFormatsValue))
+        {
+            // Accept "true", "1", "yes" as truthy values (case-insensitive)
+            var isEnabled = advancedFormatsValue.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                           advancedFormatsValue == "1" ||
+                           advancedFormatsValue.Equals("yes", StringComparison.OrdinalIgnoreCase);
+
+            if (isEnabled)
+            {
+                _logger.LogDebug("{EnvVar} detected: {Value}", AdvancedFormatsEnv, advancedFormatsValue);
+                return true;
+            }
+            else
+            {
+                _logger.LogDebug("{EnvVar} set to {Value}, not enabling advanced formats", AdvancedFormatsEnv, advancedFormatsValue);
+            }
+        }
+        else
+        {
+            _logger.LogDebug("{EnvVar} environment variable not set", AdvancedFormatsEnv);
+        }
+
+        // Check HAOS options (for add-on UI toggle)
+        if (_isHaos && _haosOptions != null)
+        {
+            if (_haosOptions.TryGetValue("enable_advanced_formats", out var element))
+            {
+                try
+                {
+                    var haosValue = element.GetBoolean();
+                    if (haosValue)
+                    {
+                        _logger.LogDebug("Advanced formats enabled via HAOS options (enable_advanced_formats: true)");
+                        return true;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    _logger.LogWarning("HAOS option 'enable_advanced_formats' is not a boolean value");
+                }
+            }
+        }
+
+        // Default: disabled
         return false;
     }
 }

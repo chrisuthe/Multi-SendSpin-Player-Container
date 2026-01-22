@@ -169,6 +169,7 @@ new ErrorResponse(false, "Error message")
 | `PA_SAMPLE_FORMAT` | `float32le` | PulseAudio sample format (Docker mode only) |
 | `SUPERVISOR_TOKEN` | (HAOS only) | Auto-set by Home Assistant supervisor |
 | `MOCK_HARDWARE` | `false` | Enable mock relay boards for testing without hardware |
+| `ENABLE_ADVANCED_FORMATS` | `false` | Enable per-player format selection (dev-only feature) |
 
 **Audio Configuration Notes:**
 - `PA_SAMPLE_RATE` and `PA_SAMPLE_FORMAT` only apply in standalone Docker mode

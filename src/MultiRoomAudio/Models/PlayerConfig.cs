@@ -67,6 +67,14 @@ public class PlayerCreateRequest
     /// Persisted players will autostart on next launch.
     /// </summary>
     public bool Persist { get; set; } = true;
+
+    /// <summary>
+    /// Specific audio format to advertise. If null or empty, advertises all supported formats.
+    /// Format string: "codec-samplerate-bitdepth" (e.g., "flac-192000", "pcm-96000-24").
+    /// Only used when ENABLE_ADVANCED_FORMATS is enabled.
+    /// </summary>
+    [StringLength(50, ErrorMessage = "AdvertisedFormat cannot exceed 50 characters.")]
+    public string? AdvertisedFormat { get; set; }
 }
 
 /// <summary>
@@ -138,6 +146,14 @@ public class PlayerUpdateRequest
     /// </summary>
     [Range(0, 100, ErrorMessage = "Volume must be between 0 and 100.")]
     public int? Volume { get; set; }
+
+    /// <summary>
+    /// Specific audio format to advertise. If null or empty, advertises all supported formats.
+    /// Format string: "codec-samplerate-bitdepth" (e.g., "flac-192000", "pcm-96000-24").
+    /// Only used when ENABLE_ADVANCED_FORMATS is enabled.
+    /// </summary>
+    [StringLength(50, ErrorMessage = "AdvertisedFormat cannot exceed 50 characters.")]
+    public string? AdvertisedFormat { get; set; }
 }
 
 /// <summary>
@@ -155,6 +171,7 @@ public class PlayerConfig
     public int BufferSizeMs { get; set; } = 100;
     public int Volume { get; set; } = 75;
     public bool IsMuted { get; set; }
+    public string? AdvertisedFormat { get; set; }
 }
 
 /// <summary>

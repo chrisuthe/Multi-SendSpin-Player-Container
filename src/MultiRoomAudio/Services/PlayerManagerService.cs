@@ -682,7 +682,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 ClientId = components.Capabilities.ClientId,
                 ServerUrl = request.ServerUrl,
                 Volume = request.Volume,
-                DelayMs = request.DelayMs
+                DelayMs = request.DelayMs,
+                AdvertisedFormat = request.AdvertisedFormat
             };
 
             var cts = new CancellationTokenSource();
@@ -717,7 +718,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                     Autostart = true,
                     DelayMs = request.DelayMs,
                     Server = request.ServerUrl,
-                    Volume = request.Volume
+                    Volume = request.Volume,
+                    AdvertisedFormat = request.AdvertisedFormat
                 };
                 _config.SetPlayer(request.Name, persistConfig);
                 _config.Save();
@@ -754,13 +756,20 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // Probe device capabilities (used for reporting in Stats for Nerds)
         var deviceCapabilities = _backendFactory.GetDeviceCapabilities(request.Device);
 
+        // Apply format filtering if advanced formats are enabled
+        var audioFormats = GetDefaultFormats();
+        if (_environment.EnableAdvancedFormats)
+        {
+            audioFormats = FilterFormatsByPreference(audioFormats, request.AdvertisedFormat);
+        }
+
         // Create capabilities with player role
         var clientCapabilities = new ClientCapabilities
         {
             ClientId = request.ClientId ?? GenerateClientId(request.Name),
             ClientName = request.Name,
             Roles = new List<string> { "controller@v1", "player@v1", "metadata@v1" },
-            AudioFormats = GetDefaultFormats(),
+            AudioFormats = audioFormats,
             BufferCapacity = ServerAnnouncedBufferCapacityBytes,
             InitialVolume = request.Volume
         };
@@ -1356,6 +1365,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             ? persistedConfig.Volume ?? 100
             : config.Volume;
 
+        // Get advertised format from persisted config
+        var advertisedFormat = persistedConfig?.AdvertisedFormat ?? config.AdvertisedFormat;
+
         // Fully remove and dispose old player
         await RemoveAndDisposePlayerAsync(name);
 
@@ -1367,6 +1379,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             ServerUrl = config.ServerUrl,
             Volume = startupVolume,  // Use startup volume, not runtime volume
             DelayMs = config.DelayMs,
+            AdvertisedFormat = advertisedFormat,
             Persist = false // Already persisted
         };
 
@@ -1948,7 +1961,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             DeviceCapabilities: context.DeviceCapabilities,
             IsPendingReconnection: isPendingReconnection,
             ReconnectionAttempts: isPendingReconnection ? reconnectState!.RetryCount : null,
-            NextReconnectionAttempt: isPendingReconnection ? reconnectState!.NextRetryTime : null
+            NextReconnectionAttempt: isPendingReconnection ? reconnectState!.NextRetryTime : null,
+            AdvertisedFormat: context.Config.AdvertisedFormat
         );
     }
 
@@ -1989,13 +2003,76 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             new AudioFormat { Codec = "flac", SampleRate = 192000, Channels = 2 },
             new AudioFormat { Codec = "flac", SampleRate = 96000, Channels = 2 },
             new AudioFormat { Codec = "flac", SampleRate = 48000, Channels = 2 },
+            new AudioFormat { Codec = "flac", SampleRate = 44100, Channels = 2 },
             // Hi-res PCM
+            new AudioFormat { Codec = "pcm", SampleRate = 192000, Channels = 2, BitDepth = 32 },
+            new AudioFormat { Codec = "pcm", SampleRate = 96000, Channels = 2, BitDepth = 32 },
+            new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 32 },
             new AudioFormat { Codec = "pcm", SampleRate = 192000, Channels = 2, BitDepth = 24 },
             new AudioFormat { Codec = "pcm", SampleRate = 96000, Channels = 2, BitDepth = 24 },
+            new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 24 },
             new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 16 },
+            new AudioFormat { Codec = "pcm", SampleRate = 44100, Channels = 2, BitDepth = 16 },
             // Opus for efficiency when streaming
             new AudioFormat { Codec = "opus", SampleRate = 48000, Channels = 2, Bitrate = 256 },
         };
+    }
+
+    /// <summary>
+    /// Filters advertised audio formats based on user preference.
+    /// Used by advanced formats feature to advertise only a specific format.
+    /// </summary>
+    /// <param name="allFormats">List of all supported formats.</param>
+    /// <param name="advertisedFormat">Format preference string (e.g., "flac-192000", "pcm-96000-24").</param>
+    /// <returns>Filtered list containing only the preferred format, or all formats if preference is invalid.</returns>
+    private List<AudioFormat> FilterFormatsByPreference(List<AudioFormat> allFormats, string? advertisedFormat)
+    {
+        // If no preference or "all", return all formats
+        if (string.IsNullOrWhiteSpace(advertisedFormat) ||
+            advertisedFormat.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            return allFormats;
+        }
+
+        // Parse format string (e.g., "flac-192000" or "pcm-96000-24")
+        var parts = advertisedFormat.Split('-');
+        if (parts.Length < 2)
+        {
+            _logger.LogWarning("Invalid advertised format '{Format}', using all formats", advertisedFormat);
+            return allFormats;
+        }
+
+        var codec = parts[0].ToLowerInvariant();
+        if (!int.TryParse(parts[1], out var sampleRate))
+        {
+            _logger.LogWarning("Invalid sample rate in format '{Format}', using all formats", advertisedFormat);
+            return allFormats;
+        }
+
+        int? bitDepth = null;
+        if (parts.Length >= 3 && int.TryParse(parts[2], out var parsedBitDepth))
+        {
+            bitDepth = parsedBitDepth;
+        }
+
+        // Find matching format
+        var matchingFormat = allFormats.FirstOrDefault(f =>
+            f.Codec.Equals(codec, StringComparison.OrdinalIgnoreCase) &&
+            f.SampleRate == sampleRate &&
+            (bitDepth == null || f.BitDepth == bitDepth));
+
+        if (matchingFormat != null)
+        {
+            _logger.LogInformation(
+                "Advertising single format: {Codec} {SampleRate}Hz{BitDepth}",
+                matchingFormat.Codec,
+                matchingFormat.SampleRate,
+                matchingFormat.BitDepth.HasValue ? $" {matchingFormat.BitDepth}-bit" : "");
+            return new List<AudioFormat> { matchingFormat };
+        }
+
+        _logger.LogWarning("Format '{Format}' not found, using all formats", advertisedFormat);
+        return allFormats;
     }
 
     /// <summary>
