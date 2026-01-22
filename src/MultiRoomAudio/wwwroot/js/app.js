@@ -1257,6 +1257,12 @@ function renderStatsPanel(stats) {
                 <span class="stats-label">Output</span>
                 <span class="stats-value info">${escapeHtml(stats.audioFormat.outputFormat)}</span>
             </div>
+            ${stats.audioFormat.hardwareFormat ? `
+            <div class="stats-row">
+                <span class="stats-label">Hardware</span>
+                <span class="stats-value info">${escapeHtml(stats.audioFormat.hardwareFormat)} ${stats.audioFormat.hardwareSampleRate}Hz ${stats.audioFormat.hardwareBitDepth}-bit</span>
+            </div>
+            ` : ''}
         </div>
 
         <!-- Sync Status Section -->

@@ -1962,11 +1962,15 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         if (!_players.TryGetValue(name, out var context))
             return null;
 
+        // Get the audio device for hardware format info
+        var device = _backendFactory.GetDevice(context.Config.DeviceId);
+
         return PlayerStatsMapper.BuildStats(
             name,
             context.Pipeline,
             context.ClockSync,
-            context.Player);
+            context.Player,
+            device);
     }
 
     private static string GenerateClientId(string name)
