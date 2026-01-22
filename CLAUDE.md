@@ -169,6 +169,7 @@ new ErrorResponse(false, "Error message")
 | `PA_SAMPLE_FORMAT` | `float32le` | PulseAudio sample format (Docker mode only) |
 | `SUPERVISOR_TOKEN` | (HAOS only) | Auto-set by Home Assistant supervisor |
 | `MOCK_HARDWARE` | `false` | Enable mock relay boards for testing without hardware |
+| `ENABLE_ADVANCED_FORMATS` | `false` | Show format selection UI (dev-only). All players default to flac-48000 regardless. |
 
 **Audio Configuration Notes:**
 - `PA_SAMPLE_RATE` and `PA_SAMPLE_FORMAT` only apply in standalone Docker mode
@@ -176,6 +177,14 @@ new ErrorResponse(false, "Error message")
 - PulseAudio will automatically negotiate down if hardware doesn't support the requested format
 - Common formats: `s16le` (16-bit), `s24le` (24-bit), `s32le` (32-bit), `float32le` (32-bit float)
 - Common rates: `44100`, `48000`, `96000`, `192000`
+
+**Audio Format Selection:**
+
+- All players default to advertising "flac-48000" for maximum Music Assistant compatibility
+- This default applies regardless of `ENABLE_ADVANCED_FORMATS` setting
+- When `ENABLE_ADVANCED_FORMATS=true`, UI shows dropdown to select specific formats or "All Formats"
+- Format preference is persisted in players.yaml and survives restarts
+- Changing format triggers automatic player restart to re-announce with new format
 
 ---
 
@@ -241,6 +250,7 @@ squeezelite-docker/
 | PUT | `/api/players/{name}/startup-volume` | Set startup volume |
 | PUT | `/api/players/{name}/mute` | Mute/unmute player |
 | PUT | `/api/players/{name}/offset` | Set delay offset |
+| GET | `/api/players/formats` | Get available audio formats (only when ENABLE_ADVANCED_FORMATS=true) |
 
 ### Audio Devices
 

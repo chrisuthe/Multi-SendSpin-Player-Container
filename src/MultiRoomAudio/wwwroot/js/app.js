@@ -3,6 +3,8 @@
 // State
 let players = {};
 let devices = [];
+let formats = [];
+let advancedFormatsEnabled = false;
 let connection = null;
 let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
@@ -253,6 +255,7 @@ function getBusTypeLabel(busType) {
 document.addEventListener('DOMContentLoaded', async () => {
     // Load initial data
     await Promise.all([
+        checkAdvancedFormats(),
         refreshBuildInfo(),
         refreshStatus(),
         refreshDevices()
@@ -370,6 +373,47 @@ async function refreshStatus() {
     }
 }
 
+async function checkAdvancedFormats() {
+    try {
+        const response = await fetch('./api/players/formats');
+        advancedFormatsEnabled = response.ok;
+
+        if (advancedFormatsEnabled) {
+            document.getElementById('advertisedFormatGroup').style.display = 'block';
+        }
+    } catch (error) {
+        advancedFormatsEnabled = false;
+    }
+}
+
+async function refreshFormats() {
+    if (!advancedFormatsEnabled) return;
+
+    try {
+        const response = await fetch('./api/players/formats');
+        if (!response.ok) throw new Error('Failed to fetch formats');
+
+        const data = await response.json();
+        formats = data.formats || [];
+
+        const formatSelect = document.getElementById('advertisedFormat');
+        if (formatSelect) {
+            const currentValue = formatSelect.value;
+            formatSelect.innerHTML = '';
+            formats.forEach(format => {
+                const option = document.createElement('option');
+                option.value = format.id;
+                option.textContent = format.label;
+                option.title = format.description;
+                formatSelect.appendChild(option);
+            });
+            if (currentValue) formatSelect.value = currentValue;
+        }
+    } catch (error) {
+        console.error('Error refreshing formats:', error);
+    }
+}
+
 async function refreshDevices() {
     try {
         const response = await fetch('./api/devices');
@@ -397,7 +441,7 @@ async function refreshDevices() {
 }
 
 // Open the modal in Add mode
-function openAddPlayerModal() {
+async function openAddPlayerModal() {
     // Reset form
     document.getElementById('playerForm').reset();
     document.getElementById('editingPlayerName').value = '';
@@ -409,8 +453,12 @@ function openAddPlayerModal() {
     document.getElementById('playerModalSubmitIcon').className = 'fas fa-plus me-1';
     document.getElementById('playerModalSubmitText').textContent = 'Add Player';
 
-    // Refresh devices and show modal
-    refreshDevices();
+    // Refresh devices and formats
+    await refreshDevices();
+    if (advancedFormatsEnabled) {
+        await refreshFormats();
+    }
+
     const modal = new bootstrap.Modal(document.getElementById('playerModal'));
     modal.show();
 }
@@ -445,6 +493,22 @@ async function openEditPlayerModal(playerName) {
             // Check if the device was actually found in the list
             if (audioDeviceSelect.value !== player.device) {
                 showAlert(`Warning: Previously configured device "${player.device}" is no longer available. Please select a new device.`, 'warning');
+            }
+        }
+
+        // Set advertised format dropdown (if advanced formats enabled)
+        if (advancedFormatsEnabled) {
+            // Refresh formats first to populate options
+            await refreshFormats();
+
+            // Store original format for change detection (default to flac-48000 for compatibility)
+            const originalFormat = player.advertisedFormat || 'flac-48000';
+            document.getElementById('playerForm').dataset.originalFormat = originalFormat;
+
+            // Set dropdown value AFTER options are populated
+            const formatSelect = document.getElementById('advertisedFormat');
+            if (formatSelect) {
+                formatSelect.value = originalFormat;
             }
         }
 
@@ -490,6 +554,19 @@ async function savePlayer() {
                 serverUrl: serverUrl || '',  // Empty string = mDNS discovery
                 volume
             };
+
+            // Include advertised format if advanced formats enabled
+            if (advancedFormatsEnabled) {
+                const form = document.getElementById('playerForm');
+                const originalFormat = form.dataset.originalFormat || 'flac-48000';
+                const currentFormat = document.getElementById('advertisedFormat').value || 'flac-48000';
+
+                // Only include if changed from original
+                if (currentFormat !== originalFormat) {
+                    // Send the specific format
+                    updatePayload.advertisedFormat = currentFormat;
+                }
+            }
 
             const response = await fetch(`./api/players/${encodeURIComponent(editingName)}`, {
                 method: 'PUT',
@@ -537,16 +614,26 @@ async function savePlayer() {
             }
         } else {
             // Add mode: Create new player
+            const payload = {
+                name,
+                device: device || null,
+                serverUrl: serverUrl || null,
+                volume,
+                persist: true
+            };
+
+            // Include advertised format if advanced formats enabled
+            if (advancedFormatsEnabled) {
+                const advertisedFormat = document.getElementById('advertisedFormat').value;
+                if (advertisedFormat && advertisedFormat !== 'all') {
+                    payload.advertisedFormat = advertisedFormat;
+                }
+            }
+
             const response = await fetch('./api/players', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name,
-                    device: device || null,
-                    serverUrl: serverUrl || null,
-                    volume,
-                    persist: true
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
