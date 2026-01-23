@@ -57,4 +57,20 @@ public interface IRelayBoard : IDisposable
     /// Get the current state of all relays as a bitmask (bit 0 = relay 1, supports up to 16 relays).
     /// </summary>
     int CurrentState { get; }
+
+    /// <summary>
+    /// Read the actual hardware state of all relay pins (if supported).
+    /// This queries the hardware directly rather than returning cached software state.
+    /// </summary>
+    /// <returns>
+    /// Relay state bitmask from hardware (bit 0 = relay 1), or null if:
+    /// - Hardware read is not supported by this board type
+    /// - Hardware read failed
+    /// - Device is not connected
+    /// </returns>
+    /// <remarks>
+    /// FTDI boards support reliable hardware reads. HID boards do not (always returns 0x00).
+    /// Use this for diagnostics and verification, not for regular state queries.
+    /// </remarks>
+    byte? ReadHardwareState() => null;
 }

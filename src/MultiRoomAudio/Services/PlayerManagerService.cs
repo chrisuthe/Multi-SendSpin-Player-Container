@@ -66,6 +66,30 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// </summary>
     private readonly SemaphoreSlim _discoveryLock = new(1, 1);
 
+    /// <summary>
+    /// Cached player stats for Stats for Nerds panel.
+    /// Updated by background timer, read instantly by UI requests.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, PlayerStatsResponse> _statsCache = new();
+
+    /// <summary>
+    /// Tracks which players have active stats viewers (last request time).
+    /// Background timer only collects stats for players requested within the last 2 seconds.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, DateTime> _statsActiveViewers = new();
+
+    /// <summary>
+    /// Timer for background stats collection (250ms interval).
+    /// Only collects for players with active viewers.
+    /// </summary>
+    private Timer? _statsCacheTimer;
+
+    /// <summary>
+    /// How long a player remains "active" after last stats request (in milliseconds).
+    /// After this time with no requests, background collection stops for that player.
+    /// </summary>
+    private const int StatsActiveViewerTimeoutMs = 2000;
+
     #region Constants
 
     /// <summary>
@@ -471,6 +495,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         _reconnectionCts = new CancellationTokenSource();
         _reconnectionTask = ProcessReconnectionsAsync(_reconnectionCts.Token);
 
+        // Start background stats cache timer (only collects for players with active viewers)
+        _statsCacheTimer = new Timer(CollectStatsForActiveViewers, null, 250, 250);
+
         _logger.LogInformation("PlayerManagerService started with {PlayerCount} active players, {PendingCount} pending reconnection",
             _players.Count, _pendingReconnections.Count);
     }
@@ -581,7 +608,16 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         _logger.LogInformation("PlayerManagerService stopping with {PlayerCount} active players, {PendingCount} pending reconnection...",
             _players.Count, _pendingReconnections.Count);
 
-        // Stop reconnection task first
+        // Stop stats cache timer
+        if (_statsCacheTimer != null)
+        {
+            await _statsCacheTimer.DisposeAsync();
+            _statsCacheTimer = null;
+        }
+        _statsCache.Clear();
+        _statsActiveViewers.Clear();
+
+        // Stop reconnection task
         _reconnectionCts?.Cancel();
         if (_reconnectionTask != null)
         {
@@ -1967,23 +2003,82 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
     /// <summary>
     /// Gets real-time stats for a player (Stats for Nerds).
+    /// Returns cached stats instantly - background timer updates the cache every 250ms.
+    /// This completely decouples UI requests from SDK access.
     /// </summary>
     /// <param name="name">Player name.</param>
-    /// <returns>Stats response or null if player not found.</returns>
+    /// <returns>Stats response or null if player not found or no cache yet.</returns>
     public PlayerStatsResponse? GetPlayerStats(string name)
     {
-        if (!_players.TryGetValue(name, out var context))
+        // Mark this player as having an active viewer
+        // Background timer will start collecting stats for this player
+        _statsActiveViewers[name] = DateTime.UtcNow;
+
+        // Check player exists
+        if (!_players.ContainsKey(name))
+        {
+            _statsActiveViewers.TryRemove(name, out _);
+            _statsCache.TryRemove(name, out _);
             return null;
+        }
 
-        // Get the audio device for hardware format info
-        var device = _backendFactory.GetDevice(context.Config.DeviceId);
+        // Return whatever is in the cache (may be null on first request)
+        // Background timer will populate it within 250ms
+        _statsCache.TryGetValue(name, out var cached);
+        return cached;
+    }
 
-        return PlayerStatsMapper.BuildStats(
-            name,
-            context.Pipeline,
-            context.ClockSync,
-            context.Player,
-            device);
+    /// <summary>
+    /// Timer callback that collects stats for players with active viewers.
+    /// Runs every 250ms but only accesses SDK for players that have been requested recently.
+    /// </summary>
+    private void CollectStatsForActiveViewers(object? state)
+    {
+        try
+        {
+            var now = DateTime.UtcNow;
+
+            // Clean up inactive viewers and collect stats for active ones
+            foreach (var kvp in _statsActiveViewers.ToList())
+            {
+                var playerName = kvp.Key;
+                var lastRequested = kvp.Value;
+
+                // Remove if no requests in last 2 seconds
+                if ((now - lastRequested).TotalMilliseconds > StatsActiveViewerTimeoutMs)
+                {
+                    _statsActiveViewers.TryRemove(playerName, out _);
+                    _statsCache.TryRemove(playerName, out _);
+                    continue;
+                }
+
+                // Collect fresh stats for active viewer
+                if (_players.TryGetValue(playerName, out var context))
+                {
+                    try
+                    {
+                        var device = context.Config.DeviceId != null
+                            ? _backendFactory.GetDevice(context.Config.DeviceId)
+                            : null;
+                        var stats = PlayerStatsMapper.BuildStats(
+                            playerName,
+                            context.Pipeline,
+                            context.ClockSync,
+                            context.Player,
+                            device);
+                        _statsCache[playerName] = stats;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to collect stats for player {PlayerName}", playerName);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error in stats cache collection timer");
+        }
     }
 
     private static string GenerateClientId(string name)

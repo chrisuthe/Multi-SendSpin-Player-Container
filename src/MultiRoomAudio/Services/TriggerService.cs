@@ -758,9 +758,23 @@ public class TriggerService : IHostedService, IAsyncDisposable
                     connected = board.OpenBySerial(boardId);
                 }
             }
+            else if (boardId.StartsWith("FTDI:", StringComparison.OrdinalIgnoreCase))
+            {
+                // FTDI path-based identification (hash of USB bus/port path)
+                var pathHash = boardId.Substring(5);
+                if (board is FtdiRelayBoard ftdiBoard)
+                {
+                    connected = ftdiBoard.OpenByPathHash(pathHash);
+                }
+                else
+                {
+                    _logger.LogWarning("Board '{BoardId}' is FTDI type but factory didn't create FtdiRelayBoard", boardId);
+                    connected = board.Open();
+                }
+            }
             else
             {
-                // FTDI uses serial-based identification
+                // FTDI with serial number (raw serial as ID)
                 var serial = GetSerialFromBoardId(boardId);
                 connected = string.IsNullOrEmpty(serial) ? board.Open() : board.OpenBySerial(serial);
             }
@@ -852,6 +866,9 @@ public class TriggerService : IHostedService, IAsyncDisposable
     /// </summary>
     private void ApplyStartupBehavior(IRelayBoard board, TriggerBoardConfiguration config)
     {
+        // Log hardware state before applying startup behavior (FTDI boards only)
+        LogHardwareState(board, config.BoardId, config.ChannelCount, "before startup behavior");
+
         switch (config.StartupBehavior)
         {
             case RelayStartupBehavior.AllOff:
@@ -871,6 +888,9 @@ public class TriggerService : IHostedService, IAsyncDisposable
                 _logger.LogInformation("Board '{BoardId}': Relay state preserved (startup behavior)", config.BoardId);
                 break;
         }
+
+        // Log hardware state after applying startup behavior
+        LogHardwareState(board, config.BoardId, config.ChannelCount, "after startup behavior");
     }
 
     /// <summary>
@@ -878,6 +898,9 @@ public class TriggerService : IHostedService, IAsyncDisposable
     /// </summary>
     private void ApplyShutdownBehavior(IRelayBoard board, TriggerBoardConfiguration config)
     {
+        // Log hardware state before applying shutdown behavior
+        LogHardwareState(board, config.BoardId, config.ChannelCount, "before shutdown behavior");
+
         switch (config.ShutdownBehavior)
         {
             case RelayStartupBehavior.AllOff:
@@ -897,6 +920,42 @@ public class TriggerService : IHostedService, IAsyncDisposable
                 _logger.LogInformation("Board '{BoardId}': Relay state preserved (shutdown behavior)", config.BoardId);
                 break;
         }
+
+        // Log hardware state after applying shutdown behavior
+        LogHardwareState(board, config.BoardId, config.ChannelCount, "after shutdown behavior");
+    }
+
+    /// <summary>
+    /// Log the actual hardware state of a relay board (if supported).
+    /// </summary>
+    private void LogHardwareState(IRelayBoard board, string boardId, int channelCount, string context)
+    {
+        byte? hardwareState = board.ReadHardwareState();
+        if (hardwareState.HasValue)
+        {
+            string activeRelays = FormatActiveRelays(hardwareState.Value, channelCount);
+            _logger.LogInformation(
+                "Board '{BoardId}': Hardware state {Context}: 0x{State:X2} ({ActiveRelays})",
+                boardId, context, hardwareState.Value, activeRelays);
+        }
+        // If null, hardware read not supported or failed - already logged by the board
+    }
+
+    /// <summary>
+    /// Format active relay channels as a human-readable string.
+    /// </summary>
+    private static string FormatActiveRelays(byte state, int channelCount)
+    {
+        if (state == 0)
+            return "none active";
+
+        var active = new List<string>();
+        for (int i = 0; i < channelCount && i < 8; i++)
+        {
+            if ((state & (1 << i)) != 0)
+                active.Add($"CH{i + 1}");
+        }
+        return string.Join(", ", active);
     }
 
     #endregion

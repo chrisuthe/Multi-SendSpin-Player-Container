@@ -26,9 +26,11 @@ Automatically power on/off amplifiers when audio playback starts and stops using
 
 ### FTDI Relay Boards
 
-- Uses FT245RL chip in bitbang mode
-- Requires `libftdi1` library
+- Uses FT245RL chip in synchronous bitbang mode
+- Requires `libftdi1` library (links against `libusb-1.0`)
 - May need `SYS_RAWIO` capability if kernel driver claims device
+- Supports Denkovi DAE-CB/Ro8-USB (8ch) and DAE-CB/Ro4-USB (4ch), plus generic 8-channel boards
+- **Note:** Denkovi 4-channel boards use non-sequential pin mapping (D1, D3, D5, D7)
 
 ### Modbus/CH340 Relay Boards
 
@@ -120,12 +122,15 @@ dmesg | grep ttyUSB
 ls /dev/ttyUSB*
 ```
 
-#### Multiple Modbus Boards
+#### Multiple Boards
 
-Multiple different board types = works and tested.
-Multiple HID types with duplicate hardware = works and tested
-CH340 = not tested 
-FTDI = not tested
+All board types support multiple devices:
+
+| Board Type | Multi-Board | Notes |
+|------------|-------------|-------|
+| **USB HID** | ✅ Tested | Uses USB port path hash for identification |
+| **FTDI** | ✅ Tested | Uses USB port path hash for identification |
+| **Modbus/CH340** | ✅ Works | Uses USB port path hash for identification |
 
 If you have multiple CH340-based boards, use `/dev/serial/by-path/` for stable identification. The `/dev/ttyUSB*` names can swap between reboots.
 
@@ -220,18 +225,23 @@ Boards are identified using stable identifiers that persist across reboots:
 | Board Type | ID Format | Example | Stability |
 | ---------- | --------- | ------- | --------- |
 | **USB HID** | `HID:<hash>` | `HID:CA88BCAC` | Stable if board stays in same USB port |
-| **FTDI** | Serial number | `A12345` | Stable regardless of USB port |
+| **FTDI** | `FTDI:<hash>` | `FTDI:7B9E3D1A` | Stable if board stays in same USB port |
 | **Modbus** | `MODBUS:<hash>` | `MODBUS:7F3A2B1C` | Stable if board stays in same USB port |
 
-### How HID Board Identification Works
+All three board types use the same identification strategy: a hash of the USB port path.
 
-USB HID relay boards often lack unique serial numbers—many boards from the same batch have identical or garbage serial data. To work around this, we identify HID boards by computing a hash of their **USB port path** (e.g., `usb1/1-3`).
+### How Board Identification Works
+
+All relay boards are identified by computing a hash of their **USB port path** (e.g., `1-3.2` for bus 1, port 3, hub port 2). This provides consistent behavior across all board types.
 
 This means:
 
 - **Same USB port = same board ID** — You can unplug and replug the board and it will reconnect automatically
 - **Different USB port = different board ID** — Moving a board to a different USB port will make it appear as a new board in the UI
-- **Hidraw number doesn't matter** — The hidraw number (e.g., `/dev/hidraw2`) can change without affecting board identification; you just need to update the Docker device mapping
+
+### Note for HID Boards (Docker)
+
+For HID boards in Docker, the hidraw number (e.g., `/dev/hidraw2`) can change without affecting board identification—you just need to update the Docker device mapping. The board ID remains the same because it's based on the USB port path, not the hidraw number.
 
 ## Troubleshooting
 

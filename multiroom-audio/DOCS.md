@@ -132,8 +132,18 @@ automatic power-on/off of amplifiers when playback starts and stops.
 
 **FTDI Relay Boards:**
 
-- Denkovi USB 8 Relay Board (DAE0006K or similar with FT245RL chip)
-- Any FTDI FT245RL-based relay board (1-16 channels)
+| Model                         | Channels | Description                       |
+|-------------------------------|----------|-----------------------------------|
+| **Denkovi DAE-CB/Ro8-USB**    | 8        | Denkovi USB 8 Relay Board         |
+| **Denkovi DAE-CB/Ro4-USB**    | 4        | Denkovi USB 4 Relay Board         |
+| **Generic FTDI**              | 8        | Standard 8-channel FTDI relay     |
+
+These boards use the FT245RL chip with synchronous bitbang mode (0x04).
+
+**Notes:**
+
+- The Denkovi 4-channel board uses different pin mappings internally (odd pins D1, D3, D5, D7). When adding an FTDI board in the UI, select the correct model to ensure proper relay control.
+- **Multiple FTDI boards:** Fully supported. Boards with unique serial numbers use the serial for identification. Boards with identical or missing serials use USB port path (stable across reboots as long as boards stay in the same USB ports).
 
 **USB HID Relay Boards:**
 

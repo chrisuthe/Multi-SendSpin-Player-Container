@@ -38,6 +38,11 @@ public sealed class FtdiRelayBoard : IRelayBoard
     // Bit mode constants
     private const byte BITMODE_RESET = 0x00;
     private const byte BITMODE_BITBANG = 0x01; // Async bitbang
+    private const byte BITMODE_SYNCBB = 0x04;  // Synchronous bitbang (required by Denkovi)
+
+    // Pin mapping for Denkovi DAE-CB/Ro4-USB (4-channel board uses odd pins: D1, D3, D5, D7)
+    // The 4-relay board connects relays to FT245RL IO pins 1, 3, 5, 7 (not 0, 1, 2, 3)
+    private static readonly int[] Denkovi4ChPinMap = { 1, 3, 5, 7 };
 
     /// <summary>
     /// Static constructor to register custom native library resolver for cross-platform support.
@@ -49,7 +54,8 @@ public sealed class FtdiRelayBoard : IRelayBoard
 
     private static IntPtr ResolveFtdiLibrary(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
-        if (libraryName != "libftdi1")
+        // Handle both libftdi1 and libusb-1.0 resolution
+        if (libraryName != "libftdi1" && libraryName != "libusb-1.0")
             return IntPtr.Zero; // Let default resolver handle it
 
         IntPtr handle;
@@ -61,16 +67,30 @@ public sealed class FtdiRelayBoard : IRelayBoard
         // Platform-specific paths
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            // macOS: Try Homebrew paths
-            string[] macPaths = new[]
+            string[] macPaths;
+            if (libraryName == "libftdi1")
             {
-                "/opt/homebrew/lib/libftdi1.dylib",      // Apple Silicon Homebrew
-                "/opt/homebrew/lib/libftdi1.1.dylib",    // Apple Silicon versioned
-                "/usr/local/lib/libftdi1.dylib",         // Intel Homebrew
-                "/usr/local/lib/libftdi1.1.dylib",       // Intel versioned
-                "libftdi1.dylib",                         // In PATH
-                "libftdi1.1.dylib"
-            };
+                macPaths = new[]
+                {
+                    "/opt/homebrew/lib/libftdi1.dylib",      // Apple Silicon Homebrew
+                    "/opt/homebrew/lib/libftdi1.1.dylib",    // Apple Silicon versioned
+                    "/usr/local/lib/libftdi1.dylib",         // Intel Homebrew
+                    "/usr/local/lib/libftdi1.1.dylib",       // Intel versioned
+                    "libftdi1.dylib",                         // In PATH
+                    "libftdi1.1.dylib"
+                };
+            }
+            else // libusb-1.0
+            {
+                macPaths = new[]
+                {
+                    "/opt/homebrew/lib/libusb-1.0.dylib",    // Apple Silicon Homebrew
+                    "/opt/homebrew/lib/libusb-1.0.0.dylib",  // Apple Silicon versioned
+                    "/usr/local/lib/libusb-1.0.dylib",       // Intel Homebrew
+                    "/usr/local/lib/libusb-1.0.0.dylib",     // Intel versioned
+                    "libusb-1.0.dylib"                        // In PATH
+                };
+            }
 
             foreach (var path in macPaths)
             {
@@ -80,15 +100,28 @@ public sealed class FtdiRelayBoard : IRelayBoard
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            // Linux: Try common library names
-            string[] linuxNames = new[]
+            string[] linuxNames;
+            if (libraryName == "libftdi1")
             {
-                "libftdi1.so.2",
-                "libftdi1.so.1",
-                "libftdi1.so",
-                "/usr/lib/x86_64-linux-gnu/libftdi1.so.2",
-                "/usr/lib/aarch64-linux-gnu/libftdi1.so.2"
-            };
+                linuxNames = new[]
+                {
+                    "libftdi1.so.2",
+                    "libftdi1.so.1",
+                    "libftdi1.so",
+                    "/usr/lib/x86_64-linux-gnu/libftdi1.so.2",
+                    "/usr/lib/aarch64-linux-gnu/libftdi1.so.2"
+                };
+            }
+            else // libusb-1.0
+            {
+                linuxNames = new[]
+                {
+                    "libusb-1.0.so.0",
+                    "libusb-1.0.so",
+                    "/usr/lib/x86_64-linux-gnu/libusb-1.0.so.0",
+                    "/usr/lib/aarch64-linux-gnu/libusb-1.0.so.0"
+                };
+            }
 
             foreach (var name in linuxNames)
             {
@@ -178,11 +211,15 @@ public sealed class FtdiRelayBoard : IRelayBoard
                     descStr = GetNullTerminatedString(description);
                 }
 
+                // Get stable USB path from libusb (bus-port.port.port format)
+                var usbPath = GetUsbPath(node.dev);
+
                 devices.Add(new FtdiDeviceInfo(
                     Index: i,
                     SerialNumber: serialStr,
                     Description: descStr ?? $"FTDI Device {i}",
-                    IsOpen: false
+                    IsOpen: false,
+                    UsbPath: usbPath
                 ));
 
                 current = node.next;
@@ -413,6 +450,124 @@ public sealed class FtdiRelayBoard : IRelayBoard
         }
     }
 
+    /// <summary>
+    /// Open connection to a specific FTDI device by USB path hash.
+    /// Used for boards identified by USB port path when serial numbers are not unique.
+    /// </summary>
+    /// <param name="pathHash">The hash portion of the board ID (e.g., "CA88BCAC" from "FTDI:CA88BCAC")</param>
+    /// <returns>True if connection was successful.</returns>
+    public bool OpenByPathHash(string pathHash)
+    {
+        lock (_lock)
+        {
+            if (_context != IntPtr.Zero)
+            {
+                _logger?.LogWarning("FTDI device already open");
+                return true;
+            }
+
+            IntPtr ctx = IntPtr.Zero;
+            IntPtr devList = IntPtr.Zero;
+
+            try
+            {
+                ctx = LibFtdi.ftdi_new();
+                if (ctx == IntPtr.Zero)
+                {
+                    _logger?.LogError("Failed to create FTDI context for enumeration");
+                    return false;
+                }
+
+                // Enumerate all FTDI devices to find the one with matching path hash
+                int count = LibFtdi.ftdi_usb_find_all(ctx, ref devList, FTDI_VENDOR_ID, FT245RL_PRODUCT_ID);
+                if (count <= 0)
+                {
+                    _logger?.LogWarning("No FTDI devices found when looking for path hash {Hash}", pathHash);
+                    return false;
+                }
+
+                IntPtr current = devList;
+                IntPtr matchingDev = IntPtr.Zero;
+
+                for (int i = 0; i < count && current != IntPtr.Zero; i++)
+                {
+                    var node = Marshal.PtrToStructure<LibFtdi.ftdi_device_list>(current);
+
+                    // Get USB path for this device
+                    var usbPath = GetUsbPath(node.dev);
+                    if (!string.IsNullOrEmpty(usbPath))
+                    {
+                        var deviceHash = FtdiDeviceInfo.StableHash(usbPath);
+                        if (deviceHash.Equals(pathHash, StringComparison.OrdinalIgnoreCase))
+                        {
+                            matchingDev = node.dev;
+                            _logger?.LogDebug("Found FTDI device by path hash: {Hash} (path: {Path})", pathHash, usbPath);
+                            break;
+                        }
+                    }
+
+                    current = node.next;
+                }
+
+                if (matchingDev == IntPtr.Zero)
+                {
+                    _logger?.LogWarning("No FTDI device found with path hash {Hash}", pathHash);
+                    return false;
+                }
+
+                // Create a new context for the actual connection
+                _context = LibFtdi.ftdi_new();
+                if (_context == IntPtr.Zero)
+                {
+                    _logger?.LogError("Failed to create FTDI context for connection");
+                    return false;
+                }
+
+                // Open the device by its libusb device pointer
+                int result = LibFtdi.ftdi_usb_open_dev(_context, matchingDev);
+                if (result < 0)
+                {
+                    _logger?.LogError("Failed to open FTDI device by path hash {Hash}: error {Result} - {Error}",
+                        pathHash, result, GetErrorString());
+                    LibFtdi.ftdi_free(_context);
+                    _context = IntPtr.Zero;
+                    return false;
+                }
+
+                if (!Initialize())
+                {
+                    Close();
+                    return false;
+                }
+
+                _logger?.LogInformation("FTDI relay board opened (path hash: {Hash})", pathHash);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Exception opening FTDI device by path hash '{Hash}'", pathHash);
+                if (_context != IntPtr.Zero)
+                {
+                    LibFtdi.ftdi_free(_context);
+                    _context = IntPtr.Zero;
+                }
+                return false;
+            }
+            finally
+            {
+                // Free the enumeration resources (but NOT the device we're using)
+                if (devList != IntPtr.Zero && ctx != IntPtr.Zero)
+                {
+                    LibFtdi.ftdi_list_free(ref devList);
+                }
+                if (ctx != IntPtr.Zero)
+                {
+                    LibFtdi.ftdi_free(ctx);
+                }
+            }
+        }
+    }
+
     private string GetErrorString()
     {
         if (_context == IntPtr.Zero)
@@ -426,7 +581,7 @@ public sealed class FtdiRelayBoard : IRelayBoard
     }
 
     /// <summary>
-    /// Initialize the device for relay control (bit-bang mode).
+    /// Initialize the device for relay control (synchronous bit-bang mode).
     /// </summary>
     private bool Initialize()
     {
@@ -442,11 +597,18 @@ public sealed class FtdiRelayBoard : IRelayBoard
                 _logger?.LogWarning("Failed to reset FTDI device: {Result} - {Error}", result, GetErrorString());
             }
 
-            // Purge buffers
-            result = LibFtdi.ftdi_usb_purge_buffers(_context);
+            // Set latency timer (important for sync mode)
+            result = LibFtdi.ftdi_set_latency_timer(_context, 2);
             if (result < 0)
             {
-                _logger?.LogWarning("Failed to purge FTDI buffers: {Result}", result);
+                _logger?.LogWarning("Failed to set latency timer: {Result}", result);
+            }
+
+            // Purge buffers
+            result = LibFtdi.ftdi_tcioflush(_context);
+            if (result < 0)
+            {
+                _logger?.LogWarning("Failed to flush FTDI buffers: {Result}", result);
             }
 
             // Set baud rate (affects bit-bang timing)
@@ -456,13 +618,16 @@ public sealed class FtdiRelayBoard : IRelayBoard
                 _logger?.LogWarning("Failed to set baud rate: {Result}", result);
             }
 
-            // Enable async bit-bang mode with all pins as outputs
-            result = LibFtdi.ftdi_set_bitmode(_context, PIN_MASK_ALL_OUTPUT, BITMODE_BITBANG);
+            // Enable synchronous bit-bang mode with all pins as outputs
+            // Denkovi DAE-CB/Ro8-USB requires sync mode (0x04), not async (0x01)
+            result = LibFtdi.ftdi_set_bitmode(_context, PIN_MASK_ALL_OUTPUT, BITMODE_SYNCBB);
             if (result < 0)
             {
-                _logger?.LogError("Failed to set bit-bang mode: {Result} - {Error}", result, GetErrorString());
+                _logger?.LogError("Failed to set sync bit-bang mode: {Result} - {Error}", result, GetErrorString());
                 return false;
             }
+
+            _logger?.LogDebug("FTDI sync bit-bang mode enabled");
 
             // Initialize all relays to OFF
             _currentState = 0x00;
@@ -470,7 +635,7 @@ public sealed class FtdiRelayBoard : IRelayBoard
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to initialize FTDI device for bit-bang mode");
+            _logger?.LogError(ex, "Failed to initialize FTDI device for sync bit-bang mode");
             return false;
         }
     }
@@ -512,14 +677,37 @@ public sealed class FtdiRelayBoard : IRelayBoard
     }
 
     /// <summary>
+    /// Get the bit mask for a relay channel, accounting for Denkovi board pin mapping.
+    /// </summary>
+    /// <param name="channel">Channel number (1-based).</param>
+    /// <returns>Bit mask for the specified channel.</returns>
+    /// <remarks>
+    /// Denkovi DAE-CB/Ro8-USB (8-channel): Sequential mapping, relay N uses bit N-1.
+    /// Denkovi DAE-CB/Ro4-USB (4-channel): Odd pin mapping, relay N uses bit (2*N - 1).
+    /// </remarks>
+    private ushort GetBitMaskForChannel(int channel)
+    {
+        if (_channelCount == 4 && channel >= 1 && channel <= 4)
+        {
+            // 4-channel Denkovi board uses odd pins: D1, D3, D5, D7
+            return (ushort)(1 << Denkovi4ChPinMap[channel - 1]);
+        }
+        else
+        {
+            // 8-channel Denkovi board uses sequential pins: D0-D7
+            return (ushort)(1 << (channel - 1));
+        }
+    }
+
+    /// <summary>
     /// Set the state of a specific relay channel.
     /// </summary>
-    /// <param name="channel">Channel number (1-16).</param>
+    /// <param name="channel">Channel number (1-8 for 8-ch board, 1-4 for 4-ch board).</param>
     /// <param name="on">True to turn on, false to turn off.</param>
     public bool SetRelay(int channel, bool on)
     {
-        if (channel < 1 || channel > 16)
-            throw new ArgumentOutOfRangeException(nameof(channel), "Channel must be 1-16");
+        if (channel < 1 || channel > _channelCount)
+            throw new ArgumentOutOfRangeException(nameof(channel), $"Channel must be 1-{_channelCount}");
 
         lock (_lock)
         {
@@ -529,8 +717,8 @@ public sealed class FtdiRelayBoard : IRelayBoard
                 return false;
             }
 
-            // Convert channel (1-16) to bit position (0-15)
-            ushort bit = (ushort)(1 << (channel - 1));
+            // Get the correct bit mask for this channel (handles 4-ch vs 8-ch pin mapping)
+            ushort bit = GetBitMaskForChannel(channel);
 
             ushort newState;
             if (on)
@@ -544,7 +732,7 @@ public sealed class FtdiRelayBoard : IRelayBoard
             if (WriteState(newState))
             {
                 _currentState = newState;
-                _logger?.LogDebug("Relay {Channel} set to {State}", channel, on ? "ON" : "OFF");
+                _logger?.LogDebug("Relay {Channel} set to {State} (bit mask 0x{Bit:X2})", channel, on ? "ON" : "OFF", bit);
                 return true;
             }
 
@@ -555,18 +743,19 @@ public sealed class FtdiRelayBoard : IRelayBoard
     /// <summary>
     /// Get the state of a specific relay channel.
     /// </summary>
-    /// <param name="channel">Channel number (1-16).</param>
+    /// <param name="channel">Channel number (1-8 for 8-ch board, 1-4 for 4-ch board).</param>
     public RelayState GetRelay(int channel)
     {
-        if (channel < 1 || channel > 16)
-            throw new ArgumentOutOfRangeException(nameof(channel), "Channel must be 1-16");
+        if (channel < 1 || channel > _channelCount)
+            throw new ArgumentOutOfRangeException(nameof(channel), $"Channel must be 1-{_channelCount}");
 
         lock (_lock)
         {
             if (_context == IntPtr.Zero)
                 return RelayState.Unknown;
 
-            ushort bit = (ushort)(1 << (channel - 1));
+            // Use the correct bit mask for this channel (handles 4-ch vs 8-ch pin mapping)
+            ushort bit = GetBitMaskForChannel(channel);
             return (_currentState & bit) != 0 ? RelayState.On : RelayState.Off;
         }
     }
@@ -608,7 +797,42 @@ public sealed class FtdiRelayBoard : IRelayBoard
     }
 
     /// <summary>
-    /// Write relay state to the board.
+    /// Read the actual hardware state of all relay pins.
+    /// This queries the FTDI chip directly to get the current pin states.
+    /// </summary>
+    /// <returns>Relay state bitmask from hardware (bit 0 = relay 1), or null if read failed.</returns>
+    public byte? ReadHardwareState()
+    {
+        lock (_lock)
+        {
+            if (_context == IntPtr.Zero)
+            {
+                _logger?.LogDebug("Cannot read hardware state - device not open");
+                return null;
+            }
+
+            try
+            {
+                int result = LibFtdi.ftdi_read_pins(_context, out byte pins);
+                if (result < 0)
+                {
+                    _logger?.LogWarning("Failed to read FTDI pins: error {Result} - {Error}",
+                        result, GetErrorString());
+                    return null;
+                }
+
+                return pins;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Exception reading FTDI pins");
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Write relay state to the board and verify the write succeeded.
     /// For 8-channel boards, writes 1 byte. For 16-channel, writes 2 bytes.
     /// </summary>
     private bool WriteState(ushort state)
@@ -641,6 +865,26 @@ public sealed class FtdiRelayBoard : IRelayBoard
             {
                 _logger?.LogWarning("FTDI write returned {BytesWritten} bytes (expected {Expected})",
                     bytesWritten, bytesToWrite);
+            }
+
+            // Verify the write succeeded by reading back hardware state
+            int readResult = LibFtdi.ftdi_read_pins(_context, out byte actualState);
+            if (readResult >= 0)
+            {
+                byte expectedLowByte = (byte)(state & 0xFF);
+                if (actualState != expectedLowByte)
+                {
+                    _logger?.LogWarning(
+                        "FTDI relay state mismatch: wrote 0x{Expected:X2}, hardware reports 0x{Actual:X2}",
+                        expectedLowByte, actualState);
+                    return false;
+                }
+                _logger?.LogDebug("FTDI write verified: 0x{State:X2}", actualState);
+            }
+            else
+            {
+                // Verification failed but write may have succeeded - log but don't fail
+                _logger?.LogDebug("Could not verify FTDI write (ftdi_read_pins returned {Result})", readResult);
             }
 
             return true;
@@ -727,6 +971,12 @@ public sealed class FtdiRelayBoard : IRelayBoard
         public static extern int ftdi_usb_purge_buffers(IntPtr ftdi);
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ftdi_tcioflush(IntPtr ftdi);
+
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ftdi_set_latency_timer(IntPtr ftdi, byte latency);
+
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int ftdi_set_baudrate(IntPtr ftdi, int baudrate);
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
@@ -739,8 +989,66 @@ public sealed class FtdiRelayBoard : IRelayBoard
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int ftdi_read_data(IntPtr ftdi, [Out] byte[] buf, int size);
 
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ftdi_read_pins(IntPtr ftdi, out byte pins);
+
         // Error handling
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr ftdi_get_error_string(IntPtr ftdi);
+    }
+
+    /// <summary>
+    /// P/Invoke declarations for libusb-1.0.
+    /// Used to get USB bus/port path for stable device identification.
+    /// libftdi links against libusb, so this library is available wherever FTDI works.
+    /// </summary>
+    private static class LibUsb
+    {
+        // Library name varies by platform:
+        // - Linux: libusb-1.0.so
+        // - macOS: libusb-1.0.dylib (usually via Homebrew)
+        private const string LibraryName = "libusb-1.0";
+
+        /// <summary>Get the bus number of a device.</summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern byte libusb_get_bus_number(IntPtr dev);
+
+        /// <summary>
+        /// Get the list of port numbers from root for a device.
+        /// Returns the number of elements filled, or LIBUSB_ERROR_OVERFLOW on failure.
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int libusb_get_port_numbers(IntPtr dev, byte[] port_numbers, int port_numbers_len);
+    }
+
+    /// <summary>
+    /// Get the USB path (bus-port.port.port) for a libusb device.
+    /// This path is stable across reboots as long as the device stays in the same physical port.
+    /// </summary>
+    /// <param name="libusb_device">Pointer to libusb_device (from ftdi_device_list.dev)</param>
+    /// <returns>USB path like "1-3.2" (bus 1, port 3, hub port 2), or null if unavailable.</returns>
+    private static string? GetUsbPath(IntPtr libusb_device)
+    {
+        if (libusb_device == IntPtr.Zero)
+            return null;
+
+        try
+        {
+            byte bus = LibUsb.libusb_get_bus_number(libusb_device);
+            byte[] ports = new byte[7]; // USB spec allows max 7 levels of hubs
+            int portCount = LibUsb.libusb_get_port_numbers(libusb_device, ports, ports.Length);
+
+            if (portCount <= 0)
+                return null;
+
+            // Format: "1-3.2" (bus 1, port 3, hub port 2) - matches Linux sysfs format
+            var portPath = string.Join(".", ports.Take(portCount).Select(p => p.ToString()));
+            return $"{bus}-{portPath}";
+        }
+        catch
+        {
+            // libusb not available or call failed - graceful degradation
+            return null;
+        }
     }
 }

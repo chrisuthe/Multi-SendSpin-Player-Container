@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace MultiRoomAudio.Models;
 
@@ -37,7 +39,11 @@ public enum RelayBoardType
 {
     /// <summary>Unknown board type.</summary>
     Unknown,
-    /// <summary>FTDI-based relay board (Denkovi, etc.) - uses bitbang protocol.</summary>
+    /// <summary>
+    /// Denkovi FTDI-based relay board using synchronous bitbang mode.
+    /// Only Denkovi DAE-CB/Ro4-USB and DAE-CB/Ro8-USB models are supported.
+    /// Uses FT245RL chip with sync bitbang protocol (mode 0x04).
+    /// </summary>
     Ftdi,
     /// <summary>USB HID relay board (DCT Tech, ucreatefun, etc.) - uses HID protocol.</summary>
     UsbHid,
@@ -45,6 +51,26 @@ public enum RelayBoardType
     Modbus,
     /// <summary>Mock board for testing.</summary>
     Mock
+}
+
+/// <summary>
+/// Denkovi FTDI relay board models.
+/// Only these specific Denkovi models are supported - generic FTDI boards are not supported.
+/// All models use FT245RL chip with synchronous bitbang mode (0x04).
+/// </summary>
+public enum DenkoviBoardModel
+{
+    /// <summary>
+    /// DAE-CB/Ro8-USB - 8 channel relay board.
+    /// Uses sequential pin mapping: Relay 1-8 → Bits 0-7.
+    /// </summary>
+    Ro8,
+
+    /// <summary>
+    /// DAE-CB/Ro4-USB - 4 channel relay board.
+    /// Uses odd pin mapping: Relay 1-4 → Bits 1,3,5,7 (pins D1,D3,D5,D7).
+    /// </summary>
+    Ro4
 }
 
 /// <summary>
@@ -442,24 +468,44 @@ public record FtdiDeviceInfo(
 )
 {
     /// <summary>
-    /// Get the preferred identifier for this device.
-    /// Uses serial number if available, otherwise USB path.
+    /// Get the stable identifier for this device.
+    /// Always uses USB path hash for consistency with HID/Modbus boards.
     /// </summary>
+    /// <remarks>
+    /// ID formats:
+    /// - Path-based: "FTDI:8HEXCHARS" (MD5 hash of USB path, stable across reboots)
+    /// - Index-based: "FTDI-00" (fallback, unstable - only if libusb unavailable)
+    /// </remarks>
     public string GetBoardId()
     {
-        if (!string.IsNullOrWhiteSpace(SerialNumber))
-            return SerialNumber;
-
+        // Always use path-based hash for consistency with HID/Modbus boards
+        // This avoids collisions when multiple boards have the same serial number
         if (!string.IsNullOrWhiteSpace(UsbPath))
-            return $"USB:{UsbPath}";
+            return $"FTDI:{StableHash(UsbPath)}";
 
+        // Last resort - index-based, unstable (shouldn't happen with libusb)
         return $"FTDI-{Index:D2}";
     }
 
     /// <summary>
-    /// Whether this device is identified by USB port path (less stable).
+    /// Whether this device is identified by USB port path.
+    /// Always true for FTDI boards (matches HID/Modbus behavior).
     /// </summary>
-    public bool IsPortBased => string.IsNullOrWhiteSpace(SerialNumber);
+    public bool IsPortBased => true;
+
+    /// <summary>
+    /// Compute a stable hash of the USB path for device identification.
+    /// Uses MD5 to produce a short, consistent identifier.
+    /// </summary>
+    /// <param name="input">The USB path string (e.g., "1-3.2")</param>
+    /// <returns>8-character hex string (first 4 bytes of MD5)</returns>
+    public static string StableHash(string input)
+    {
+        var bytes = Encoding.UTF8.GetBytes(input);
+        var hash = MD5.HashData(bytes);
+        // Take first 4 bytes for an 8-char hex string
+        return $"{hash[0]:X2}{hash[1]:X2}{hash[2]:X2}{hash[3]:X2}";
+    }
 };
 
 /// <summary>

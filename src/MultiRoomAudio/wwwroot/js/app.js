@@ -1320,9 +1320,9 @@ function openStatsForNerds(playerName) {
     const modal = new bootstrap.Modal(document.getElementById('statsForNerdsModal'));
     modal.show();
 
-    // Start polling
+    // Start polling (500ms for responsive UI - backend caches stats every 250ms)
     fetchAndRenderStats();
-    statsInterval = setInterval(fetchAndRenderStats, 2000);
+    statsInterval = setInterval(fetchAndRenderStats, 500);
 
     // Stop polling when modal closes
     document.getElementById('statsForNerdsModal').addEventListener('hidden.bs.modal', () => {
@@ -3263,6 +3263,12 @@ function renderTriggers() {
             `;
         }).join('');
 
+        // Board type badge
+        const boardTypeLabel = board.boardType === 'Ftdi' ? 'FTDI' : (board.boardType === 'UsbHid' ? 'HID' : board.boardType);
+        const boardTypeBadge = board.boardType
+            ? `<span class="badge ${board.boardType === 'Ftdi' ? 'bg-primary' : 'bg-info'} ms-2">${boardTypeLabel}</span>`
+            : '';
+
         return `
             <div class="accordion-item">
                 <h2 class="accordion-header">
@@ -3270,6 +3276,7 @@ function renderTriggers() {
                             data-bs-toggle="collapse" data-bs-target="#board-${boardIdSafe}">
                         <span class="me-2"><i class="fas fa-microchip"></i></span>
                         <span class="fw-bold">${escapeHtml(board.displayName || board.boardId)}</span>
+                        ${boardTypeBadge}
                         <span class="ms-2 small ${boardStatusClass}">${boardStatusText}</span>
                         ${portWarning}
                         <span class="ms-auto me-3 small text-muted">${board.channelCount} channels</span>
@@ -3413,10 +3420,12 @@ async function showAddBoardDialog() {
                 availableDevices.map(d => {
                     // Use boardId as the value (consistent with RelayDeviceInfo)
                     const id = d.boardId;
-                    // Build label showing type, description and simplified port
+                    // Build label showing type
                     const typeLabel = d.boardType === 'UsbHid' ? 'HID' : 'FTDI';
-                    const channelPart = d.channelCount ? ` - ${d.channelCount}ch` : '';
-                    const detectedNote = d.channelCountDetected ? ' (auto)' : '';
+                    // For FTDI boards, don't show channel count in label (user will select model)
+                    const isFtdi = d.boardType === 'Ftdi';
+                    const channelPart = !isFtdi && d.channelCount ? ` - ${d.channelCount}ch` : '';
+                    const detectedNote = !isFtdi && d.channelCountDetected ? ' (auto)' : '';
                     // Always show USB port for differentiation, plus serial if available
                     const usbPort = extractUsbPort(d.usbPath);
                     const portPart = usbPort || '';
@@ -3431,28 +3440,41 @@ async function showAddBoardDialog() {
     }
 
     const channelCountSelect = document.getElementById('addBoardChannelCount');
-    const channelCountGroup = channelCountSelect.closest('.mb-3');
+    const channelCountGroup = document.getElementById('addBoardChannelCountGroup');
+    const ftdiModelGroup = document.getElementById('addBoardFtdiModelGroup');
+    const ftdiModelSelect = document.getElementById('addBoardFtdiModel');
 
-    // Update port warning visibility and channel count on selection change
+    // Update port warning visibility and channel count/model selector on selection change
     select.onchange = function() {
         const option = this.options[this.selectedIndex];
         const isPortBased = option?.dataset?.portBased === 'true';
         const channelDetected = option?.dataset?.channelDetected === 'true';
         const channelCount = option?.dataset?.channelCount;
+        const boardType = option?.dataset?.boardType;
+        const isFtdi = boardType === 'Ftdi';
 
         document.getElementById('addBoardPortWarning').classList.toggle('d-none', !isPortBased);
 
-        // Auto-fill channel count from detected value
-        if (channelCount) {
-            channelCountSelect.value = channelCount;
-        }
+        // Show FTDI model selector for FTDI boards, channel count for others
+        ftdiModelGroup.classList.toggle('d-none', !isFtdi);
+        channelCountGroup.classList.toggle('d-none', isFtdi);
 
-        // Disable channel count selector if auto-detected
-        channelCountSelect.disabled = channelDetected;
-        if (channelDetected) {
-            channelCountGroup.title = 'Channel count auto-detected from device';
+        if (isFtdi) {
+            // For FTDI boards, default to 8-channel model
+            ftdiModelSelect.value = 'Ro8';
         } else {
-            channelCountGroup.title = '';
+            // Auto-fill channel count from detected value for HID boards
+            if (channelCount) {
+                channelCountSelect.value = channelCount;
+            }
+
+            // Disable channel count selector if auto-detected
+            channelCountSelect.disabled = channelDetected;
+            if (channelDetected) {
+                channelCountGroup.title = 'Channel count auto-detected from device';
+            } else {
+                channelCountGroup.title = '';
+            }
         }
     };
 
@@ -3460,6 +3482,9 @@ async function showAddBoardDialog() {
     channelCountSelect.value = '8';
     channelCountSelect.disabled = false;
     channelCountGroup.title = '';
+    ftdiModelSelect.value = 'Ro8';
+    ftdiModelGroup.classList.add('d-none');
+    channelCountGroup.classList.remove('d-none');
     document.getElementById('addBoardPortWarning').classList.add('d-none');
 
     addBoardModal.show();
@@ -3470,11 +3495,23 @@ async function addBoard() {
     const select = document.getElementById('addBoardDeviceSelect');
     const boardId = select.value;
     const displayName = document.getElementById('addBoardDisplayName').value.trim();
-    const channelCount = parseInt(document.getElementById('addBoardChannelCount').value, 10);
 
     // Get board type from selected option
     const selectedOption = select.options[select.selectedIndex];
     const boardType = selectedOption?.dataset?.boardType || 'Unknown';
+    const isFtdi = boardType === 'Ftdi';
+
+    // Get channel count from appropriate selector based on board type
+    let channelCount;
+    if (isFtdi) {
+        // For FTDI boards, get channel count from model selector
+        const ftdiModelSelect = document.getElementById('addBoardFtdiModel');
+        const selectedModel = ftdiModelSelect.options[ftdiModelSelect.selectedIndex];
+        channelCount = parseInt(selectedModel.dataset.channels, 10);
+    } else {
+        // For HID and other boards, use the channel count selector
+        channelCount = parseInt(document.getElementById('addBoardChannelCount').value, 10);
+    }
 
     if (!boardId) {
         showAlert('Please select a device', 'danger');
@@ -3538,10 +3575,13 @@ async function editBoard(boardId) {
     const board = triggersData?.boards?.find(b => b.boardId === boardId);
     if (!board) return;
 
-    // Check if this device has auto-detected channel count
+    // Check board type
+    const isFtdi = board.boardType === 'Ftdi';
+
+    // Check if this device has auto-detected channel count (only relevant for non-FTDI)
     // Look up the device in the detected devices list
     let channelCountDetected = false;
-    if (ftdiDevicesData?.devices) {
+    if (!isFtdi && ftdiDevicesData?.devices) {
         const device = ftdiDevicesData.devices.find(d => {
             // Match by board ID (could be serial-based or path-based)
             const deviceBoardId = d.boardId ||
@@ -3561,17 +3601,33 @@ async function editBoard(boardId) {
     const channelCountSelect = document.getElementById('editBoardChannelCount');
     const channelCountGroup = document.getElementById('editBoardChannelCountGroup');
     const channelCountHelp = document.getElementById('editBoardChannelCountHelp');
+    const ftdiModelGroup = document.getElementById('editBoardFtdiModelGroup');
+    const ftdiModelSelect = document.getElementById('editBoardFtdiModel');
     const boardIdInput = document.getElementById('editBoardId');
+    const boardTypeInput = document.getElementById('editBoardType');
     const saveBtn = document.getElementById('editBoardSaveBtn');
 
     // Populate form
     boardIdInput.value = boardId;
+    boardTypeInput.value = board.boardType || '';
     displayNameInput.value = board.displayName || '';
-    channelCountSelect.value = String(board.channelCount);
 
-    // Disable channel count if auto-detected
-    channelCountSelect.disabled = channelCountDetected;
-    channelCountHelp.classList.toggle('d-none', !channelCountDetected);
+    // Show appropriate selector based on board type
+    if (isFtdi) {
+        // For FTDI boards, show model selector
+        ftdiModelGroup.classList.remove('d-none');
+        channelCountGroup.classList.add('d-none');
+        // Set model based on current channel count (4 = Ro4, 8 = Ro8 or Generic8)
+        ftdiModelSelect.value = board.channelCount === 4 ? 'Ro4' : 'Ro8';
+    } else {
+        // For HID and other boards, show channel count selector
+        ftdiModelGroup.classList.add('d-none');
+        channelCountGroup.classList.remove('d-none');
+        channelCountSelect.value = String(board.channelCount);
+        // Disable channel count if auto-detected
+        channelCountSelect.disabled = channelCountDetected;
+        channelCountHelp.classList.toggle('d-none', !channelCountDetected);
+    }
 
     const bsModal = new bootstrap.Modal(modal);
 
@@ -3581,7 +3637,15 @@ async function editBoard(boardId) {
 
     newSaveBtn.addEventListener('click', async () => {
         const newName = displayNameInput.value.trim();
-        const newCount = parseInt(channelCountSelect.value, 10);
+
+        // Get channel count from appropriate selector based on board type
+        let newCount;
+        if (isFtdi) {
+            const selectedModel = ftdiModelSelect.options[ftdiModelSelect.selectedIndex];
+            newCount = parseInt(selectedModel.dataset.channels, 10);
+        } else {
+            newCount = parseInt(channelCountSelect.value, 10);
+        }
 
         try {
             const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {

@@ -49,7 +49,7 @@ ASP.NET Core 8.0 Application
 ├── Relay/                        # 12V trigger hardware abstraction
 │   ├── IRelayBoard.cs           # Common relay board interface
 │   ├── HidRelayBoard.cs         # USB HID relay boards (DCT Tech)
-│   ├── FtdiRelayBoard.cs        # FTDI relay boards (Denkovi)
+│   ├── FtdiRelayBoard.cs        # FTDI relay boards (Denkovi + generic)
 │   └── MockRelayBoard.cs        # Mock board for testing
 ├── Audio/                        # Audio output layer
 │   ├── BufferedAudioSampleSource.cs  # Bridges timed buffer to audio output
@@ -369,19 +369,23 @@ The trigger system supports USB relay boards for automatic amplifier power contr
 
 ### Supported Hardware
 
-| Type | VID:PID | Example Products | Channel Detection |
-| ---- | ------- | ---------------- | ----------------- |
-| **USB HID** | `0x16C0:0x05DF` | DCT Tech, ucreatefun | Auto-detected from product name (e.g., "USBRelay8") |
-| **FTDI** | `0x0403:0x6001` | Denkovi DAE0006K | Manual configuration required |
-| **Modbus/CH340** | `0x1A86:0x7523` | Sainsmart 16-channel | Manual configuration required |
+| Type             | VID:PID         | Supported Models                                    | Channel Detection |
+|------------------|-----------------|-----------------------------------------------------|-------------------|
+| **USB HID**      | `0x16C0:0x05DF` | DCT Tech, ucreatefun                                | Auto-detected     |
+| **FTDI**         | `0x0403:0x6001` | Denkovi DAE-CB/Ro8-USB, DAE-CB/Ro4-USB, Generic 8ch | Manual (model)    |
+| **Modbus/CH340** | `0x1A86:0x7523` | Sainsmart 16-channel                                | Manual            |
 
 ### Board Identification
 
-Boards are identified in priority order:
+All board types use USB port path hash for consistent identification:
 
-1. **Serial Number** (preferred) - Stable across reboots and USB port changes
-2. **USB Port Path** (fallback) - For boards without unique serial numbers, format: `USB:1-2.3`
-3. **Serial Port** (Modbus boards) - Format: `MODBUS:/dev/ttyUSB0`
+| Board Type | ID Format | Example |
+|------------|-----------|---------|
+| **HID** | `HID:8HEXCHARS` | `HID:CA88BCAC` |
+| **FTDI** | `FTDI:8HEXCHARS` | `FTDI:7B9E3D1A` |
+| **Modbus** | `MODBUS:8HEXCHARS` | `MODBUS:7F3A2B1C` |
+
+Board IDs are stable across reboots as long as the board stays in the same USB port. Moving a board to a different port will generate a new ID.
 
 ### HID Protocol Details
 
@@ -393,9 +397,20 @@ Boards are identified in priority order:
 
 ### FTDI Protocol Details
 
-- Uses bitbang mode on FT245RL chip
-- State written as single byte bitmask (bit 0 = channel 1, etc.)
+- Uses **synchronous bitbang mode (0x04)** on FT245RL chip - NOT async bitbang (0x01)
+- State written as single byte bitmask
 - Requires `libftdi1` library
+- Hardware state read-back supported via `ftdi_read_pins()`
+
+**Pin Mapping:**
+
+| Model                        | Relay 1 | Relay 2 | Relay 3 | Relay 4 | Relays 5-8 |
+|------------------------------|---------|---------|---------|---------|------------|
+| **Denkovi DAE-CB/Ro8-USB**   | Bit 0   | Bit 1   | Bit 2   | Bit 3   | Bits 4-7   |
+| **Denkovi DAE-CB/Ro4-USB**   | Bit 1   | Bit 3   | Bit 5   | Bit 7   | N/A        |
+| **Generic FTDI (8 channels)**| Bit 0   | Bit 1   | Bit 2   | Bit 3   | Bits 4-7   |
+
+The Denkovi 4-channel board uses **odd pins only** (D1, D3, D5, D7), not sequential pins.
 
 ### Modbus/CH340 Protocol Details
 
