@@ -1299,6 +1299,7 @@ function showPrompt(title, label, defaultValue = '', placeholder = '') {
 // ========== Stats for Nerds ==========
 let statsInterval = null;
 let currentStatsPlayer = null;
+let isStatsFetching = false;
 
 function openStatsForNerds(playerName) {
     // Clear any existing interval first to prevent multiple polling loops
@@ -1333,7 +1334,9 @@ function openStatsForNerds(playerName) {
 
 async function fetchAndRenderStats() {
     if (!currentStatsPlayer) return;
+    if (isStatsFetching) return; // Prevent overlapping requests
 
+    isStatsFetching = true;
     try {
         const response = await fetch(`./api/players/${encodeURIComponent(currentStatsPlayer)}/stats`);
         if (!response.ok) {
@@ -1350,6 +1353,8 @@ async function fetchAndRenderStats() {
                 <p class="text-muted mb-0">Failed to load stats</p>
             </div>
         `;
+    } finally {
+        isStatsFetching = false;
     }
 }
 
