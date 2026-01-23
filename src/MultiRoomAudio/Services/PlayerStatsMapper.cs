@@ -95,7 +95,7 @@ internal static class PlayerStatsMapper
         var bufferStats = pipeline.BufferStats;
         return new BufferStatsInfo(
             BufferedMs: (int)(bufferStats?.BufferedMs ?? 0),
-            TargetMs: (int)(bufferStats?.TargetMs ?? 0),
+            TargetMs: 5000,
             Underruns: bufferStats?.UnderrunCount ?? 0,
             Overruns: bufferStats?.OverrunCount ?? 0
         );
