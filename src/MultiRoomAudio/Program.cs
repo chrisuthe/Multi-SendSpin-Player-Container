@@ -191,6 +191,9 @@ else if (!int.TryParse(portString, out port) || port < 1 || port > 65535)
     port = DefaultPort;
 }
 
+// Clear default URLs to avoid "Overriding address" warning
+builder.WebHost.UseUrls();
+
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(port);
