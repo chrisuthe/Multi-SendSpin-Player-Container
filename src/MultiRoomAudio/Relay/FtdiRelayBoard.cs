@@ -38,6 +38,7 @@ public sealed class FtdiRelayBoard : IRelayBoard
     // Bit mode constants
     private const byte BITMODE_RESET = 0x00;
     private const byte BITMODE_BITBANG = 0x01; // Async bitbang
+    private const byte BITMODE_SYNCBB = 0x04;  // Synchronous bitbang (required by Denkovi)
 
     /// <summary>
     /// Static constructor to register custom native library resolver for cross-platform support.
@@ -426,7 +427,7 @@ public sealed class FtdiRelayBoard : IRelayBoard
     }
 
     /// <summary>
-    /// Initialize the device for relay control (bit-bang mode).
+    /// Initialize the device for relay control (synchronous bit-bang mode).
     /// </summary>
     private bool Initialize()
     {
@@ -442,11 +443,18 @@ public sealed class FtdiRelayBoard : IRelayBoard
                 _logger?.LogWarning("Failed to reset FTDI device: {Result} - {Error}", result, GetErrorString());
             }
 
-            // Purge buffers
-            result = LibFtdi.ftdi_usb_purge_buffers(_context);
+            // Set latency timer (important for sync mode)
+            result = LibFtdi.ftdi_set_latency_timer(_context, 2);
             if (result < 0)
             {
-                _logger?.LogWarning("Failed to purge FTDI buffers: {Result}", result);
+                _logger?.LogWarning("Failed to set latency timer: {Result}", result);
+            }
+
+            // Purge buffers
+            result = LibFtdi.ftdi_tcioflush(_context);
+            if (result < 0)
+            {
+                _logger?.LogWarning("Failed to flush FTDI buffers: {Result}", result);
             }
 
             // Set baud rate (affects bit-bang timing)
@@ -456,13 +464,16 @@ public sealed class FtdiRelayBoard : IRelayBoard
                 _logger?.LogWarning("Failed to set baud rate: {Result}", result);
             }
 
-            // Enable async bit-bang mode with all pins as outputs
-            result = LibFtdi.ftdi_set_bitmode(_context, PIN_MASK_ALL_OUTPUT, BITMODE_BITBANG);
+            // Enable synchronous bit-bang mode with all pins as outputs
+            // Denkovi DAE-CB/Ro8-USB requires sync mode (0x04), not async (0x01)
+            result = LibFtdi.ftdi_set_bitmode(_context, PIN_MASK_ALL_OUTPUT, BITMODE_SYNCBB);
             if (result < 0)
             {
-                _logger?.LogError("Failed to set bit-bang mode: {Result} - {Error}", result, GetErrorString());
+                _logger?.LogError("Failed to set sync bit-bang mode: {Result} - {Error}", result, GetErrorString());
                 return false;
             }
+
+            _logger?.LogDebug("FTDI sync bit-bang mode enabled");
 
             // Initialize all relays to OFF
             _currentState = 0x00;
@@ -470,7 +481,7 @@ public sealed class FtdiRelayBoard : IRelayBoard
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to initialize FTDI device for bit-bang mode");
+            _logger?.LogError(ex, "Failed to initialize FTDI device for sync bit-bang mode");
             return false;
         }
     }
@@ -725,6 +736,12 @@ public sealed class FtdiRelayBoard : IRelayBoard
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int ftdi_usb_purge_buffers(IntPtr ftdi);
+
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ftdi_tcioflush(IntPtr ftdi);
+
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ftdi_set_latency_timer(IntPtr ftdi, byte latency);
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int ftdi_set_baudrate(IntPtr ftdi, int baudrate);
