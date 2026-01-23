@@ -9,6 +9,7 @@ let connection = null;
 let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
 let pendingUpdate = null; // Store pending updates during interaction
+let isModalOpen = false; // Pause auto-refresh while modal is open
 
 function formatBuildVersion(apiInfo) {
     const version = apiInfo?.version;
@@ -355,7 +356,12 @@ function setupSignalR() {
 }
 
 // API calls
-async function refreshStatus() {
+async function refreshStatus(force = false) {
+    // Skip auto-refresh while modal is open (unless forced)
+    if (isModalOpen && !force) {
+        return;
+    }
+
     try {
         const response = await fetch('./api/players');
         if (!response.ok) throw new Error('Failed to fetch players');
@@ -442,6 +448,8 @@ async function refreshDevices() {
 
 // Open the modal in Add mode
 async function openAddPlayerModal() {
+    isModalOpen = true;
+
     // Reset form
     document.getElementById('playerForm').reset();
     document.getElementById('editingPlayerName').value = '';
@@ -461,10 +469,17 @@ async function openAddPlayerModal() {
 
     const modal = new bootstrap.Modal(document.getElementById('playerModal'));
     modal.show();
+
+    // Reset flag when modal closes
+    document.getElementById('playerModal').addEventListener('hidden.bs.modal', () => {
+        isModalOpen = false;
+    }, { once: true });
 }
 
 // Open the modal in Edit mode with player data
 async function openEditPlayerModal(playerName) {
+    isModalOpen = true;
+
     try {
         // Fetch current player data
         const response = await fetch(`./api/players/${encodeURIComponent(playerName)}`);
@@ -520,7 +535,13 @@ async function openEditPlayerModal(playerName) {
 
         const modal = new bootstrap.Modal(document.getElementById('playerModal'));
         modal.show();
+
+        // Reset flag when modal closes
+        document.getElementById('playerModal').addEventListener('hidden.bs.modal', () => {
+            isModalOpen = false;
+        }, { once: true });
     } catch (error) {
+        isModalOpen = false;
         console.error('Error opening edit modal:', error);
         showAlert(error.message, 'danger');
     }
@@ -593,7 +614,7 @@ async function savePlayer() {
                 if (wasRenamed) {
                     // For renames, offer to restart rather than auto-restart
                     // The name change is saved locally, but Music Assistant needs a restart to see it
-                    await refreshStatus();
+                    await refreshStatus(true);
                     showAlert(
                         `Player renamed to "${finalName}". Restart the player for the name to appear in Music Assistant.`,
                         'info',
@@ -608,11 +629,11 @@ async function savePlayer() {
                         console.warn('Restart request failed, player may need manual restart');
                     }
                     // Refresh status AFTER restart completes
-                    await refreshStatus();
+                    await refreshStatus(true);
                     showAlert(`Player "${finalName}" updated and restarted`, 'success');
                 }
             } else {
-                await refreshStatus();
+                await refreshStatus(true);
                 showAlert(`Player "${finalName}" updated successfully`, 'success');
             }
         } else {
@@ -648,7 +669,7 @@ async function savePlayer() {
             bootstrap.Modal.getInstance(document.getElementById('playerModal')).hide();
             document.getElementById('playerForm').reset();
             document.getElementById('initialVolumeValue').textContent = '75%';
-            await refreshStatus();
+            await refreshStatus(true);
 
             showAlert(`Player "${name}" created successfully`, 'success');
         }
@@ -1300,7 +1321,7 @@ function openStatsForNerds(playerName) {
 
     // Start polling
     fetchAndRenderStats();
-    statsInterval = setInterval(fetchAndRenderStats, 500);
+    statsInterval = setInterval(fetchAndRenderStats, 2000);
 
     // Stop polling when modal closes
     document.getElementById('statsForNerdsModal').addEventListener('hidden.bs.modal', () => {
