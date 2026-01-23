@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-b76486b
+## Development Build: sha-0e83da6
 
 **Current Dev Build Changes** (recent)
 
-- Merge pull request #69 from scyto/feature/preserve-volume-across-tracks
-- Fix hardware volume init to always apply volume, not skip
-- Fix UI slider interaction and tooltip issues
-- Add volume grace period to resolve startup volume sync battle
-- Fix tooltip persistence issues by properly disposing old instances
-- Add automatic page reload on backend version change
-- Fix: Restore volume sync and implement proper tooltips
-- UI improvements for player volume controls
-- Fix: Push startup volume to MA immediately on connection
-- Fix: Respect configured volume limits during hardware initialization
+- Merge pull request #103 from scyto/dev
+- fix format selection i hope
+- Merge branch 'dev' of https://github.com/scyto/Multi-SendSpin-Player-Container into dev
+- Fix stats for nerds buffer target to show 5000ms protocol capacity
+- Trigger rebuild
+- Fix Kestrel address override warning at startup
+- Fix stats for nerds overlapping requests causing audio issues
+- Pause auto-refresh during modal editing, slow stats polling
+- Remove buffer size UI and fix stats/format bugs
+- Merge pull request #101 from scyto/dev
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->

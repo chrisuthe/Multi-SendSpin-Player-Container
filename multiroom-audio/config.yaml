@@ -1,5 +1,5 @@
 name: Multi-Room Audio Controller
-version: "3.0.0"
+version: "4.0.0"
 slug: multiroom-audio
 description: >-
   Sendspin-powered multi-room audio controller. Stream audio from Music
