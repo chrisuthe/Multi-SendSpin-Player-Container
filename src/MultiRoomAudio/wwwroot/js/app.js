@@ -1320,9 +1320,9 @@ function openStatsForNerds(playerName) {
     const modal = new bootstrap.Modal(document.getElementById('statsForNerdsModal'));
     modal.show();
 
-    // Start polling
+    // Start polling (500ms for responsive UI - backend caches stats every 250ms)
     fetchAndRenderStats();
-    statsInterval = setInterval(fetchAndRenderStats, 2000);
+    statsInterval = setInterval(fetchAndRenderStats, 500);
 
     // Stop polling when modal closes
     document.getElementById('statsForNerdsModal').addEventListener('hidden.bs.modal', () => {

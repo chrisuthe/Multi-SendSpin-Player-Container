@@ -66,6 +66,22 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// </summary>
     private readonly SemaphoreSlim _discoveryLock = new(1, 1);
 
+    /// <summary>
+    /// Cached player stats for Stats for Nerds panel.
+    /// Populated by background timer to avoid SDK lock contention with audio thread.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, PlayerStatsResponse> _statsCache = new();
+
+    /// <summary>
+    /// Timer for background stats collection (250ms interval).
+    /// </summary>
+    private Timer? _statsCacheTimer;
+
+    /// <summary>
+    /// Interval for background stats collection from SDK.
+    /// </summary>
+    private const int StatsCacheIntervalMs = 250;
+
     #region Constants
 
     /// <summary>
@@ -471,6 +487,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         _reconnectionCts = new CancellationTokenSource();
         _reconnectionTask = ProcessReconnectionsAsync(_reconnectionCts.Token);
 
+        // Start background stats cache timer (collects stats every 250ms to avoid SDK lock contention)
+        _statsCacheTimer = new Timer(CollectStatsForCache, null, StatsCacheIntervalMs, StatsCacheIntervalMs);
+
         _logger.LogInformation("PlayerManagerService started with {PlayerCount} active players, {PendingCount} pending reconnection",
             _players.Count, _pendingReconnections.Count);
     }
@@ -580,7 +599,15 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         _logger.LogInformation("PlayerManagerService stopping with {PlayerCount} active players, {PendingCount} pending reconnection...",
             _players.Count, _pendingReconnections.Count);
 
-        // Stop reconnection task first
+        // Stop stats cache timer first
+        if (_statsCacheTimer != null)
+        {
+            await _statsCacheTimer.DisposeAsync();
+            _statsCacheTimer = null;
+        }
+        _statsCache.Clear();
+
+        // Stop reconnection task
         _reconnectionCts?.Cancel();
         if (_reconnectionTask != null)
         {
@@ -1965,23 +1992,76 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
     /// <summary>
     /// Gets real-time stats for a player (Stats for Nerds).
+    /// Returns cached stats collected by background timer to avoid SDK lock contention.
     /// </summary>
     /// <param name="name">Player name.</param>
     /// <returns>Stats response or null if player not found.</returns>
     public PlayerStatsResponse? GetPlayerStats(string name)
     {
-        if (!_players.TryGetValue(name, out var context))
+        // Return cached stats - these are updated every 250ms by the background timer
+        // This avoids accessing SDK's BufferStats from the HTTP request thread,
+        // which was causing lock contention with the audio playback thread
+        if (_statsCache.TryGetValue(name, out var cachedStats))
+            return cachedStats;
+
+        // Player exists but no cached stats yet (first 250ms after player start)
+        // Return null rather than accessing SDK directly to maintain consistency
+        if (!_players.ContainsKey(name))
             return null;
 
-        // Get the audio device for hardware format info
-        var device = _backendFactory.GetDevice(context.Config.DeviceId);
+        // Player exists but cache not yet populated - return minimal response
+        return null;
+    }
 
-        return PlayerStatsMapper.BuildStats(
-            name,
-            context.Pipeline,
-            context.ClockSync,
-            context.Player,
-            device);
+    /// <summary>
+    /// Timer callback that collects stats from all players and updates the cache.
+    /// Runs every 250ms on a background thread to avoid blocking the audio thread.
+    /// </summary>
+    private void CollectStatsForCache(object? state)
+    {
+        try
+        {
+            // Get snapshot of current player names
+            var playerNames = _players.Keys.ToList();
+
+            // Remove stats for players that no longer exist
+            foreach (var cachedName in _statsCache.Keys.ToList())
+            {
+                if (!_players.ContainsKey(cachedName))
+                {
+                    _statsCache.TryRemove(cachedName, out _);
+                }
+            }
+
+            // Collect fresh stats for each player
+            foreach (var name in playerNames)
+            {
+                if (_players.TryGetValue(name, out var context))
+                {
+                    try
+                    {
+                        var device = context.Config.DeviceId != null
+                            ? _backendFactory.GetDevice(context.Config.DeviceId)
+                            : null;
+                        var stats = PlayerStatsMapper.BuildStats(
+                            name,
+                            context.Pipeline,
+                            context.ClockSync,
+                            context.Player,
+                            device);
+                        _statsCache[name] = stats;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to collect stats for player {PlayerName}", name);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error in stats cache collection timer");
+        }
     }
 
     private static string GenerateClientId(string name)
