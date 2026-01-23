@@ -521,6 +521,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 ServerUrl = playerConfig.Server,
                 Volume = playerConfig.Volume ?? 100,
                 DelayMs = playerConfig.DelayMs,
+                AdvertisedFormat = playerConfig.AdvertisedFormat,
                 Persist = false // Already persisted, don't re-save
             };
 
@@ -978,7 +979,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 {
                     Name = playerName,
                     Device = playerConfig.Device,
-                    Volume = playerConfig.Volume ?? 75
+                    Volume = playerConfig.Volume ?? 75,
+                    AdvertisedFormat = playerConfig.AdvertisedFormat
                 };
 
                 await CreatePlayerAsync(createRequest, ct);
@@ -2294,6 +2296,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 ServerUrl = state.Config.Server,
                 Volume = state.Config.Volume ?? 100,
                 DelayMs = state.Config.DelayMs,
+                AdvertisedFormat = state.Config.AdvertisedFormat,
                 Persist = false // Already persisted
             };
 
