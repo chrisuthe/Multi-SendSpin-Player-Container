@@ -3263,8 +3263,8 @@ function renderTriggers() {
             `;
         }).join('');
 
-        // Board type badge - use "Denkovi" for FTDI boards
-        const boardTypeLabel = board.boardType === 'Ftdi' ? 'Denkovi' : (board.boardType === 'UsbHid' ? 'HID' : board.boardType);
+        // Board type badge
+        const boardTypeLabel = board.boardType === 'Ftdi' ? 'FTDI' : (board.boardType === 'UsbHid' ? 'HID' : board.boardType);
         const boardTypeBadge = board.boardType
             ? `<span class="badge ${board.boardType === 'Ftdi' ? 'bg-primary' : 'bg-info'} ms-2">${boardTypeLabel}</span>`
             : '';
@@ -3420,9 +3420,9 @@ async function showAddBoardDialog() {
                 availableDevices.map(d => {
                     // Use boardId as the value (consistent with RelayDeviceInfo)
                     const id = d.boardId;
-                    // Build label showing type - use "Denkovi" for FTDI boards
-                    const typeLabel = d.boardType === 'UsbHid' ? 'HID' : 'Denkovi';
-                    // For FTDI/Denkovi boards, don't show channel count in label (user will select model)
+                    // Build label showing type
+                    const typeLabel = d.boardType === 'UsbHid' ? 'HID' : 'FTDI';
+                    // For FTDI boards, don't show channel count in label (user will select model)
                     const isFtdi = d.boardType === 'Ftdi';
                     const channelPart = !isFtdi && d.channelCount ? ` - ${d.channelCount}ch` : '';
                     const detectedNote = !isFtdi && d.channelCountDetected ? ' (auto)' : '';
@@ -3441,8 +3441,8 @@ async function showAddBoardDialog() {
 
     const channelCountSelect = document.getElementById('addBoardChannelCount');
     const channelCountGroup = document.getElementById('addBoardChannelCountGroup');
-    const denkoviModelGroup = document.getElementById('addBoardDenkoviModelGroup');
-    const denkoviModelSelect = document.getElementById('addBoardDenkoviModel');
+    const ftdiModelGroup = document.getElementById('addBoardFtdiModelGroup');
+    const ftdiModelSelect = document.getElementById('addBoardFtdiModel');
 
     // Update port warning visibility and channel count/model selector on selection change
     select.onchange = function() {
@@ -3455,13 +3455,13 @@ async function showAddBoardDialog() {
 
         document.getElementById('addBoardPortWarning').classList.toggle('d-none', !isPortBased);
 
-        // Show Denkovi model selector for FTDI boards, channel count for others
-        denkoviModelGroup.classList.toggle('d-none', !isFtdi);
+        // Show FTDI model selector for FTDI boards, channel count for others
+        ftdiModelGroup.classList.toggle('d-none', !isFtdi);
         channelCountGroup.classList.toggle('d-none', isFtdi);
 
         if (isFtdi) {
-            // For Denkovi boards, default to 8-channel model
-            denkoviModelSelect.value = 'Ro8';
+            // For FTDI boards, default to 8-channel model
+            ftdiModelSelect.value = 'Ro8';
         } else {
             // Auto-fill channel count from detected value for HID boards
             if (channelCount) {
@@ -3482,8 +3482,8 @@ async function showAddBoardDialog() {
     channelCountSelect.value = '8';
     channelCountSelect.disabled = false;
     channelCountGroup.title = '';
-    denkoviModelSelect.value = 'Ro8';
-    denkoviModelGroup.classList.add('d-none');
+    ftdiModelSelect.value = 'Ro8';
+    ftdiModelGroup.classList.add('d-none');
     channelCountGroup.classList.remove('d-none');
     document.getElementById('addBoardPortWarning').classList.add('d-none');
 
@@ -3504,9 +3504,9 @@ async function addBoard() {
     // Get channel count from appropriate selector based on board type
     let channelCount;
     if (isFtdi) {
-        // For Denkovi FTDI boards, get channel count from model selector
-        const denkoviModelSelect = document.getElementById('addBoardDenkoviModel');
-        const selectedModel = denkoviModelSelect.options[denkoviModelSelect.selectedIndex];
+        // For FTDI boards, get channel count from model selector
+        const ftdiModelSelect = document.getElementById('addBoardFtdiModel');
+        const selectedModel = ftdiModelSelect.options[ftdiModelSelect.selectedIndex];
         channelCount = parseInt(selectedModel.dataset.channels, 10);
     } else {
         // For HID and other boards, use the channel count selector
@@ -3601,8 +3601,8 @@ async function editBoard(boardId) {
     const channelCountSelect = document.getElementById('editBoardChannelCount');
     const channelCountGroup = document.getElementById('editBoardChannelCountGroup');
     const channelCountHelp = document.getElementById('editBoardChannelCountHelp');
-    const denkoviModelGroup = document.getElementById('editBoardDenkoviModelGroup');
-    const denkoviModelSelect = document.getElementById('editBoardDenkoviModel');
+    const ftdiModelGroup = document.getElementById('editBoardFtdiModelGroup');
+    const ftdiModelSelect = document.getElementById('editBoardFtdiModel');
     const boardIdInput = document.getElementById('editBoardId');
     const boardTypeInput = document.getElementById('editBoardType');
     const saveBtn = document.getElementById('editBoardSaveBtn');
@@ -3614,14 +3614,14 @@ async function editBoard(boardId) {
 
     // Show appropriate selector based on board type
     if (isFtdi) {
-        // For Denkovi FTDI boards, show model selector
-        denkoviModelGroup.classList.remove('d-none');
+        // For FTDI boards, show model selector
+        ftdiModelGroup.classList.remove('d-none');
         channelCountGroup.classList.add('d-none');
-        // Set model based on current channel count
-        denkoviModelSelect.value = board.channelCount === 4 ? 'Ro4' : 'Ro8';
+        // Set model based on current channel count (4 = Ro4, 8 = Ro8 or Generic8)
+        ftdiModelSelect.value = board.channelCount === 4 ? 'Ro4' : 'Ro8';
     } else {
         // For HID and other boards, show channel count selector
-        denkoviModelGroup.classList.add('d-none');
+        ftdiModelGroup.classList.add('d-none');
         channelCountGroup.classList.remove('d-none');
         channelCountSelect.value = String(board.channelCount);
         // Disable channel count if auto-detected
@@ -3641,7 +3641,7 @@ async function editBoard(boardId) {
         // Get channel count from appropriate selector based on board type
         let newCount;
         if (isFtdi) {
-            const selectedModel = denkoviModelSelect.options[denkoviModelSelect.selectedIndex];
+            const selectedModel = ftdiModelSelect.options[ftdiModelSelect.selectedIndex];
             newCount = parseInt(selectedModel.dataset.channels, 10);
         } else {
             newCount = parseInt(channelCountSelect.value, 10);

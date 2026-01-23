@@ -758,9 +758,23 @@ public class TriggerService : IHostedService, IAsyncDisposable
                     connected = board.OpenBySerial(boardId);
                 }
             }
+            else if (boardId.StartsWith("FTDI:", StringComparison.OrdinalIgnoreCase))
+            {
+                // FTDI path-based identification (hash of USB bus/port path)
+                var pathHash = boardId.Substring(5);
+                if (board is FtdiRelayBoard ftdiBoard)
+                {
+                    connected = ftdiBoard.OpenByPathHash(pathHash);
+                }
+                else
+                {
+                    _logger.LogWarning("Board '{BoardId}' is FTDI type but factory didn't create FtdiRelayBoard", boardId);
+                    connected = board.Open();
+                }
+            }
             else
             {
-                // FTDI uses serial-based identification
+                // FTDI with serial number (raw serial as ID)
                 var serial = GetSerialFromBoardId(boardId);
                 connected = string.IsNullOrEmpty(serial) ? board.Open() : board.OpenBySerial(serial);
             }

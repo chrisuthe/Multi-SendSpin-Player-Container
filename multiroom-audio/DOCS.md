@@ -130,18 +130,20 @@ automatic power-on/off of amplifiers when playback starts and stops.
 
 ### Supported Hardware
 
-**Denkovi FTDI Relay Boards:**
+**FTDI Relay Boards:**
 
-Only these specific Denkovi USB relay board models are supported:
+| Model                         | Channels | Description                       |
+|-------------------------------|----------|-----------------------------------|
+| **Denkovi DAE-CB/Ro8-USB**    | 8        | Denkovi USB 8 Relay Board         |
+| **Denkovi DAE-CB/Ro4-USB**    | 4        | Denkovi USB 4 Relay Board         |
+| **Generic FTDI**              | 8        | Standard 8-channel FTDI relay     |
 
-| Model              | Channels | Product           |
-|--------------------|----------|-------------------|
-| **DAE-CB/Ro8-USB** | 8        | USB 8 Relay Board |
-| **DAE-CB/Ro4-USB** | 4        | USB 4 Relay Board |
+These boards use the FT245RL chip with synchronous bitbang mode (0x04).
 
-These boards use the FT245RL chip with synchronous bitbang mode (0x04). Generic FTDI relay boards are **not** supported.
+**Notes:**
 
-**Note:** The 4-channel and 8-channel boards use different pin mappings internally. When adding a Denkovi board in the UI, select the correct model to ensure proper relay control.
+- The Denkovi 4-channel board uses different pin mappings internally (odd pins D1, D3, D5, D7). When adding an FTDI board in the UI, select the correct model to ensure proper relay control.
+- **Multiple FTDI boards:** Fully supported. Boards with unique serial numbers use the serial for identification. Boards with identical or missing serials use USB port path (stable across reboots as long as boards stay in the same USB ports).
 
 **USB HID Relay Boards:**
 
@@ -165,12 +167,12 @@ For standalone Docker deployments, enable USB passthrough in your `docker-compos
 services:
   multiroom-audio:
     devices:
-      # Required for Denkovi FTDI and USB HID relay boards
+      # Required for FTDI and USB HID relay boards
       - /dev/bus/usb:/dev/bus/usb
       # Required for CH340/Modbus relay boards (serial port)
       - /dev/ttyUSB0:/dev/ttyUSB0
     cap_add:
-      # Optional: Only needed if ftdi_sio kernel driver claims your Denkovi device
+      # Optional: Only needed if ftdi_sio kernel driver claims your FTDI device
       # Not required for USB HID or CH340 boards
       - SYS_RAWIO
 ```
@@ -233,7 +235,7 @@ own channel assignments. Boards are identified by:
 1. **Sendspin only**: This add-on only supports Music Assistant via Sendspin protocol
 2. **PulseAudio on HAOS**: Device names differ from standalone Docker deployments
 3. **Permissions**: Requires `full_access` for proper audio device access
-4. **Denkovi FTDI relay boards**: Requires USB passthrough and SYS_RAWIO capability in Docker
+4. **FTDI relay boards**: Requires USB passthrough and SYS_RAWIO capability in Docker
 
 ## Support
 

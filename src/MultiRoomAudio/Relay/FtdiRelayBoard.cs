@@ -54,7 +54,8 @@ public sealed class FtdiRelayBoard : IRelayBoard
 
     private static IntPtr ResolveFtdiLibrary(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
-        if (libraryName != "libftdi1")
+        // Handle both libftdi1 and libusb-1.0 resolution
+        if (libraryName != "libftdi1" && libraryName != "libusb-1.0")
             return IntPtr.Zero; // Let default resolver handle it
 
         IntPtr handle;
@@ -66,16 +67,30 @@ public sealed class FtdiRelayBoard : IRelayBoard
         // Platform-specific paths
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            // macOS: Try Homebrew paths
-            string[] macPaths = new[]
+            string[] macPaths;
+            if (libraryName == "libftdi1")
             {
-                "/opt/homebrew/lib/libftdi1.dylib",      // Apple Silicon Homebrew
-                "/opt/homebrew/lib/libftdi1.1.dylib",    // Apple Silicon versioned
-                "/usr/local/lib/libftdi1.dylib",         // Intel Homebrew
-                "/usr/local/lib/libftdi1.1.dylib",       // Intel versioned
-                "libftdi1.dylib",                         // In PATH
-                "libftdi1.1.dylib"
-            };
+                macPaths = new[]
+                {
+                    "/opt/homebrew/lib/libftdi1.dylib",      // Apple Silicon Homebrew
+                    "/opt/homebrew/lib/libftdi1.1.dylib",    // Apple Silicon versioned
+                    "/usr/local/lib/libftdi1.dylib",         // Intel Homebrew
+                    "/usr/local/lib/libftdi1.1.dylib",       // Intel versioned
+                    "libftdi1.dylib",                         // In PATH
+                    "libftdi1.1.dylib"
+                };
+            }
+            else // libusb-1.0
+            {
+                macPaths = new[]
+                {
+                    "/opt/homebrew/lib/libusb-1.0.dylib",    // Apple Silicon Homebrew
+                    "/opt/homebrew/lib/libusb-1.0.0.dylib",  // Apple Silicon versioned
+                    "/usr/local/lib/libusb-1.0.dylib",       // Intel Homebrew
+                    "/usr/local/lib/libusb-1.0.0.dylib",     // Intel versioned
+                    "libusb-1.0.dylib"                        // In PATH
+                };
+            }
 
             foreach (var path in macPaths)
             {
@@ -85,15 +100,28 @@ public sealed class FtdiRelayBoard : IRelayBoard
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            // Linux: Try common library names
-            string[] linuxNames = new[]
+            string[] linuxNames;
+            if (libraryName == "libftdi1")
             {
-                "libftdi1.so.2",
-                "libftdi1.so.1",
-                "libftdi1.so",
-                "/usr/lib/x86_64-linux-gnu/libftdi1.so.2",
-                "/usr/lib/aarch64-linux-gnu/libftdi1.so.2"
-            };
+                linuxNames = new[]
+                {
+                    "libftdi1.so.2",
+                    "libftdi1.so.1",
+                    "libftdi1.so",
+                    "/usr/lib/x86_64-linux-gnu/libftdi1.so.2",
+                    "/usr/lib/aarch64-linux-gnu/libftdi1.so.2"
+                };
+            }
+            else // libusb-1.0
+            {
+                linuxNames = new[]
+                {
+                    "libusb-1.0.so.0",
+                    "libusb-1.0.so",
+                    "/usr/lib/x86_64-linux-gnu/libusb-1.0.so.0",
+                    "/usr/lib/aarch64-linux-gnu/libusb-1.0.so.0"
+                };
+            }
 
             foreach (var name in linuxNames)
             {
@@ -183,11 +211,15 @@ public sealed class FtdiRelayBoard : IRelayBoard
                     descStr = GetNullTerminatedString(description);
                 }
 
+                // Get stable USB path from libusb (bus-port.port.port format)
+                var usbPath = GetUsbPath(node.dev);
+
                 devices.Add(new FtdiDeviceInfo(
                     Index: i,
                     SerialNumber: serialStr,
                     Description: descStr ?? $"FTDI Device {i}",
-                    IsOpen: false
+                    IsOpen: false,
+                    UsbPath: usbPath
                 ));
 
                 current = node.next;
@@ -414,6 +446,124 @@ public sealed class FtdiRelayBoard : IRelayBoard
                     _context = IntPtr.Zero;
                 }
                 return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Open connection to a specific FTDI device by USB path hash.
+    /// Used for boards identified by USB port path when serial numbers are not unique.
+    /// </summary>
+    /// <param name="pathHash">The hash portion of the board ID (e.g., "CA88BCAC" from "FTDI:CA88BCAC")</param>
+    /// <returns>True if connection was successful.</returns>
+    public bool OpenByPathHash(string pathHash)
+    {
+        lock (_lock)
+        {
+            if (_context != IntPtr.Zero)
+            {
+                _logger?.LogWarning("FTDI device already open");
+                return true;
+            }
+
+            IntPtr ctx = IntPtr.Zero;
+            IntPtr devList = IntPtr.Zero;
+
+            try
+            {
+                ctx = LibFtdi.ftdi_new();
+                if (ctx == IntPtr.Zero)
+                {
+                    _logger?.LogError("Failed to create FTDI context for enumeration");
+                    return false;
+                }
+
+                // Enumerate all FTDI devices to find the one with matching path hash
+                int count = LibFtdi.ftdi_usb_find_all(ctx, ref devList, FTDI_VENDOR_ID, FT245RL_PRODUCT_ID);
+                if (count <= 0)
+                {
+                    _logger?.LogWarning("No FTDI devices found when looking for path hash {Hash}", pathHash);
+                    return false;
+                }
+
+                IntPtr current = devList;
+                IntPtr matchingDev = IntPtr.Zero;
+
+                for (int i = 0; i < count && current != IntPtr.Zero; i++)
+                {
+                    var node = Marshal.PtrToStructure<LibFtdi.ftdi_device_list>(current);
+
+                    // Get USB path for this device
+                    var usbPath = GetUsbPath(node.dev);
+                    if (!string.IsNullOrEmpty(usbPath))
+                    {
+                        var deviceHash = FtdiDeviceInfo.StableHash(usbPath);
+                        if (deviceHash.Equals(pathHash, StringComparison.OrdinalIgnoreCase))
+                        {
+                            matchingDev = node.dev;
+                            _logger?.LogDebug("Found FTDI device by path hash: {Hash} (path: {Path})", pathHash, usbPath);
+                            break;
+                        }
+                    }
+
+                    current = node.next;
+                }
+
+                if (matchingDev == IntPtr.Zero)
+                {
+                    _logger?.LogWarning("No FTDI device found with path hash {Hash}", pathHash);
+                    return false;
+                }
+
+                // Create a new context for the actual connection
+                _context = LibFtdi.ftdi_new();
+                if (_context == IntPtr.Zero)
+                {
+                    _logger?.LogError("Failed to create FTDI context for connection");
+                    return false;
+                }
+
+                // Open the device by its libusb device pointer
+                int result = LibFtdi.ftdi_usb_open_dev(_context, matchingDev);
+                if (result < 0)
+                {
+                    _logger?.LogError("Failed to open FTDI device by path hash {Hash}: error {Result} - {Error}",
+                        pathHash, result, GetErrorString());
+                    LibFtdi.ftdi_free(_context);
+                    _context = IntPtr.Zero;
+                    return false;
+                }
+
+                if (!Initialize())
+                {
+                    Close();
+                    return false;
+                }
+
+                _logger?.LogInformation("FTDI relay board opened (path hash: {Hash})", pathHash);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Exception opening FTDI device by path hash '{Hash}'", pathHash);
+                if (_context != IntPtr.Zero)
+                {
+                    LibFtdi.ftdi_free(_context);
+                    _context = IntPtr.Zero;
+                }
+                return false;
+            }
+            finally
+            {
+                // Free the enumeration resources (but NOT the device we're using)
+                if (devList != IntPtr.Zero && ctx != IntPtr.Zero)
+                {
+                    LibFtdi.ftdi_list_free(ref devList);
+                }
+                if (ctx != IntPtr.Zero)
+                {
+                    LibFtdi.ftdi_free(ctx);
+                }
             }
         }
     }
@@ -845,5 +995,60 @@ public sealed class FtdiRelayBoard : IRelayBoard
         // Error handling
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr ftdi_get_error_string(IntPtr ftdi);
+    }
+
+    /// <summary>
+    /// P/Invoke declarations for libusb-1.0.
+    /// Used to get USB bus/port path for stable device identification.
+    /// libftdi links against libusb, so this library is available wherever FTDI works.
+    /// </summary>
+    private static class LibUsb
+    {
+        // Library name varies by platform:
+        // - Linux: libusb-1.0.so
+        // - macOS: libusb-1.0.dylib (usually via Homebrew)
+        private const string LibraryName = "libusb-1.0";
+
+        /// <summary>Get the bus number of a device.</summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern byte libusb_get_bus_number(IntPtr dev);
+
+        /// <summary>
+        /// Get the list of port numbers from root for a device.
+        /// Returns the number of elements filled, or LIBUSB_ERROR_OVERFLOW on failure.
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int libusb_get_port_numbers(IntPtr dev, byte[] port_numbers, int port_numbers_len);
+    }
+
+    /// <summary>
+    /// Get the USB path (bus-port.port.port) for a libusb device.
+    /// This path is stable across reboots as long as the device stays in the same physical port.
+    /// </summary>
+    /// <param name="libusb_device">Pointer to libusb_device (from ftdi_device_list.dev)</param>
+    /// <returns>USB path like "1-3.2" (bus 1, port 3, hub port 2), or null if unavailable.</returns>
+    private static string? GetUsbPath(IntPtr libusb_device)
+    {
+        if (libusb_device == IntPtr.Zero)
+            return null;
+
+        try
+        {
+            byte bus = LibUsb.libusb_get_bus_number(libusb_device);
+            byte[] ports = new byte[7]; // USB spec allows max 7 levels of hubs
+            int portCount = LibUsb.libusb_get_port_numbers(libusb_device, ports, ports.Length);
+
+            if (portCount <= 0)
+                return null;
+
+            // Format: "1-3.2" (bus 1, port 3, hub port 2) - matches Linux sysfs format
+            var portPath = string.Join(".", ports.Take(portCount).Select(p => p.ToString()));
+            return $"{bus}-{portPath}";
+        }
+        catch
+        {
+            // libusb not available or call failed - graceful degradation
+            return null;
+        }
     }
 }
