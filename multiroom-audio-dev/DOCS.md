@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-ed78201
+## Development Build: sha-5db9f06
 
 **Current Dev Build Changes** (recent)
 
+- Fix whitespace formatting in PlayerStatsMapper
 - Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into dev
 - Fix stats for nerds blocking at high bitrates (192kHz 24-bit)
 - Merge pull request #107 from scyto/ftdi-clean
