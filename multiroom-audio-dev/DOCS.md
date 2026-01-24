@@ -1,19 +1,19 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-48a1c23
+## Development Build: sha-d5ea40e
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #107 from scyto/ftdi-clean
+- Fix FTDI OpenByPathHash crash: use single context for enumeration and open
+- Use USB path-based IDs for all FTDI boards (multi-board support)
+- Add Denkovi 4/8 channel relay board support with model-specific UI
+- Add FTDI relay hardware state verification and logging
+- Use synchronous bit-bang mode for FTDI relay boards
 - Merge branch 'main' into dev
 - Merge pull request #103 from scyto/dev
 - fix format selection i hope
-- Merge branch 'dev' of https://github.com/scyto/Multi-SendSpin-Player-Container into dev
-- Fix stats for nerds buffer target to show 5000ms protocol capacity
-- Trigger rebuild
-- Fix Kestrel address override warning at startup
-- Fix stats for nerds overlapping requests causing audio issues
-- Pause auto-refresh during modal editing, slow stats polling
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
