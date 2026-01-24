@@ -1116,10 +1116,10 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// Sets the volume for a player (0-100).
     /// Updates local config and notifies server. Hardware volume is fixed at 80% on startup.
     /// </summary>
-    public async Task<bool> SetVolumeAsync(string name, int volume, CancellationToken ct = default)
+    public Task<bool> SetVolumeAsync(string name, int volume, CancellationToken ct = default)
     {
         if (!_players.TryGetValue(name, out var context))
-            return false;
+            return Task.FromResult(false);
 
         volume = Math.Clamp(volume, 0, 100);
         _logger.LogInformation("VOLUME [Set] Player '{Name}': {Volume}%", name, volume);
@@ -1130,25 +1130,29 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // 2. Software volume stays at 1.0 (passthrough) - server controls actual volume
         context.Player.Volume = 1.0f;
 
-        // 3. Notify server of volume change (only if in an active state)
-        // Server (Music Assistant) handles the actual volume control
+        // 3. Sync volume to Music Assistant server (only if in an active state)
+        // Use SendPlayerStateAsync (not SetVolumeAsync) to properly update MA's stored state
         if (IsPlayerInActiveState(context.State))
         {
-            try
+            FireAndForget(async () =>
             {
-                await context.Client.SetVolumeAsync(volume);
-            }
-            catch (Exception ex)
-            {
-                // Don't fail the whole operation if server notification fails
-                _logger.LogWarning(ex, "Failed to notify server of volume change for '{Name}'", name);
-            }
+                try
+                {
+                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
+                    _logger.LogInformation("VOLUME [StateEcho] Player '{Name}': synced {Volume}% to server",
+                        name, volume);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to sync volume for '{Name}'", name);
+                }
+            }, $"Volume state sync for '{name}'", _logger);
         }
 
         // 4. Broadcast status update to all clients
         _ = BroadcastStatusAsync();
 
-        return true;
+        return Task.FromResult(true);
     }
 
 

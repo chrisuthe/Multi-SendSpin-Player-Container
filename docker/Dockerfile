@@ -94,6 +94,10 @@ ENV DBUS_SESSION_BUS_ADDRESS=disabled
 ENV PULSE_SYSTEM=1
 ENV PULSE_SERVER=unix:/run/pulse/native
 
+# Clear default ASPNETCORE_URLS to prevent "Overriding address" warning
+# (.NET 8+ images default to http://+:8080, which conflicts with Kestrel config on port 8096)
+ENV ASPNETCORE_URLS=
+
 # Health check - verifies the API is responding
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8096/api/health || exit 1
