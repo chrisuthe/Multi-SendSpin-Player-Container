@@ -38,6 +38,10 @@ var logLevel = logLevelStr switch
 };
 builder.Logging.SetMinimumLevel(logLevel);
 
+// Override appsettings.json logging configuration with LOG_LEVEL env var
+// This ensures LOG_LEVEL=debug actually enables debug logging
+builder.Logging.AddFilter(null, logLevel);
+
 // Reduce noise from framework loggers unless in debug mode
 if (logLevel > LogLevel.Debug)
 {
