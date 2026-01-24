@@ -883,11 +883,10 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// <param name="delayMs">Delay offset in milliseconds.</param>
     private void InitializeAndConnectPlayer(string name, PlayerContext context, int delayMs)
     {
-        // Software volume stays at 1.0 (passthrough)
+        // Apply startup volume locally - player is authoritative for its own volume
         // Hardware volume is set to 80% on container startup to avoid clipping
-        // Server (Music Assistant) controls the actual volume level
-        context.Player.Volume = 1.0f;
-        _logger.LogInformation("VOLUME [Create] Player '{Name}': startup volume {Volume}% (sent to server)",
+        context.Player.Volume = context.Config.Volume / 100.0f;
+        _logger.LogInformation("VOLUME [Create] Player '{Name}': startup volume {Volume}% applied locally",
             name, context.Config.Volume);
 
         // Apply delay offset from user configuration
@@ -1127,11 +1126,10 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // 1. Update local config (always)
         context.Config.Volume = volume;
 
-        // 2. Software volume stays at 1.0 (passthrough) - server controls actual volume
-        context.Player.Volume = 1.0f;
+        // 2. Apply volume locally - player is authoritative for its own volume
+        context.Player.Volume = volume / 100.0f;
 
-        // 3. Sync volume to Music Assistant server (only if in an active state)
-        // Use SendPlayerStateAsync (not SetVolumeAsync) to properly update MA's stored state
+        // 3. Inform MA of our volume state (sync UI only, not a command)
         if (IsPlayerInActiveState(context.State))
         {
             FireAndForget(async () =>
@@ -1139,12 +1137,12 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 try
                 {
                     await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
-                    _logger.LogInformation("VOLUME [StateEcho] Player '{Name}': synced {Volume}% to server",
+                    _logger.LogDebug("VOLUME [StateSync] Player '{Name}': informed MA of {Volume}%",
                         name, volume);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to sync volume for '{Name}'", name);
+                    _logger.LogWarning(ex, "Failed to sync volume state for '{Name}'", name);
                 }
             }, $"Volume state sync for '{name}'", _logger);
         }
@@ -1899,11 +1897,11 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 _logger.LogInformation("VOLUME [ServerSync] Player '{Name}': {OldVol}% -> {NewVol}%",
                     name, context.Config.Volume, serverVolume);
 
-                // Update runtime config only (affects current playback)
-                // DO NOT persist to config file - MA has its own volume database
-                // If we persist, we create a fight between our config and MA's database
-                // The config file volume is only the STARTUP volume sent on connection
+                // Update runtime config
                 context.Config.Volume = serverVolume;
+
+                // Apply volume locally - player is authoritative for its own volume
+                context.Player.Volume = serverVolume / 100.0f;
 
                 // Send player state back to MA to update its stored preference
                 // This uses SendPlayerStateAsync which is fire-and-forget and doesn't trigger GroupStateChanged
