@@ -1202,13 +1202,20 @@ function openStatsForNerds(playerName) {
     const modal = new bootstrap.Modal(document.getElementById('statsForNerdsModal'));
     modal.show();
 
-    // Start polling
-    fetchAndRenderStats();
-    statsInterval = setInterval(fetchAndRenderStats, 500);
+    // Start non-overlapping polling: waits for each request to complete
+    // before scheduling the next, preventing request pileup under load.
+    async function pollStats() {
+        if (!currentStatsPlayer) return;
+        await fetchAndRenderStats();
+        if (currentStatsPlayer) {
+            statsInterval = setTimeout(pollStats, 500);
+        }
+    }
+    pollStats();
 
     // Stop polling when modal closes
     document.getElementById('statsForNerdsModal').addEventListener('hidden.bs.modal', () => {
-        clearInterval(statsInterval);
+        clearTimeout(statsInterval);
         statsInterval = null;
         currentStatsPlayer = null;
     }, { once: true });

@@ -34,6 +34,10 @@ internal static class PlayerStatsMapper
         IClockSynchronizer clockSync,
         IAudioPlayer player)
     {
+        // Single snapshot of buffer stats — one lock acquisition instead of five.
+        // This matches the Windows version's pattern of snapshotting the struct once
+        // and avoids lock contention with the audio thread at high bitrates.
+        var bufferStats = pipeline.BufferStats;
         var clockStatus = clockSync.GetStatus();
         var inputFormat = pipeline.CurrentFormat;
         var outputFormat = pipeline.OutputFormat ?? inputFormat;
@@ -41,12 +45,12 @@ internal static class PlayerStatsMapper
         return new PlayerStatsResponse(
             PlayerName: playerName,
             AudioFormat: BuildAudioFormatStats(inputFormat, outputFormat),
-            Sync: BuildSyncStats(pipeline),
-            Buffer: BuildBufferStats(pipeline),
+            Sync: BuildSyncStats(bufferStats),
+            Buffer: BuildBufferStats(bufferStats),
             ClockSync: BuildClockSyncStats(clockStatus, player, clockSync),
-            Throughput: BuildThroughputStats(pipeline),
-            Correction: BuildSyncCorrectionStats(pipeline),
-            Diagnostics: BuildBufferDiagnostics(pipeline)
+            Throughput: BuildThroughputStats(bufferStats),
+            Correction: BuildSyncCorrectionStats(bufferStats),
+            Diagnostics: BuildBufferDiagnostics(bufferStats, pipeline)
         );
     }
 
@@ -76,9 +80,8 @@ internal static class PlayerStatsMapper
     /// <summary>
     /// Builds sync statistics showing current error and tolerance status.
     /// </summary>
-    private static SyncStats BuildSyncStats(IAudioPipeline pipeline)
+    private static SyncStats BuildSyncStats(AudioBufferStats? bufferStats)
     {
-        var bufferStats = pipeline.BufferStats;
         var syncErrorMs = bufferStats?.SyncErrorMs ?? 0;
         return new SyncStats(
             SyncErrorMs: syncErrorMs,
@@ -90,9 +93,8 @@ internal static class PlayerStatsMapper
     /// <summary>
     /// Builds buffer level statistics showing fill level and under/overrun counts.
     /// </summary>
-    private static BufferStatsInfo BuildBufferStats(IAudioPipeline pipeline)
+    private static BufferStatsInfo BuildBufferStats(AudioBufferStats? bufferStats)
     {
-        var bufferStats = pipeline.BufferStats;
         return new BufferStatsInfo(
             BufferedMs: (int)(bufferStats?.BufferedMs ?? 0),
             TargetMs: 5000,
@@ -126,9 +128,8 @@ internal static class PlayerStatsMapper
     /// <summary>
     /// Builds throughput statistics showing total samples processed.
     /// </summary>
-    private static ThroughputStats BuildThroughputStats(IAudioPipeline pipeline)
+    private static ThroughputStats BuildThroughputStats(AudioBufferStats? bufferStats)
     {
-        var bufferStats = pipeline.BufferStats;
         return new ThroughputStats(
             SamplesWritten: bufferStats?.TotalSamplesWritten ?? 0,
             SamplesRead: bufferStats?.TotalSamplesRead ?? 0,
@@ -139,9 +140,8 @@ internal static class PlayerStatsMapper
     /// <summary>
     /// Builds sync correction statistics showing frame drop/insert mode.
     /// </summary>
-    private static SyncCorrectionStats BuildSyncCorrectionStats(IAudioPipeline pipeline)
+    private static SyncCorrectionStats BuildSyncCorrectionStats(AudioBufferStats? bufferStats)
     {
-        var bufferStats = pipeline.BufferStats;
         var syncErrorMs = bufferStats?.SyncErrorMs ?? 0;
         var framesDropped = bufferStats?.SamplesDroppedForSync ?? 0;
         var framesInserted = bufferStats?.SamplesInsertedForSync ?? 0;
@@ -175,9 +175,8 @@ internal static class PlayerStatsMapper
     /// Builds buffer diagnostics for debugging playback issues.
     /// Determines buffer state based on playback activity and sample flow.
     /// </summary>
-    private static BufferDiagnostics BuildBufferDiagnostics(IAudioPipeline pipeline)
+    private static BufferDiagnostics BuildBufferDiagnostics(AudioBufferStats? bufferStats, IAudioPipeline pipeline)
     {
-        var bufferStats = pipeline.BufferStats;
         var bufferedMs = bufferStats?.BufferedMs ?? 0;
         var targetMs = bufferStats?.TargetMs ?? 1;  // Avoid divide by zero
         var fillPercent = (int)(bufferedMs / targetMs * 100);
