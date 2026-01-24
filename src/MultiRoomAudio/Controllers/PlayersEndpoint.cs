@@ -452,6 +452,14 @@ public static class PlayersEndpoint
                 var savedConfig = config.GetPlayer(currentName);
                 if (savedConfig != null)
                 {
+                    // Persist volume as startup volume (takes effect on next restart)
+                    if (request.Volume.HasValue)
+                    {
+                        savedConfig.Volume = Math.Clamp(request.Volume.Value, 0, 100);
+                        logger.LogInformation("VOLUME [StartupConfig] Player '{Name}': startup volume set to {Volume}%",
+                            currentName, savedConfig.Volume);
+                    }
+
                     if (request.ServerUrl != null && request.ServerUrl != (savedConfig.Server ?? ""))
                     {
                         savedConfig.Server = request.ServerUrl == "" ? null : request.ServerUrl;

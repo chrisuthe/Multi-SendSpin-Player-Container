@@ -770,31 +770,71 @@ async function setVolume(name, volume) {
 }
 
 /**
- * Set the hardware volume limit for a player's audio device.
- * This controls the PulseAudio sink volume (physical output level).
+ * Get the display state for a player's mute button.
+ * Returns icon, class, and label based on mute state.
  */
-async function setStartupVolume(name, volume) {
+function getPlayerMuteDisplayState(player) {
+    const isMuted = player?.isMuted || false;
+    return {
+        isMuted,
+        label: isMuted ? 'Muted' : 'Unmuted',
+        icon: isMuted ? 'fa-volume-mute' : 'fa-volume-up',
+        iconClass: isMuted ? 'text-danger' : 'text-success'
+    };
+}
+
+/**
+ * Toggle the mute state for a player.
+ */
+function togglePlayerMute(playerName) {
+    const player = players[playerName];
+    const isMuted = player?.isMuted || false;
+    return setPlayerMute(playerName, !isMuted);
+}
+
+/**
+ * Set the mute state for a player.
+ * This is software mute on the audio pipeline (not hardware sink).
+ * Syncs bidirectionally with Music Assistant.
+ */
+async function setPlayerMute(playerName, muted) {
+    // Find and disable the button during the API call
+    const card = document.querySelector(`.player-card[data-player="${CSS.escape(playerName)}"]`);
+    const button = card?.querySelector('.card-mute-toggle');
+    if (button) button.disabled = true;
+
     try {
-        const response = await fetch(`./api/players/${encodeURIComponent(name)}/startup-volume`, {
+        const response = await fetch(`./api/players/${encodeURIComponent(playerName)}/mute`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ volume: parseInt(volume) })
+            body: JSON.stringify({ muted })
         });
 
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.message || 'Failed to set startup volume');
+            throw new Error(error.message || 'Failed to set mute state');
         }
 
         // Update local state
-        if (players[name]) {
-            players[name].startupVolume = parseInt(volume);
+        if (players[playerName]) {
+            players[playerName].isMuted = muted;
         }
 
-        showAlert(`Startup volume set to ${volume}% (takes effect on next restart)`, 'success', 2000);
+        // Update button UI
+        if (button) {
+            const state = getPlayerMuteDisplayState({ isMuted: muted });
+            const icon = button.querySelector('i');
+            if (icon) {
+                icon.className = `fas ${state.icon} ${state.iconClass}`;
+            }
+            button.setAttribute('aria-label', state.label);
+            button.setAttribute('title', state.label);
+        }
     } catch (error) {
-        console.error('Error setting startup volume:', error);
+        console.error('Error setting mute state:', error);
         showAlert(error.message, 'danger');
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -1033,24 +1073,12 @@ function renderPlayers() {
                                     onchange="setVolume('${escapeHtml(name)}', this.value)"
                                     oninput="this.nextElementSibling.textContent = this.value + '%'">
                                 <span class="volume-display ms-2 small">${player.volume}%</span>
-                            </div>
-                        </div>
-
-                        <div class="startup-volume-section mb-3 pt-2 border-top">
-                            <div class="d-flex align-items-center mb-1">
-                                <i class="fas fa-power-off me-1 text-muted small"></i>
-                                <span class="small text-muted">Startup Volume</span>
-                                <i class="fas fa-info-circle ms-1 text-muted small volume-tooltip"
-                                   data-bs-toggle="tooltip"
-                                   data-bs-placement="top"
-                                   data-bs-title="Startup volume sent when player connects (on container or player restart)"></i>
-                            </div>
-                            <div class="d-flex align-items-center">
-                                <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100"
-                                       value="${player.startupVolume || player.volume}"
-                                       onchange="setStartupVolume('${escapeHtml(name)}', this.value)"
-                                       oninput="this.nextElementSibling.textContent = this.value + '%'">
-                                <span class="volume-display ms-2 small">${player.startupVolume || player.volume}%</span>
+                                <button class="btn card-mute-toggle ms-2"
+                                        title="${getPlayerMuteDisplayState(player).label}"
+                                        aria-label="${getPlayerMuteDisplayState(player).label}"
+                                        onclick="togglePlayerMute('${escapeHtml(name)}')">
+                                    <i class="fas ${getPlayerMuteDisplayState(player).icon} ${getPlayerMuteDisplayState(player).iconClass}"></i>
+                                </button>
                             </div>
                         </div>
 

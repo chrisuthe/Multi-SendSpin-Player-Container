@@ -1153,13 +1153,34 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
     /// <summary>
     /// Sets the mute state for a player.
+    /// Applies software mute to the audio pipeline (not the hardware sink).
+    /// Also syncs mute state to Music Assistant server.
     /// </summary>
     public bool SetMuted(string name, bool muted)
     {
         if (!_players.TryGetValue(name, out var context))
             return false;
 
+        _logger.LogInformation("MUTE [UserToggle] Player '{Name}': {State}",
+            name, muted ? "muted" : "unmuted");
+
         context.Pipeline.SetMuted(muted);
+
+        // Sync mute state to Music Assistant server (bidirectional sync)
+        FireAndForget(async () =>
+        {
+            try
+            {
+                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted);
+                _logger.LogDebug("MUTE [StateEcho] Player '{Name}': synced {State} to server",
+                    name, muted ? "muted" : "unmuted");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync mute state for '{Name}'", name);
+            }
+        }, $"Mute state sync for '{name}'", _logger);
+
         return true;
     }
 
@@ -1889,6 +1910,18 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 }, $"Player state echo for '{name}'", _logger);
 
                 // Broadcast to UI so slider updates
+                _ = BroadcastStatusAsync();
+            }
+
+            // Handle mute state from server (bidirectional sync)
+            if (group.Muted != context.Player.IsMuted)
+            {
+                _logger.LogInformation("MUTE [ServerSync] Player '{Name}': {OldState} -> {NewState}",
+                    name,
+                    context.Player.IsMuted ? "muted" : "unmuted",
+                    group.Muted ? "muted" : "unmuted");
+
+                context.Pipeline.SetMuted(group.Muted);
                 _ = BroadcastStatusAsync();
             }
         };
