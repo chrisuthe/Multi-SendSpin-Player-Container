@@ -1129,22 +1129,25 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // 2. Apply volume locally - player is authoritative for its own volume
         context.Player.Volume = volume / 100.0f;
 
-        // 3. Inform MA of our volume state (sync UI only, not a command)
+        // 3. Inform MA of our volume (command + state echo)
         if (IsPlayerInActiveState(context.State))
         {
             FireAndForget(async () =>
             {
                 try
                 {
+                    // Command MA to update its displayed volume
+                    await context.Client.SetVolumeAsync(volume);
+                    // Echo our full state back to MA
                     await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
-                    _logger.LogDebug("VOLUME [StateSync] Player '{Name}': informed MA of {Volume}%",
+                    _logger.LogInformation("VOLUME [Sync] Player '{Name}': sent {Volume}% to MA",
                         name, volume);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to sync volume state for '{Name}'", name);
+                    _logger.LogWarning(ex, "Failed to sync volume for '{Name}'", name);
                 }
-            }, $"Volume state sync for '{name}'", _logger);
+            }, $"Volume sync for '{name}'", _logger);
         }
 
         // 4. Broadcast status update to all clients
