@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-d5ea40e
+## Development Build: sha-ed78201
 
 **Current Dev Build Changes** (recent)
 
+- Merge branch 'dev' of https://github.com/chrisuthe/Multi-SendSpin-Player-Container into dev
+- Fix stats for nerds blocking at high bitrates (192kHz 24-bit)
 - Merge pull request #107 from scyto/ftdi-clean
 - Fix FTDI OpenByPathHash crash: use single context for enumeration and open
 - Use USB path-based IDs for all FTDI boards (multi-board support)
@@ -12,8 +14,6 @@
 - Add FTDI relay hardware state verification and logging
 - Use synchronous bit-bang mode for FTDI relay boards
 - Merge branch 'main' into dev
-- Merge pull request #103 from scyto/dev
-- fix format selection i hope
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
