@@ -1300,6 +1300,8 @@ function showPrompt(title, label, defaultValue = '', placeholder = '') {
 let statsInterval = null;
 let currentStatsPlayer = null;
 let isStatsFetching = false;
+let cachedHardwareInfo = null; // Cache hardware format info (static during playback)
+let statsPanelInitialized = false; // Track if panel structure has been created
 
 function openStatsForNerds(playerName) {
     // Clear any existing interval first to prevent multiple polling loops
@@ -1309,6 +1311,8 @@ function openStatsForNerds(playerName) {
     }
 
     currentStatsPlayer = playerName;
+    cachedHardwareInfo = null; // Clear cache - will be populated on first fetch
+    statsPanelInitialized = false; // Will rebuild panel structure on first render
 
     // Update player name in modal header
     const playerNameSpan = document.getElementById('statsPlayerName');
@@ -1350,6 +1354,23 @@ async function fetchAndRenderStats() {
             throw new Error('Failed to fetch stats');
         }
         const stats = await response.json();
+
+        // Cache hardware info on first fetch (static during playback)
+        if (!cachedHardwareInfo && stats.audioFormat) {
+            cachedHardwareInfo = {
+                hardwareFormat: stats.audioFormat.hardwareFormat,
+                hardwareSampleRate: stats.audioFormat.hardwareSampleRate,
+                hardwareBitDepth: stats.audioFormat.hardwareBitDepth
+            };
+        }
+
+        // Use cached hardware info for rendering
+        if (cachedHardwareInfo && stats.audioFormat) {
+            stats.audioFormat.hardwareFormat = cachedHardwareInfo.hardwareFormat;
+            stats.audioFormat.hardwareSampleRate = cachedHardwareInfo.hardwareSampleRate;
+            stats.audioFormat.hardwareBitDepth = cachedHardwareInfo.hardwareBitDepth;
+        }
+
         renderStatsPanel(stats);
     } catch (error) {
         console.error('Error fetching stats:', error);
@@ -1368,173 +1389,272 @@ async function fetchAndRenderStats() {
 function renderStatsPanel(stats) {
     const body = document.getElementById('statsForNerdsBody');
 
-    body.innerHTML = `
-        <!-- Audio Format Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Audio Format</div>
-            <div class="stats-row">
-                <span class="stats-label">Input</span>
-                <span class="stats-value info">${escapeHtml(stats.audioFormat.inputFormat)}</span>
+    // First render: create the full structure with IDs
+    if (!statsPanelInitialized) {
+        body.innerHTML = `
+            <!-- Audio Format Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Audio Format</div>
+                <div class="stats-row">
+                    <span class="stats-label">Input</span>
+                    <span id="stats-input-format" class="stats-value info"></span>
+                </div>
+                <div class="stats-row" id="stats-bitrate-row" style="display: none;">
+                    <span class="stats-label">Bitrate</span>
+                    <span id="stats-input-bitrate" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Output</span>
+                    <span id="stats-output-format" class="stats-value info"></span>
+                </div>
+                <div class="stats-row" id="stats-hardware-row" style="display: none;">
+                    <span class="stats-label">Hardware</span>
+                    <span id="stats-hardware-format" class="stats-value info"></span>
+                </div>
             </div>
-            ${stats.audioFormat.inputBitrate ? `
-            <div class="stats-row">
-                <span class="stats-label">Bitrate</span>
-                <span class="stats-value">${escapeHtml(stats.audioFormat.inputBitrate)}</span>
-            </div>
-            ` : ''}
-            <div class="stats-row">
-                <span class="stats-label">Output</span>
-                <span class="stats-value info">${escapeHtml(stats.audioFormat.outputFormat)}</span>
-            </div>
-            ${stats.audioFormat.hardwareFormat ? `
-            <div class="stats-row">
-                <span class="stats-label">Hardware</span>
-                <span class="stats-value info">${escapeHtml(stats.audioFormat.hardwareFormat)} ${stats.audioFormat.hardwareSampleRate}Hz ${stats.audioFormat.hardwareBitDepth}-bit</span>
-            </div>
-            ` : ''}
-        </div>
 
-        <!-- Sync Status Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Sync Status</div>
-            <div class="stats-row">
-                <span class="stats-label">Sync Error</span>
-                <span class="stats-value ${getSyncErrorClass(stats.sync.syncErrorMs)}">${formatMs(stats.sync.syncErrorMs)}</span>
+            <!-- Sync Status Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Sync Status</div>
+                <div class="stats-row">
+                    <span class="stats-label">Sync Error</span>
+                    <span id="stats-sync-error" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Status</span>
+                    <span id="stats-sync-status" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Playback Active</span>
+                    <span id="stats-playback-active" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Status</span>
-                <span class="stats-value ${stats.sync.isWithinTolerance ? 'good' : 'warning'}">${stats.sync.isWithinTolerance ? 'Within tolerance' : 'Correcting'}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Playback Active</span>
-                <span class="stats-value ${stats.sync.isPlaybackActive ? 'good' : 'muted'}">${stats.sync.isPlaybackActive ? 'Yes' : 'No'}</span>
-            </div>
-        </div>
 
-        <!-- Buffer Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Buffer</div>
-            <div class="stats-row">
-                <span class="stats-label">Buffered</span>
-                <span class="stats-value">${stats.buffer.bufferedMs}ms / ${stats.buffer.targetMs}ms</span>
+            <!-- Buffer Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Buffer</div>
+                <div class="stats-row">
+                    <span class="stats-label">Buffered</span>
+                    <span id="stats-buffered" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Underruns</span>
+                    <span id="stats-underruns" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Overruns</span>
+                    <span id="stats-overruns" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Underruns</span>
-                <span class="stats-value ${stats.buffer.underruns > 0 ? 'bad' : 'good'}">${formatCount(stats.buffer.underruns)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Overruns</span>
-                <span class="stats-value ${stats.buffer.overruns > 0 ? 'warning' : 'good'}">${formatCount(stats.buffer.overruns)}</span>
-            </div>
-        </div>
 
-        <!-- Sync Correction Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Sync Correction</div>
-            <div class="stats-row">
-                <span class="stats-label">Mode</span>
-                <span class="stats-value ${getCorrectionModeClass(stats.correction.mode)}">${escapeHtml(stats.correction.mode)}</span>
+            <!-- Sync Correction Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Sync Correction</div>
+                <div class="stats-row">
+                    <span class="stats-label">Mode</span>
+                    <span id="stats-correction-mode" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Threshold</span>
+                    <span id="stats-threshold" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Frames Dropped</span>
+                    <span id="stats-frames-dropped" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Frames Inserted</span>
+                    <span id="stats-frames-inserted" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Dropped (Overflow)</span>
+                    <span id="stats-dropped-overflow" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Threshold</span>
-                <span class="stats-value">${stats.correction.thresholdMs}ms</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Frames Dropped</span>
-                <span class="stats-value ${stats.correction.framesDropped > 0 ? 'warning' : ''}">${formatSampleCount(stats.correction.framesDropped)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Frames Inserted</span>
-                <span class="stats-value ${stats.correction.framesInserted > 0 ? 'warning' : ''}">${formatSampleCount(stats.correction.framesInserted)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Dropped (Overflow)</span>
-                <span class="stats-value ${stats.throughput.samplesDroppedOverflow > 0 ? 'bad' : ''}">${formatSampleCount(stats.throughput.samplesDroppedOverflow)}</span>
-            </div>
-        </div>
 
-        <!-- Clock Sync Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Clock Sync</div>
-            <div class="stats-row">
-                <span class="stats-label">Status</span>
-                <span class="stats-value">
-                    <span class="sync-indicator">
-                        <span class="sync-dot ${stats.clockSync.isSynchronized ? '' : (stats.clockSync.measurementCount > 0 ? 'syncing' : 'not-synced')}"></span>
-                        <span class="${stats.clockSync.isSynchronized ? 'good' : 'warning'}">${stats.clockSync.isSynchronized ? 'Synchronized' : (stats.clockSync.measurementCount > 0 ? 'Syncing...' : 'Not synced')}</span>
+            <!-- Clock Sync Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Clock Sync</div>
+                <div class="stats-row">
+                    <span class="stats-label">Status</span>
+                    <span class="stats-value">
+                        <span class="sync-indicator">
+                            <span id="stats-clock-dot" class="sync-dot"></span>
+                            <span id="stats-clock-status"></span>
+                        </span>
                     </span>
-                </span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Clock Offset</span>
+                    <span id="stats-clock-offset" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Uncertainty</span>
+                    <span id="stats-uncertainty" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Drift Rate</span>
+                    <span id="stats-drift-rate" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Measurements</span>
+                    <span id="stats-measurements" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Output Latency</span>
+                    <span id="stats-output-latency" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Static Delay</span>
+                    <span id="stats-static-delay" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Clock Offset</span>
-                <span class="stats-value">${formatMs(stats.clockSync.clockOffsetMs)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Uncertainty</span>
-                <span class="stats-value">${formatMs(stats.clockSync.uncertaintyMs)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Drift Rate</span>
-                <span class="stats-value ${stats.clockSync.isDriftReliable ? '' : 'muted'}">${stats.clockSync.driftRatePpm.toFixed(1)} ppm ${stats.clockSync.isDriftReliable ? '' : '(unstable)'}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Measurements</span>
-                <span class="stats-value">${formatCount(stats.clockSync.measurementCount)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Output Latency</span>
-                <span class="stats-value">${stats.clockSync.outputLatencyMs}ms</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Static Delay</span>
-                <span class="stats-value">${stats.clockSync.staticDelayMs}ms</span>
-            </div>
-        </div>
 
-        <!-- Throughput Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Throughput</div>
-            <div class="stats-row">
-                <span class="stats-label">Samples Written</span>
-                <span class="stats-value">${formatSampleCount(stats.throughput.samplesWritten)}</span>
+            <!-- Throughput Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Throughput</div>
+                <div class="stats-row">
+                    <span class="stats-label">Samples Written</span>
+                    <span id="stats-samples-written" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Samples Read</span>
+                    <span id="stats-samples-read" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Samples Read</span>
-                <span class="stats-value">${formatSampleCount(stats.throughput.samplesRead)}</span>
-            </div>
-        </div>
 
-        <!-- Buffer Diagnostics Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">
-                <i class="fas fa-stethoscope me-1"></i>Buffer Diagnostics
+            <!-- Buffer Diagnostics Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">
+                    <i class="fas fa-stethoscope me-1"></i>Buffer Diagnostics
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">State</span>
+                    <span id="stats-diag-state" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Fill Level</span>
+                    <span id="stats-fill-level" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Pipeline State</span>
+                    <span id="stats-pipeline-state" class="stats-value info"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Has Received Data</span>
+                    <span id="stats-has-received" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Dropped (Overflow)</span>
+                    <span id="stats-diag-dropped" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Smoothed Sync Error</span>
+                    <span id="stats-smoothed-sync" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">State</span>
-                <span class="stats-value ${getBufferStateClass(stats.diagnostics.state)}">${escapeHtml(stats.diagnostics.state)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Fill Level</span>
-                <span class="stats-value">${stats.diagnostics.fillPercent}%</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Pipeline State</span>
-                <span class="stats-value info">${escapeHtml(stats.diagnostics.pipelineState)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Has Received Data</span>
-                <span class="stats-value ${stats.diagnostics.hasReceivedSamples ? 'good' : 'warning'}">${stats.diagnostics.hasReceivedSamples ? 'Yes' : 'No'}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Dropped (Overflow)</span>
-                <span class="stats-value ${stats.diagnostics.droppedOverflow > 0 ? 'bad' : 'good'}">${formatSampleCount(stats.diagnostics.droppedOverflow)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Smoothed Sync Error</span>
-                <span class="stats-value">${formatUs(stats.diagnostics.smoothedSyncErrorUs)}</span>
-            </div>
-        </div>
-    `;
+        `;
+        statsPanelInitialized = true;
+    }
+
+    // Update values only (no DOM structure changes)
+    updateStatsValue('stats-input-format', stats.audioFormat.inputFormat);
+
+    // Bitrate row - show/hide and update
+    const bitrateRow = document.getElementById('stats-bitrate-row');
+    if (stats.audioFormat.inputBitrate) {
+        bitrateRow.style.display = '';
+        updateStatsValue('stats-input-bitrate', stats.audioFormat.inputBitrate);
+    } else {
+        bitrateRow.style.display = 'none';
+    }
+
+    updateStatsValue('stats-output-format', stats.audioFormat.outputFormat);
+
+    // Hardware row - show/hide and update
+    const hardwareRow = document.getElementById('stats-hardware-row');
+    if (stats.audioFormat.hardwareFormat) {
+        hardwareRow.style.display = '';
+        updateStatsValue('stats-hardware-format',
+            `${stats.audioFormat.hardwareFormat} ${stats.audioFormat.hardwareSampleRate}Hz ${stats.audioFormat.hardwareBitDepth}-bit`);
+    } else {
+        hardwareRow.style.display = 'none';
+    }
+
+    // Sync Status
+    updateStatsValueWithClass('stats-sync-error', formatMs(stats.sync.syncErrorMs), getSyncErrorClass(stats.sync.syncErrorMs));
+    updateStatsValueWithClass('stats-sync-status',
+        stats.sync.isWithinTolerance ? 'Within tolerance' : 'Correcting',
+        stats.sync.isWithinTolerance ? 'good' : 'warning');
+    updateStatsValueWithClass('stats-playback-active',
+        stats.sync.isPlaybackActive ? 'Yes' : 'No',
+        stats.sync.isPlaybackActive ? 'good' : 'muted');
+
+    // Buffer
+    updateStatsValue('stats-buffered', `${stats.buffer.bufferedMs}ms / ${stats.buffer.targetMs}ms`);
+    updateStatsValueWithClass('stats-underruns', formatCount(stats.buffer.underruns),
+        stats.buffer.underruns > 0 ? 'bad' : 'good');
+    updateStatsValueWithClass('stats-overruns', formatCount(stats.buffer.overruns),
+        stats.buffer.overruns > 0 ? 'warning' : 'good');
+
+    // Sync Correction
+    updateStatsValueWithClass('stats-correction-mode', stats.correction.mode, getCorrectionModeClass(stats.correction.mode));
+    updateStatsValue('stats-threshold', `${stats.correction.thresholdMs}ms`);
+    updateStatsValueWithClass('stats-frames-dropped', formatSampleCount(stats.correction.framesDropped),
+        stats.correction.framesDropped > 0 ? 'warning' : '');
+    updateStatsValueWithClass('stats-frames-inserted', formatSampleCount(stats.correction.framesInserted),
+        stats.correction.framesInserted > 0 ? 'warning' : '');
+    updateStatsValueWithClass('stats-dropped-overflow', formatSampleCount(stats.throughput.samplesDroppedOverflow),
+        stats.throughput.samplesDroppedOverflow > 0 ? 'bad' : '');
+
+    // Clock Sync
+    const clockDot = document.getElementById('stats-clock-dot');
+    const clockStatus = document.getElementById('stats-clock-status');
+    if (clockDot && clockStatus) {
+        clockDot.className = 'sync-dot ' + (stats.clockSync.isSynchronized ? '' :
+            (stats.clockSync.measurementCount > 0 ? 'syncing' : 'not-synced'));
+        clockStatus.className = stats.clockSync.isSynchronized ? 'good' : 'warning';
+        clockStatus.textContent = stats.clockSync.isSynchronized ? 'Synchronized' :
+            (stats.clockSync.measurementCount > 0 ? 'Syncing...' : 'Not synced');
+    }
+    updateStatsValue('stats-clock-offset', formatMs(stats.clockSync.clockOffsetMs));
+    updateStatsValue('stats-uncertainty', formatMs(stats.clockSync.uncertaintyMs));
+    updateStatsValueWithClass('stats-drift-rate',
+        `${stats.clockSync.driftRatePpm.toFixed(1)} ppm ${stats.clockSync.isDriftReliable ? '' : '(unstable)'}`,
+        stats.clockSync.isDriftReliable ? '' : 'muted');
+    updateStatsValue('stats-measurements', formatCount(stats.clockSync.measurementCount));
+    updateStatsValue('stats-output-latency', `${stats.clockSync.outputLatencyMs}ms`);
+    updateStatsValue('stats-static-delay', `${stats.clockSync.staticDelayMs}ms`);
+
+    // Throughput
+    updateStatsValue('stats-samples-written', formatSampleCount(stats.throughput.samplesWritten));
+    updateStatsValue('stats-samples-read', formatSampleCount(stats.throughput.samplesRead));
+
+    // Buffer Diagnostics
+    updateStatsValueWithClass('stats-diag-state', stats.diagnostics.state, getBufferStateClass(stats.diagnostics.state));
+    updateStatsValue('stats-fill-level', `${stats.diagnostics.fillPercent}%`);
+    updateStatsValue('stats-pipeline-state', stats.diagnostics.pipelineState);
+    updateStatsValueWithClass('stats-has-received',
+        stats.diagnostics.hasReceivedSamples ? 'Yes' : 'No',
+        stats.diagnostics.hasReceivedSamples ? 'good' : 'warning');
+    updateStatsValueWithClass('stats-diag-dropped', formatSampleCount(stats.diagnostics.droppedOverflow),
+        stats.diagnostics.droppedOverflow > 0 ? 'bad' : 'good');
+    updateStatsValue('stats-smoothed-sync', formatUs(stats.diagnostics.smoothedSyncErrorUs));
+}
+
+// Helper to update a stats value by ID
+function updateStatsValue(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+// Helper to update a stats value and its CSS class
+function updateStatsValueWithClass(id, value, className) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.textContent = value;
+        el.className = 'stats-value ' + className;
+    }
 }
 
 // Stats helper functions

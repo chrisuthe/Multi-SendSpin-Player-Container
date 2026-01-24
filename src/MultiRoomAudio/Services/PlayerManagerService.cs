@@ -319,7 +319,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         PlayerConfig Config,
         DateTime CreatedAt,
         CancellationTokenSource Cts,
-        DeviceCapabilities? DeviceCapabilities = null
+        DeviceCapabilities? DeviceCapabilities = null,
+        AudioDevice? CachedDevice = null
     )
     {
         public PlayerState State { get; set; } = PlayerState.Created;
@@ -688,6 +689,13 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             };
 
             var cts = new CancellationTokenSource();
+
+            // Cache device info once at creation time for stats display
+            // This avoids running pactl every 250ms when stats panel is open
+            var cachedDevice = !string.IsNullOrEmpty(request.Device)
+                ? _backendFactory.GetDevice(request.Device)
+                : null;
+
             var context = new PlayerContext(
                 components.Client,
                 components.Connection,
@@ -698,7 +706,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 config,
                 DateTime.UtcNow,
                 cts,
-                components.DeviceCapabilities)
+                components.DeviceCapabilities,
+                cachedDevice)
             {
                 State = PlayerState.Created,
                 InitialVolume = request.Volume
@@ -1975,15 +1984,14 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         if (!_players.TryGetValue(name, out var context))
             return null;
 
-        // Get the audio device for hardware format info
-        var device = _backendFactory.GetDevice(context.Config.DeviceId);
-
+        // Use cached device info (captured at player creation)
+        // This avoids running pactl every time stats are requested
         return PlayerStatsMapper.BuildStats(
             name,
             context.Pipeline,
             context.ClockSync,
             context.Player,
-            device);
+            context.CachedDevice);
     }
 
     private static string GenerateClientId(string name)
