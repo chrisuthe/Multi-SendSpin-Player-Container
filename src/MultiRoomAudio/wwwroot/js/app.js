@@ -1986,10 +1986,11 @@ function openRemapSinkModal(editData = null) {
     nameInput.disabled = !!editData; // Disable name field when editing, enable for create
     document.getElementById('remapSinkDesc').value = editData?.description || '';
 
-    // Populate master device dropdown
+    // Populate master device dropdown (exclude remap sinks - they can't be masters of other remap sinks)
     const masterSelect = document.getElementById('remapMasterDevice');
+    const eligibleDevices = devices.filter(d => d.sinkType !== 'Remap');
     masterSelect.innerHTML = '<option value="">Select a device...</option>' +
-        devices.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)</option>`).join('');
+        eligibleDevices.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)</option>`).join('');
 
     // Set master device if editing
     if (editData?.masterSink) {

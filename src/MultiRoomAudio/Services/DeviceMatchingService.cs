@@ -341,7 +341,8 @@ public class DeviceMatchingService
                 Capabilities: null,
                 Identifiers: null,
                 Alias: sink.Description ?? sink.Name,  // Use description as alias, fallback to name
-                Hidden: false
+                Hidden: false,
+                SinkType: sink.Type.ToString()  // "Combine" or "Remap"
             ));
 
         // Combine and return
