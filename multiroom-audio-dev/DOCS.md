@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-4b2d9e2
+## Development Build: sha-200bc86
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #117 from scyto/dev
+- Fix sinkType not set for custom sinks from PulseAudio backend
+- Add mono output mode for remap sinks
+- Add AI agent guidelines to CLAUDE.md
+- Filter remap sinks from wizard master device dropdown
+- Add testing guidelines to CLAUDE.md
+- Filter remap sinks from master device dropdown
 - Merge pull request #116 from scyto/dev
 - Add editable alias field to sound card modal
 - Merge pull request #115 from scyto/dev
-- Fix local volume changes not updating MA UI
-- Fix volume control: player is now authoritative for its own volume
-- Merge pull request #114 from scyto/dev
-- Fix volume sync: use SendPlayerStateAsync to update MA state
-- Fix Kestrel address override warning in Docker
-- Merge pull request #112 from scyto/dev
-- Fix mute state not echoing back to MA server
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
