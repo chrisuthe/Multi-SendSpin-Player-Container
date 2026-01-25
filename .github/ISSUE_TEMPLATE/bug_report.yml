@@ -1,0 +1,116 @@
+name: Bug Report
+description: Report a bug or issue with Multi-Room Audio
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "## Home Assistant"
+
+  - type: dropdown
+    id: ha-installation
+    attributes:
+      label: Home Assistant Installation
+      options:
+        - Home Assistant OS
+        - Home Assistant Container (Docker)
+        - Home Assistant Supervised
+        - Not using Home Assistant
+    validations:
+      required: true
+
+  - type: textarea
+    id: home-assistant
+    attributes:
+      label: Home Assistant Details
+      description: |
+        Go to Settings > System > Repairs > ⋮ > System Information
+        Copy the Core, Supervisor, and Operating System versions.
+        (Skip if not using Home Assistant)
+
+  - type: markdown
+    attributes:
+      value: "## Music Assistant"
+
+  - type: dropdown
+    id: ma-installation
+    attributes:
+      label: Music Assistant Installation
+      options:
+        - Home Assistant Add-on
+        - Docker Standalone
+    validations:
+      required: true
+
+  - type: input
+    id: music-assistant
+    attributes:
+      label: Music Assistant Version
+      description: In Music Assistant, go to Settings > About and copy the "Server version"
+      placeholder: "2.7.5"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: "## Multi-Room Audio"
+
+  - type: dropdown
+    id: mra-installation
+    attributes:
+      label: Multi-Room Audio Installation
+      options:
+        - Home Assistant Add-on
+        - Docker Standalone
+    validations:
+      required: true
+
+  - type: input
+    id: multiroom-audio
+    attributes:
+      label: Multi-Room Audio Version
+      description: |
+        Shown in the web UI header as "BUILD X.X.X" (or sha-XXXXXX for dev builds)
+        HAOS users can also check Settings > Add-ons > Multi-Room Audio
+      placeholder: "4.0.0"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: "## Issue Details"
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of what the bug is
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs Actual Behavior
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs (optional)
+      description: Paste any relevant logs from Settings > Logs in the web UI
+      render: shell
