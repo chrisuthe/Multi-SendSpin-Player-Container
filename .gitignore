@@ -70,3 +70,4 @@ logs/*
 !logs/.gitkeep
 config/*
 !config/players.yaml.example
+test-config/

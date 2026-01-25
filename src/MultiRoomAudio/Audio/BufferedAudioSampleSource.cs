@@ -11,23 +11,89 @@ namespace MultiRoomAudio.Audio;
 /// implements player-controlled sync correction via frame drop/insert with interpolation.
 /// </summary>
 /// <remarks>
+/// <para><strong>Overview</strong></para>
 /// <para>
-/// This class is called from the audio thread and must be fast and non-blocking.
-/// It reads raw samples from the buffer and applies sync correction based on
-/// the buffer's sync error measurements.
+/// This class serves as the bridge between the Sendspin SDK's timed audio buffer and the
+/// audio output system (PulseAudio or ALSA). It is called from the audio output thread's
+/// write callback whenever audio samples are needed.
+/// </para>
+///
+/// <para><strong>Thread Safety Contract</strong></para>
+/// <para>
+/// This class is designed to be called from a single audio thread. The following guarantees apply:
+/// </para>
+/// <list type="bullet">
+///   <item><description>
+///     <see cref="Read"/> is called exclusively from the audio output thread (PulseAudio write callback)
+///     and must complete quickly without blocking to avoid audio glitches.
+///   </description></item>
+///   <item><description>
+///     <see cref="Reset"/> may be called from any thread to reset correction state. It modifies
+///     fields that are only read (not written) by the audio thread during <see cref="Read"/>,
+///     so no lock is required - the audio thread will see the reset values on the next callback.
+///   </description></item>
+///   <item><description>
+///     The diagnostic properties (<see cref="TotalReads"/>, <see cref="ZeroReads"/>, etc.) may be
+///     read from any thread. They are simple scalar reads which are atomic on modern architectures.
+///   </description></item>
+///   <item><description>
+///     The underlying <see cref="ITimedAudioBuffer"/> is thread-safe and handles its own synchronization.
+///   </description></item>
+/// </list>
+///
+/// <para><strong>Sync Correction Algorithm</strong></para>
+/// <para>
+/// The Sendspin protocol delivers audio samples with precise timestamps indicating when each
+/// sample should be played. Network jitter, clock drift between sender/receiver, and audio
+/// hardware variations can cause the playback position to drift from the ideal schedule.
+/// This class measures and corrects that drift.
 /// </para>
 /// <para>
-/// Correction strategy:
-/// - Within 5ms: no correction (acceptable tolerance)
-/// - Beyond 5ms behind (positive error): drop frames to catch up
-/// - Beyond 5ms ahead (negative error): insert frames to slow down
-/// Correction rate is proportional to error magnitude for smooth convergence.
+/// <strong>Algorithm overview:</strong>
 /// </para>
+/// <list type="number">
+///   <item><description>
+///     The SDK's <see cref="ITimedAudioBuffer"/> measures sync error: the difference between
+///     where playback should be (based on timestamps) and where it actually is.
+///     Positive error means playback is behind; negative means it's ahead.
+///   </description></item>
+///   <item><description>
+///     If error is within the deadband (+/- 5ms), no correction is applied. This prevents
+///     unnecessary processing when sync is acceptable.
+///   </description></item>
+///   <item><description>
+///     Beyond the deadband, we apply correction by dropping or inserting frames:
+///     <list type="bullet">
+///       <item><description>Behind schedule (positive error): DROP frames to catch up faster</description></item>
+///       <item><description>Ahead of schedule (negative error): INSERT frames to slow down</description></item>
+///     </list>
+///   </description></item>
+///   <item><description>
+///     Correction rate is proportional to error magnitude. Larger errors trigger more
+///     frequent corrections (every 10-500 frames depending on error size).
+///   </description></item>
+///   <item><description>
+///     To minimize audible artifacts, corrections use linear interpolation:
+///     <list type="bullet">
+///       <item><description>Drop: blend two frames into one: (A + B) / 2</description></item>
+///       <item><description>Insert: interpolate between last output and next input: (last + next) / 2</description></item>
+///     </list>
+///   </description></item>
+///   <item><description>
+///     The SDK is notified of all corrections via <see cref="ITimedAudioBuffer.NotifyExternalCorrection"/>
+///     so it can maintain accurate sync tracking.
+///   </description></item>
+/// </list>
+///
+/// <para><strong>Performance Considerations</strong></para>
 /// <para>
-/// Drop/insert uses linear interpolation to minimize audible artifacts:
-/// - Drop: blend two frames into one ((A + B) / 2)
-/// - Insert: interpolate between last output and next input ((last + next) / 2)
+/// The <see cref="Read"/> method is called from a real-time audio thread. To avoid glitches:
 /// </para>
+/// <list type="bullet">
+///   <item><description>Uses <see cref="System.Buffers.ArrayPool{T}"/> to avoid GC allocations</description></item>
+///   <item><description>No locks or blocking operations</description></item>
+///   <item><description>Diagnostic logging is rate-limited to once per second</description></item>
+/// </list>
 /// </remarks>
 public sealed class BufferedAudioSampleSource : IAudioSampleSource
 {
@@ -121,6 +187,11 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         {
             throw new ArgumentException("Audio format must have at least one channel.", nameof(buffer));
         }
+
+        _logger?.LogInformation(
+            "BufferedAudioSampleSource initialized: channels={Channels}, sampleRate={SampleRate}, " +
+            "interpolation=3-point weighted with 2-point fallback",
+            _channels, _sampleRate);
     }
 
     /// <inheritdoc/>
@@ -227,7 +298,9 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     }
 
     /// <summary>
-    /// Applies sync correction with linear interpolation to minimize audible artifacts.
+    /// Applies sync correction with interpolation to minimize audible artifacts.
+    /// Uses 3-point weighted interpolation when sufficient lookahead is available in the input buffer,
+    /// falling back to 2-point linear interpolation otherwise.
     /// </summary>
     /// <returns>Tuple of (output sample count, samples dropped, samples inserted).</returns>
     private (int OutputCount, int SamplesDropped, int SamplesInserted) ApplyCorrectionWithInterpolation(
@@ -275,18 +348,33 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
 
                 if (remainingInput >= _channels * 2)
                 {
-                    // Read both frames, output interpolated blend
                     var frameAStart = inputPos;
                     var frameBStart = inputPos + _channels;
                     var outputSpan = output.Slice(outputPos, _channels);
 
-                    // Linear interpolation: (A + B) / 2
-                    for (int i = 0; i < _channels; i++)
+                    // Use 3-point weighted interpolation if we have lookahead available
+                    if (remainingInput >= _channels * 3)
                     {
-                        outputSpan[i] = (input[frameAStart + i] + input[frameBStart + i]) * 0.5f;
+                        // 3-point weighted: A=0.25, B=0.5, C=0.25 (Gaussian-like kernel)
+                        // Smoother blend that considers the frame after the drop point
+                        var frameCStart = inputPos + _channels * 2;
+                        for (int i = 0; i < _channels; i++)
+                        {
+                            outputSpan[i] = input[frameAStart + i] * 0.25f
+                                          + input[frameBStart + i] * 0.5f
+                                          + input[frameCStart + i] * 0.25f;
+                        }
+                    }
+                    else
+                    {
+                        // Fallback: 2-point linear interpolation (A + B) / 2
+                        for (int i = 0; i < _channels; i++)
+                        {
+                            outputSpan[i] = (input[frameAStart + i] + input[frameBStart + i]) * 0.5f;
+                        }
                     }
 
-                    // Consume both input frames
+                    // Consume both input frames (A and B)
                     inputPos += _channels * 2;
 
                     // Save as last output frame
@@ -307,10 +395,24 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
                 {
                     var outputSpan = output.Slice(outputPos, _channels);
 
-                    // Interpolate with next input frame if available
-                    if (remainingInput >= _channels)
+                    // Use true lookahead if we have two frames available
+                    if (remainingInput >= _channels * 2)
                     {
-                        // Linear interpolation: (last + next) / 2
+                        // Interpolate between current and next frame (true lookahead)
+                        // Better than using stale _lastOutputFrame from previous callback
+                        var currentStart = inputPos;
+                        var nextStart = inputPos + _channels;
+                        for (int i = 0; i < _channels; i++)
+                        {
+                            outputSpan[i] = (input[currentStart + i] + input[nextStart + i]) * 0.5f;
+                        }
+
+                        // Save interpolated frame
+                        outputSpan.CopyTo(_lastOutputFrame);
+                    }
+                    else if (remainingInput >= _channels)
+                    {
+                        // Fallback: use last output frame + current input
                         for (int i = 0; i < _channels; i++)
                         {
                             outputSpan[i] = (_lastOutputFrame![i] + input[inputPos + i]) * 0.5f;

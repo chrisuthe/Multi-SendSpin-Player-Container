@@ -78,6 +78,37 @@ AUDIO_BACKEND=alsa
 AUDIO_BACKEND=pulse
 ```
 
+### ENABLE_ADVANCED_FORMATS
+
+Enable per-player audio format selection UI (dev-only).
+
+- **Type:** Boolean
+- **Default:** `false`
+- **Valid Values:** `true`, `false`, `1`, `0`, `yes`, `no`
+- **Description:** Controls whether the advanced format selection UI is displayed. **Important:** All players default to advertising "flac-48000" for maximum Music Assistant compatibility regardless of this setting.
+
+**Behavior:**
+
+| Setting           | Default Format | UI Behavior                 | Use Case                                                                      |
+|-------------------|----------------|-----------------------------|-------------------------------------------------------------------------------|
+| `false` (default) | flac-48000     | No format dropdown shown    | Production - maximum MA compatibility                                         |
+| `true`            | flac-48000     | Format dropdown shown in UI | Development/testing - allows selecting specific formats or "All Formats"      |
+
+When enabled, the UI provides options to:
+
+- Keep the default "flac-48000" (recommended)
+- Select specific formats (e.g., "PCM 192kHz 32-bit", "FLAC 96kHz")
+- Choose "All Formats" to advertise all supported formats
+
+**Examples:**
+```bash
+# Production (default) - flac-48000, no UI dropdown
+ENABLE_ADVANCED_FORMATS=false
+
+# Development - flac-48000 default, but UI allows format selection
+ENABLE_ADVANCED_FORMATS=true
+```
+
 ### CONFIG_PATH
 
 Configuration directory path.
@@ -105,6 +136,59 @@ Log directory path.
 # Custom log directory
 LOG_PATH=/custom/logs
 ```
+
+## Audio Configuration
+
+### PA_SAMPLE_RATE
+
+PulseAudio default sample rate (Docker mode only).
+
+- **Type:** Integer
+- **Default:** `48000`
+- **Valid Values:** Common rates include 44100, 48000, 96000, 192000
+- **Description:** Sets the default sample rate for PulseAudio in standalone Docker mode. This is applied at container startup before PulseAudio starts. Has no effect in HAOS mode (uses system PulseAudio).
+
+**Examples:**
+```bash
+# Standard 48kHz (default)
+PA_SAMPLE_RATE=48000
+
+# Hi-res 192kHz
+PA_SAMPLE_RATE=192000
+
+# CD quality 44.1kHz
+PA_SAMPLE_RATE=44100
+```
+
+### PA_SAMPLE_FORMAT
+
+PulseAudio default sample format (Docker mode only).
+
+- **Type:** String
+- **Default:** `float32le`
+- **Valid Values:** `s16le`, `s24le`, `s32le`, `float32le` (and big-endian variants)
+- **Description:** Sets the default sample format for PulseAudio in standalone Docker mode. This is applied at container startup before PulseAudio starts. Has no effect in HAOS mode (uses system PulseAudio).
+
+| Format | Bit Depth | Type | Use Case |
+|--------|-----------|------|----------|
+| `s16le` | 16-bit | Signed integer | Low CPU, basic quality |
+| `s24le` | 24-bit | Signed integer | Good quality, moderate CPU |
+| `s32le` | 32-bit | Signed integer | Hi-res, more CPU |
+| `float32le` | 32-bit | Floating point | Default, best compatibility |
+
+**Examples:**
+```bash
+# Default - float32 (best compatibility)
+PA_SAMPLE_FORMAT=float32le
+
+# Hi-res 32-bit signed integer
+PA_SAMPLE_FORMAT=s32le
+
+# Conservative 16-bit
+PA_SAMPLE_FORMAT=s16le
+```
+
+**Note:** PulseAudio will automatically negotiate down to hardware capabilities if the requested format/rate isn't supported. These settings only affect the default target - actual output depends on DAC capabilities.
 
 ## HAOS-Specific Variables
 
@@ -135,6 +219,36 @@ services:
       AUDIO_BACKEND: "alsa"
       CONFIG_PATH: "/app/config"
       LOG_PATH: "/app/logs"
+
+      # Audio Configuration (Docker mode only)
+      PA_SAMPLE_RATE: "48000"
+      PA_SAMPLE_FORMAT: "float32le"
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    devices:
+      - /dev/snd:/dev/snd
+    ports:
+      - "8096:8096"
+```
+
+### Hi-Res Audio Example
+
+For hi-res audio with capable DACs:
+
+```yaml
+version: '3.8'
+
+services:
+  multiroom-audio:
+    image: ghcr.io/chrisuthe/multiroom-audio:latest
+    environment:
+      WEB_PORT: "8096"
+      LOG_LEVEL: "info"
+
+      # Hi-res audio: 192kHz, 32-bit
+      PA_SAMPLE_RATE: "192000"
+      PA_SAMPLE_FORMAT: "s32le"
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs

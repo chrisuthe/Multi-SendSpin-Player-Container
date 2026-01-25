@@ -381,12 +381,14 @@ jobs:
           ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update multiroom-audio-dev config.yaml with commit SHA
+      - name: Update multiroom-audio-dev config.yaml with commit SHA and image
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           sed -i "s/^version: .*/version: \"sha-${SHORT_SHA}\"/" multiroom-audio-dev/config.yaml
-          echo "Updated multiroom-audio-dev/config.yaml to version sha-${SHORT_SHA}"
-          cat multiroom-audio-dev/config.yaml | head -5
+          # Update image to match fork owner (allows forks to test their own builds)
+          sed -i "s|^image: ghcr.io/[^/]*/multiroom-audio-hassio-dev|image: ghcr.io/${{ github.repository_owner }}/multiroom-audio-hassio-dev|" multiroom-audio-dev/config.yaml
+          echo "Updated multiroom-audio-dev/config.yaml:"
+          grep -E "^(version|image):" multiroom-audio-dev/config.yaml
 
       - name: Update multiroom-audio-dev DOCS.md with dev changes
         shell: bash

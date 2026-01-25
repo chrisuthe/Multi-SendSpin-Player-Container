@@ -5,11 +5,13 @@ namespace MultiRoomAudio.Utilities;
 
 /// <summary>
 /// Parses and modifies /etc/pulse/default.pa for sink import functionality.
+/// Thread-safe: uses locking for all file operations.
 /// </summary>
 public partial class DefaultPaParser
 {
     private readonly ILogger<DefaultPaParser> _logger;
     private readonly string _defaultPaPath;
+    private readonly object _fileLock = new();
 
     /// <summary>
     /// Regex pattern to match load-module lines for combine or remap sinks.
@@ -49,62 +51,65 @@ public partial class DefaultPaParser
     {
         var detected = new List<DetectedSink>();
 
-        if (!File.Exists(_defaultPaPath))
+        lock (_fileLock)
         {
-            _logger.LogDebug("default.pa not found at {Path}", _defaultPaPath);
-            return detected;
-        }
-
-        try
-        {
-            var lines = File.ReadAllLines(_defaultPaPath);
-
-            for (int i = 0; i < lines.Length; i++)
+            if (!File.Exists(_defaultPaPath))
             {
-                var line = lines[i];
-                var lineNumber = i + 1; // 1-based line numbers
-
-                // Skip already commented lines
-                if (line.TrimStart().StartsWith('#'))
-                    continue;
-
-                // Handle line continuations (\) - track both start and end line numbers
-                var fullLine = line;
-                var startLine = lineNumber;
-                while (fullLine.TrimEnd().EndsWith('\\') && i + 1 < lines.Length)
-                {
-                    fullLine = fullLine.TrimEnd().TrimEnd('\\') + " " + lines[++i].Trim();
-                }
-                // End line is current position + 1 (1-based)
-                var endLine = i + 1;
-
-                var match = LoadModulePattern().Match(fullLine);
-                if (!match.Success)
-                    continue;
-
-                var moduleType = match.Groups[1].Value.ToLowerInvariant();
-                var arguments = match.Groups[2].Value;
-
-                var sink = ParseModuleArguments(moduleType, arguments, startLine, endLine, fullLine);
-                if (sink != null)
-                {
-                    detected.Add(sink);
-                    if (startLine == endLine)
-                    {
-                        _logger.LogDebug("Found {Type}-sink '{Name}' at line {Line}", moduleType, sink.SinkName, startLine);
-                    }
-                    else
-                    {
-                        _logger.LogDebug("Found {Type}-sink '{Name}' at lines {StartLine}-{EndLine}", moduleType, sink.SinkName, startLine, endLine);
-                    }
-                }
+                _logger.LogDebug("default.pa not found at {Path}", _defaultPaPath);
+                return detected;
             }
 
-            _logger.LogInformation("Scanned default.pa: found {Count} importable sinks", detected.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to scan default.pa at {Path}", _defaultPaPath);
+            try
+            {
+                var lines = File.ReadAllLines(_defaultPaPath);
+
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    var lineNumber = i + 1; // 1-based line numbers
+
+                    // Skip already commented lines
+                    if (line.TrimStart().StartsWith('#'))
+                        continue;
+
+                    // Handle line continuations (\) - track both start and end line numbers
+                    var fullLine = line;
+                    var startLine = lineNumber;
+                    while (fullLine.TrimEnd().EndsWith('\\') && i + 1 < lines.Length)
+                    {
+                        fullLine = fullLine.TrimEnd().TrimEnd('\\') + " " + lines[++i].Trim();
+                    }
+                    // End line is current position + 1 (1-based)
+                    var endLine = i + 1;
+
+                    var match = LoadModulePattern().Match(fullLine);
+                    if (!match.Success)
+                        continue;
+
+                    var moduleType = match.Groups[1].Value.ToLowerInvariant();
+                    var arguments = match.Groups[2].Value;
+
+                    var sink = ParseModuleArguments(moduleType, arguments, startLine, endLine, fullLine);
+                    if (sink != null)
+                    {
+                        detected.Add(sink);
+                        if (startLine == endLine)
+                        {
+                            _logger.LogDebug("Found {Type}-sink '{Name}' at line {Line}", moduleType, sink.SinkName, startLine);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Found {Type}-sink '{Name}' at lines {StartLine}-{EndLine}", moduleType, sink.SinkName, startLine, endLine);
+                        }
+                    }
+                }
+
+                _logger.LogInformation("Scanned default.pa: found {Count} importable sinks", detected.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to scan default.pa at {Path}", _defaultPaPath);
+            }
         }
 
         return detected;
@@ -197,121 +202,129 @@ public partial class DefaultPaParser
     /// <summary>
     /// Comment out a range of lines in default.pa by prepending our marker.
     /// Creates a backup file on first modification for recovery purposes.
+    /// Thread-safe: uses file lock to prevent concurrent modifications.
     /// </summary>
     /// <param name="startLine">1-based line number where the entry starts.</param>
     /// <param name="endLine">1-based line number where the entry ends (inclusive).</param>
     /// <returns>True if successfully commented out.</returns>
     public bool CommentOutLines(int startLine, int endLine)
     {
-        if (!File.Exists(_defaultPaPath))
+        lock (_fileLock)
         {
-            _logger.LogWarning("Cannot comment out lines: default.pa not found at {Path}", _defaultPaPath);
-            return false;
-        }
-
-        try
-        {
-            var lines = File.ReadAllLines(_defaultPaPath).ToList();
-            var startIndex = startLine - 1; // Convert to 0-based
-            var endIndex = endLine - 1;
-
-            if (startIndex < 0 || endIndex >= lines.Count || startIndex > endIndex)
+            if (!File.Exists(_defaultPaPath))
             {
-                _logger.LogWarning("Line range {Start}-{End} is invalid (file has {Total} lines)", startLine, endLine, lines.Count);
+                _logger.LogWarning("Cannot comment out lines: default.pa not found at {Path}", _defaultPaPath);
                 return false;
             }
 
-            // Check if first line is already commented by us (assume all are if first is)
-            if (lines[startIndex].StartsWith(CommentMarker))
+            try
             {
-                _logger.LogDebug("Lines {Start}-{End} are already commented out by us", startLine, endLine);
+                var lines = File.ReadAllLines(_defaultPaPath).ToList();
+                var startIndex = startLine - 1; // Convert to 0-based
+                var endIndex = endLine - 1;
+
+                if (startIndex < 0 || endIndex >= lines.Count || startIndex > endIndex)
+                {
+                    _logger.LogWarning("Line range {Start}-{End} is invalid (file has {Total} lines)", startLine, endLine, lines.Count);
+                    return false;
+                }
+
+                // Check if first line is already commented by us (assume all are if first is)
+                if (lines[startIndex].StartsWith(CommentMarker))
+                {
+                    _logger.LogDebug("Lines {Start}-{End} are already commented out by us", startLine, endLine);
+                    return true;
+                }
+
+                // Create backup on first modification (don't overwrite existing backup)
+                EnsureBackupExistsUnsafe();
+
+                // Comment out all lines in the range
+                for (int i = startIndex; i <= endIndex; i++)
+                {
+                    if (!lines[i].StartsWith(CommentMarker))
+                    {
+                        lines[i] = CommentMarker + lines[i];
+                    }
+                }
+
+                File.WriteAllLines(_defaultPaPath, lines);
+                if (startLine == endLine)
+                {
+                    _logger.LogInformation("Commented out line {Line} in default.pa", startLine);
+                }
+                else
+                {
+                    _logger.LogInformation("Commented out lines {Start}-{End} in default.pa", startLine, endLine);
+                }
                 return true;
             }
-
-            // Create backup on first modification (don't overwrite existing backup)
-            EnsureBackupExists();
-
-            // Comment out all lines in the range
-            for (int i = startIndex; i <= endIndex; i++)
+            catch (UnauthorizedAccessException)
             {
-                if (!lines[i].StartsWith(CommentMarker))
-                {
-                    lines[i] = CommentMarker + lines[i];
-                }
+                _logger.LogError("Permission denied: cannot modify default.pa at {Path}", _defaultPaPath);
+                return false;
             }
-
-            File.WriteAllLines(_defaultPaPath, lines);
-            if (startLine == endLine)
+            catch (Exception ex)
             {
-                _logger.LogInformation("Commented out line {Line} in default.pa", startLine);
+                _logger.LogError(ex, "Failed to comment out lines {Start}-{End} in default.pa", startLine, endLine);
+                return false;
             }
-            else
-            {
-                _logger.LogInformation("Commented out lines {Start}-{End} in default.pa", startLine, endLine);
-            }
-            return true;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            _logger.LogError("Permission denied: cannot modify default.pa at {Path}", _defaultPaPath);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to comment out lines {Start}-{End} in default.pa", startLine, endLine);
-            return false;
         }
     }
 
     /// <summary>
     /// Restore a line that was previously commented out by us.
+    /// Thread-safe: uses file lock to prevent concurrent modifications.
     /// </summary>
     /// <param name="lineNumber">1-based line number to restore.</param>
     /// <returns>True if successfully restored.</returns>
     public bool UncommentLine(int lineNumber)
     {
-        if (!File.Exists(_defaultPaPath))
+        lock (_fileLock)
         {
-            _logger.LogWarning("Cannot uncomment line: default.pa not found at {Path}", _defaultPaPath);
-            return false;
-        }
-
-        try
-        {
-            var lines = File.ReadAllLines(_defaultPaPath).ToList();
-            var index = lineNumber - 1;
-
-            if (index < 0 || index >= lines.Count)
+            if (!File.Exists(_defaultPaPath))
             {
-                _logger.LogWarning("Line number {Line} is out of range", lineNumber);
+                _logger.LogWarning("Cannot uncomment line: default.pa not found at {Path}", _defaultPaPath);
                 return false;
             }
 
-            // Only remove our marker, not other comments
-            if (!lines[index].StartsWith(CommentMarker))
+            try
             {
-                _logger.LogDebug("Line {Line} was not commented out by us", lineNumber);
+                var lines = File.ReadAllLines(_defaultPaPath).ToList();
+                var index = lineNumber - 1;
+
+                if (index < 0 || index >= lines.Count)
+                {
+                    _logger.LogWarning("Line number {Line} is out of range", lineNumber);
+                    return false;
+                }
+
+                // Only remove our marker, not other comments
+                if (!lines[index].StartsWith(CommentMarker))
+                {
+                    _logger.LogDebug("Line {Line} was not commented out by us", lineNumber);
+                    return false;
+                }
+
+                // Create backup on first modification (don't overwrite existing backup)
+                EnsureBackupExistsUnsafe();
+
+                lines[index] = lines[index][CommentMarker.Length..];
+
+                File.WriteAllLines(_defaultPaPath, lines);
+                _logger.LogInformation("Restored line {Line} in default.pa", lineNumber);
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                _logger.LogError("Permission denied: cannot modify default.pa at {Path}", _defaultPaPath);
                 return false;
             }
-
-            // Create backup on first modification (don't overwrite existing backup)
-            EnsureBackupExists();
-
-            lines[index] = lines[index][CommentMarker.Length..];
-
-            File.WriteAllLines(_defaultPaPath, lines);
-            _logger.LogInformation("Restored line {Line} in default.pa", lineNumber);
-            return true;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            _logger.LogError("Permission denied: cannot modify default.pa at {Path}", _defaultPaPath);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to uncomment line {Line} in default.pa", lineNumber);
-            return false;
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to uncomment line {Line} in default.pa", lineNumber);
+                return false;
+            }
         }
     }
 
@@ -345,8 +358,9 @@ public partial class DefaultPaParser
     /// <summary>
     /// Creates a backup of default.pa if one doesn't already exist.
     /// The backup is only created once to preserve the original state before any modifications.
+    /// Must be called while holding _fileLock.
     /// </summary>
-    private void EnsureBackupExists()
+    private void EnsureBackupExistsUnsafe()
     {
         var backupPath = _defaultPaPath + BackupExtension;
         if (File.Exists(backupPath))

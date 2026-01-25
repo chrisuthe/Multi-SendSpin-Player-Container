@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Utilities;
 using YamlDotNet.Serialization;
@@ -13,13 +14,13 @@ namespace MultiRoomAudio.Services;
 public class CustomSinksService : IHostedService, IAsyncDisposable
 {
     private readonly ILogger<CustomSinksService> _logger;
-    private readonly PaModuleRunner _moduleRunner;
+    private readonly IPaModuleRunner _moduleRunner;
     private readonly EnvironmentService _environment;
     private readonly ConcurrentDictionary<string, CustomSinkContext> _sinks = new();
     private readonly string _configPath;
     private readonly IDeserializer _deserializer;
     private readonly ISerializer _serializer;
-    private readonly object _configLock = new();
+    private readonly ReaderWriterLockSlim _configLock = new(LockRecursionPolicy.NoRecursion);
     private bool _disposed;
 
     /// <summary>
@@ -37,7 +38,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
     public CustomSinksService(
         ILogger<CustomSinksService> logger,
-        PaModuleRunner moduleRunner,
+        IPaModuleRunner moduleRunner,
         EnvironmentService environment)
     {
         _logger = logger;
@@ -53,6 +54,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         _serializer = new SerializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
+            .WithQuotingNecessaryStrings()
             .Build();
     }
 
@@ -145,7 +147,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         // Check if sink name already exists in PulseAudio before we try to add locally
         if (await _moduleRunner.SinkExistsAsync(request.Name, cancellationToken))
         {
-            throw new InvalidOperationException($"A PulseAudio sink with name '{request.Name}' already exists.");
+            throw new EntityAlreadyExistsException("PulseAudio sink", request.Name);
         }
 
         var config = new CustomSinkConfiguration
@@ -164,9 +166,11 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         // TryAdd is atomic - if another thread added the same name, we fail gracefully
         if (!_sinks.TryAdd(request.Name, context))
         {
-            throw new InvalidOperationException($"Sink '{request.Name}' already exists.");
+            throw new EntityAlreadyExistsException("Sink", request.Name);
         }
 
+        // Use try-finally to ensure cleanup on any failure path
+        bool success = false;
         try
         {
             var moduleIndex = await _moduleRunner.LoadCombineSinkAsync(
@@ -184,22 +188,36 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
                 // Persist to YAML only on success
                 SaveConfiguration(config);
+                success = true;
 
                 return ToResponse(request.Name, context);
             }
             else
             {
-                // Module failed to load - remove from tracking and throw
-                _sinks.TryRemove(request.Name, out _);
                 throw new InvalidOperationException($"Failed to load combine-sink '{request.Name}' in PulseAudio");
             }
         }
-        catch (Exception ex)
+        finally
         {
-            context.State = CustomSinkState.Error;
-            context.ErrorMessage = ex.Message;
-            _sinks.TryRemove(request.Name, out _);
-            throw;
+            if (!success)
+            {
+                // Ensure we clean up on any failure - unload module if it was loaded
+                if (context.ModuleIndex.HasValue)
+                {
+                    try
+                    {
+                        await _moduleRunner.UnloadModuleAsync(context.ModuleIndex.Value, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to unload module during cleanup for sink '{Name}'", request.Name);
+                    }
+                }
+
+                context.State = CustomSinkState.Error;
+                context.ErrorMessage ??= "Creation failed";
+                _sinks.TryRemove(request.Name, out _);
+            }
         }
     }
 
@@ -212,10 +230,16 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
     {
         ValidateSinkName(request.Name);
 
+        // Validate master sink exists
+        if (!await _moduleRunner.SinkExistsAsync(request.MasterSink, cancellationToken))
+        {
+            throw new ArgumentException($"Master sink '{request.MasterSink}' not found. Use /api/devices to list available sinks.");
+        }
+
         // Check if sink name already exists in PulseAudio before we try to add locally
         if (await _moduleRunner.SinkExistsAsync(request.Name, cancellationToken))
         {
-            throw new InvalidOperationException($"A PulseAudio sink with name '{request.Name}' already exists.");
+            throw new EntityAlreadyExistsException("PulseAudio sink", request.Name);
         }
 
         // Build channel maps
@@ -241,9 +265,11 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
         // TryAdd is atomic - if another thread added the same name, we fail gracefully
         if (!_sinks.TryAdd(request.Name, context))
         {
-            throw new InvalidOperationException($"Sink '{request.Name}' already exists.");
+            throw new EntityAlreadyExistsException("Sink", request.Name);
         }
 
+        // Use try-finally to ensure cleanup on any failure path
+        bool success = false;
         try
         {
             var moduleIndex = await _moduleRunner.LoadRemapSinkAsync(
@@ -265,22 +291,36 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
                 // Persist to YAML only on success
                 SaveConfiguration(config);
+                success = true;
 
                 return ToResponse(request.Name, context);
             }
             else
             {
-                // Module failed to load - remove from tracking and throw
-                _sinks.TryRemove(request.Name, out _);
                 throw new InvalidOperationException($"Failed to load remap-sink '{request.Name}' in PulseAudio");
             }
         }
-        catch (Exception ex)
+        finally
         {
-            context.State = CustomSinkState.Error;
-            context.ErrorMessage = ex.Message;
-            _sinks.TryRemove(request.Name, out _);
-            throw;
+            if (!success)
+            {
+                // Ensure we clean up on any failure - unload module if it was loaded
+                if (context.ModuleIndex.HasValue)
+                {
+                    try
+                    {
+                        await _moduleRunner.UnloadModuleAsync(context.ModuleIndex.Value, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to unload module during cleanup for sink '{Name}'", request.Name);
+                    }
+                }
+
+                context.State = CustomSinkState.Error;
+                context.ErrorMessage ??= "Creation failed";
+                _sinks.TryRemove(request.Name, out _);
+            }
         }
     }
 
@@ -295,7 +335,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
         if (_sinks.ContainsKey(detected.SinkName))
         {
-            throw new InvalidOperationException($"Sink '{detected.SinkName}' already exists in app management.");
+            throw new EntityAlreadyExistsException("Sink", detected.SinkName);
         }
 
         CustomSinkConfiguration config;
@@ -517,108 +557,177 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
     private List<CustomSinkConfiguration> LoadConfigurations()
     {
-        lock (_configLock)
+        // Read file content outside the lock to avoid blocking on slow I/O
+        string? yaml = null;
+        bool fileExists;
+
+        try
         {
-            if (!File.Exists(_configPath))
+            fileExists = File.Exists(_configPath);
+            if (fileExists)
+            {
+                yaml = File.ReadAllText(_configPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read custom sinks configuration from {Path}", _configPath);
+            return [];
+        }
+
+        // Process the data under a read lock
+        _configLock.EnterReadLock();
+        try
+        {
+            if (!fileExists)
             {
                 _logger.LogDebug("Custom sinks config not found at {Path}", _configPath);
                 return [];
             }
 
-            try
-            {
-                var yaml = File.ReadAllText(_configPath);
-                if (string.IsNullOrWhiteSpace(yaml))
-                    return [];
-
-                var dict = _deserializer.Deserialize<Dictionary<string, CustomSinkConfiguration>>(yaml);
-                if (dict == null)
-                    return [];
-
-                // Ensure name field matches dictionary key
-                foreach (var (name, config) in dict)
-                {
-                    config.Name = name;
-                }
-
-                _logger.LogInformation("Loaded {Count} custom sink configurations", dict.Count);
-                return dict.Values.ToList();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to load custom sinks configuration from {Path}", _configPath);
+            if (string.IsNullOrWhiteSpace(yaml))
                 return [];
+
+            var dict = _deserializer.Deserialize<Dictionary<string, CustomSinkConfiguration>>(yaml);
+            if (dict == null)
+                return [];
+
+            // Ensure name field matches dictionary key
+            foreach (var (name, config) in dict)
+            {
+                config.Name = name;
             }
+
+            _logger.LogInformation("Loaded {Count} custom sink configurations", dict.Count);
+            return dict.Values.ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse custom sinks configuration from {Path}", _configPath);
+            return [];
+        }
+        finally
+        {
+            _configLock.ExitReadLock();
         }
     }
 
     private void SaveConfiguration(CustomSinkConfiguration config)
     {
-        lock (_configLock)
+        // Read existing config file outside the lock
+        string? existingYaml = null;
+        try
+        {
+            if (File.Exists(_configPath))
+            {
+                existingYaml = File.ReadAllText(_configPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read existing config");
+        }
+
+        // Process and serialize under write lock
+        string yamlToWrite;
+        _configLock.EnterWriteLock();
+        try
         {
             var configs = new Dictionary<string, CustomSinkConfiguration>();
 
-            // Load existing
-            if (File.Exists(_configPath))
+            if (!string.IsNullOrWhiteSpace(existingYaml))
             {
                 try
                 {
-                    var yaml = File.ReadAllText(_configPath);
-                    if (!string.IsNullOrWhiteSpace(yaml))
-                    {
-                        configs = _deserializer.Deserialize<Dictionary<string, CustomSinkConfiguration>>(yaml)
-                            ?? new Dictionary<string, CustomSinkConfiguration>();
-                    }
+                    configs = _deserializer.Deserialize<Dictionary<string, CustomSinkConfiguration>>(existingYaml)
+                        ?? new Dictionary<string, CustomSinkConfiguration>();
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to read existing config, starting fresh");
+                    _logger.LogWarning(ex, "Failed to parse existing config, starting fresh");
                 }
             }
 
             // Add or update
             configs[config.Name] = config;
 
-            // Save
-            try
-            {
-                var yaml = _serializer.Serialize(configs);
-                File.WriteAllText(_configPath, yaml);
-                _logger.LogDebug("Saved custom sink configuration for '{Name}'", config.Name);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to save custom sink configuration");
-            }
+            yamlToWrite = _serializer.Serialize(configs);
+        }
+        finally
+        {
+            _configLock.ExitWriteLock();
+        }
+
+        // Write file outside the lock
+        try
+        {
+            File.WriteAllText(_configPath, yamlToWrite);
+            _logger.LogDebug("Saved custom sink configuration for '{Name}'", config.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save custom sink configuration");
         }
     }
 
     private void RemoveConfiguration(string name)
     {
-        lock (_configLock)
+        // Read existing config file outside the lock
+        string? existingYaml = null;
+        bool fileExists;
+        try
         {
-            if (!File.Exists(_configPath))
-                return;
+            fileExists = File.Exists(_configPath);
+            if (fileExists)
+            {
+                existingYaml = File.ReadAllText(_configPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read config for removal of sink '{Name}'", name);
+            return;
+        }
 
+        if (!fileExists || string.IsNullOrWhiteSpace(existingYaml))
+            return;
+
+        // Process under write lock
+        string? yamlToWrite = null;
+        bool removed;
+        _configLock.EnterWriteLock();
+        try
+        {
+            var configs = _deserializer.Deserialize<Dictionary<string, CustomSinkConfiguration>>(existingYaml)
+                ?? new Dictionary<string, CustomSinkConfiguration>();
+
+            removed = configs.Remove(name);
+            if (removed)
+            {
+                yamlToWrite = _serializer.Serialize(configs);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process removal of sink '{Name}' from configuration", name);
+            return;
+        }
+        finally
+        {
+            _configLock.ExitWriteLock();
+        }
+
+        // Write file outside the lock if we removed the sink
+        if (removed && yamlToWrite != null)
+        {
             try
             {
-                var yaml = File.ReadAllText(_configPath);
-                if (string.IsNullOrWhiteSpace(yaml))
-                    return;
-
-                var configs = _deserializer.Deserialize<Dictionary<string, CustomSinkConfiguration>>(yaml)
-                    ?? new Dictionary<string, CustomSinkConfiguration>();
-
-                if (configs.Remove(name))
-                {
-                    yaml = _serializer.Serialize(configs);
-                    File.WriteAllText(_configPath, yaml);
-                    _logger.LogDebug("Removed sink '{Name}' from configuration", name);
-                }
+                File.WriteAllText(_configPath, yamlToWrite);
+                _logger.LogDebug("Removed sink '{Name}' from configuration", name);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to remove sink '{Name}' from configuration", name);
+                _logger.LogError(ex, "Failed to save config after removing sink '{Name}'", name);
             }
         }
     }

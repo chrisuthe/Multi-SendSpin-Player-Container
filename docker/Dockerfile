@@ -18,14 +18,25 @@ EXPOSE 8096
 # - pulseaudio: Audio daemon (used for both HAOS and Docker modes)
 # - libasound2: ALSA library (required for PulseAudio's ALSA output backend)
 # - libasound2-plugins: ALSA plugins including PulseAudio bridge
+# FTDI relay board dependencies:
+# - libftdi1-2: libftdi1 library for FTDI USB device control
+# - libusb-1.0-0: USB library required by libftdi
+# USB HID relay board dependencies:
+# - libudev1: Required by HidSharp for USB HID device enumeration
+# CH340/Modbus serial relay board dependencies:
+# - dialout group membership for serial port access (added below)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pulseaudio \
     libasound2 \
     libasound2-plugins \
     curl \
+    libftdi1-2 \
+    libusb-1.0-0 \
+    libudev1 \
     && rm -rf /var/lib/apt/lists/* \
     && usermod -a -G audio pulse 2>/dev/null || true \
-    && usermod -a -G audio root 2>/dev/null || true
+    && usermod -a -G audio root 2>/dev/null || true \
+    && usermod -a -G dialout root 2>/dev/null || true
 
 # Build stage - using Debian SDK for consistent glibc builds
 FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS build
@@ -82,6 +93,10 @@ RUN mkdir -p /app/config /app/logs /data /share /run/pulse && \
 ENV DBUS_SESSION_BUS_ADDRESS=disabled
 ENV PULSE_SYSTEM=1
 ENV PULSE_SERVER=unix:/run/pulse/native
+
+# Clear default ASPNETCORE_URLS to prevent "Overriding address" warning
+# (.NET 8+ images default to http://+:8080, which conflicts with Kestrel config on port 8096)
+ENV ASPNETCORE_URLS=
 
 # Health check - verifies the API is responding
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \

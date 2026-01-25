@@ -727,6 +727,37 @@ h1, h2, h3, h4, h5, h6 {
     text-align: center;
 }
 
+/* Sound Card Alias Input - inline editable styling */
+.card-alias-input {
+    max-width: 280px;
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--bs-body-color);
+    background-color: transparent;
+    border: 1px solid transparent;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.card-alias-input::placeholder {
+    color: var(--bs-secondary-color);
+    font-style: italic;
+}
+
+.card-alias-input:hover {
+    border-color: var(--bs-border-color);
+    background-color: var(--bs-tertiary-bg);
+}
+
+.card-alias-input:focus {
+    border-color: var(--accent-primary);
+    background-color: var(--bs-body-bg);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+    outline: none;
+}
+
 /* ============================================
    Forms
    ============================================ */

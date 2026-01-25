@@ -3,10 +3,13 @@
 // State
 let players = {};
 let devices = [];
+let formats = [];
+let advancedFormatsEnabled = false;
 let connection = null;
 let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
 let pendingUpdate = null; // Store pending updates during interaction
+let isModalOpen = false; // Pause auto-refresh while modal is open
 
 function formatBuildVersion(apiInfo) {
     const version = apiInfo?.version;
@@ -103,6 +106,37 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Extract simplified USB port identifier from full device path
+// e.g., "...AppleUSB20HubPort@02341200..." -> "Port 4.1.2"
+function extractUsbPort(usbPath) {
+    if (!usbPath) return null;
+
+    // Look for USB hub port patterns in the path
+    // macOS: AppleUSB20HubPort@XXXXXXXX
+    const portMatches = usbPath.match(/HubPort@([0-9a-fA-F]+)/g);
+    if (portMatches && portMatches.length > 0) {
+        // Extract port numbers from hex addresses
+        // Format is typically: 0234XYZZ where X=hub port, Y=sub-port, ZZ=00
+        // e.g., 02340000=port 0, 02341000=port 1.0, 02341100=port 1.1, 02341200=port 1.2
+        const ports = portMatches.map(m => {
+            const hex = m.match(/@([0-9a-fA-F]+)/)[1];
+            // Extract digits at positions 4 and 5
+            const major = parseInt(hex.charAt(4), 16);
+            const minor = parseInt(hex.charAt(5), 16);
+            return minor > 0 ? `${major}.${minor}` : `${major}`;
+        });
+        return `Port ${ports.join('-')}`;
+    }
+
+    // Linux path pattern: look for usb port numbers like "1-2.3"
+    const linuxMatch = usbPath.match(/(\d+-[\d.]+)/);
+    if (linuxMatch) {
+        return `Port ${linuxMatch[1]}`;
+    }
+
+    return null;
+}
+
 // Format sample rate for display (e.g., 48000 -> "48kHz", 192000 -> "192kHz")
 function formatSampleRate(rate) {
     if (rate >= 1000) {
@@ -127,10 +161,102 @@ function formatChannelName(channel) {
     return map[channel?.toLowerCase()] || channel || 'Unknown';
 }
 
+/**
+ * Determines the connection type of an audio device from its identifiers and ID.
+ * Uses device.bus_path (sysfs path) and device ID for detection:
+ * - HDMI: device ID contains "hdmi" (HDMI audio output)
+ * - USB: bus_path contains "/usb"
+ * - PCI: bus_path contains "/pci" but NOT "/usb" (USB devices are on PCI USB controllers)
+ * - Bluetooth: device ID starts with "bluez_" (no sysfs bus_path)
+ * @param {object} device - Device object with id and identifiers properties
+ * @returns {string} 'hdmi', 'usb', 'pci', 'bluetooth', or 'unknown'
+ */
+function getDeviceBusType(device) {
+    if (!device) return 'unknown';
+
+    const deviceId = device.id || '';
+
+    // Check for HDMI first (HDMI devices are on PCI but should show HDMI icon)
+    if (deviceId.toLowerCase().includes('hdmi')) return 'hdmi';
+
+    // Check for Bluetooth (bluez devices don't have sysfs bus_path)
+    if (deviceId.startsWith('bluez_')) return 'bluetooth';
+
+    // Check bus_path from identifiers (most reliable for USB vs PCI)
+    const busPath = device.identifiers?.busPath;
+    if (busPath) {
+        if (busPath.includes('/usb')) return 'usb';
+        if (busPath.includes('/pci')) return 'pci';
+    }
+
+    // Fallback: Check device ID patterns for USB/PCI
+    if (deviceId.includes('.usb-')) return 'usb';
+    if (deviceId.includes('.pci-')) return 'pci';
+
+    return 'unknown';
+}
+
+/**
+ * Determines the connection type of a sound card from its name and active profile.
+ * Card names follow PulseAudio naming conventions:
+ * - HDMI: active profile contains "hdmi" (HDMI-only cards like GPU audio)
+ * - USB: "alsa_card.usb-..."
+ * - PCI: "alsa_card.pci-..."
+ * - Bluetooth: "bluez_card.XX_XX_XX..."
+ * @param {string} cardName - The card name from PulseAudio
+ * @param {string} [activeProfile] - Optional active profile name for HDMI detection
+ * @returns {string} 'hdmi', 'usb', 'pci', 'bluetooth', or 'unknown'
+ */
+function getCardBusType(cardName, activeProfile) {
+    if (!cardName) return 'unknown';
+    if (cardName.startsWith('bluez_')) return 'bluetooth';
+    if (cardName.includes('.usb-')) return 'usb';
+    if (cardName.includes('.pci-')) {
+        // Check if this is an HDMI-only card (like GPU audio)
+        // by checking if the active profile is HDMI
+        if (activeProfile && activeProfile.toLowerCase().includes('hdmi')) {
+            return 'hdmi';
+        }
+        return 'pci';
+    }
+    return 'unknown';
+}
+
+/**
+ * Gets the appropriate Font Awesome icon class for a connection type.
+ * @param {string} busType - The connection type ('hdmi', 'usb', 'pci', 'bluetooth', or 'unknown')
+ * @returns {string} Font Awesome icon class
+ */
+function getBusTypeIcon(busType) {
+    switch (busType) {
+        case 'bluetooth': return 'fab fa-bluetooth-b';
+        case 'usb': return 'fab fa-usb';
+        case 'hdmi': return 'fas fa-tv';  // TV/monitor icon for HDMI
+        case 'pci': return 'fas fa-microchip';
+        default: return 'fas fa-volume-up';
+    }
+}
+
+/**
+ * Gets a human-readable label for a connection type.
+ * @param {string} busType - The connection type ('hdmi', 'usb', 'pci', 'bluetooth', or 'unknown')
+ * @returns {string} Human-readable connection type label
+ */
+function getBusTypeLabel(busType) {
+    switch (busType) {
+        case 'bluetooth': return 'Bluetooth';
+        case 'usb': return 'USB';
+        case 'hdmi': return 'HDMI';
+        case 'pci': return 'PCI/Internal';
+        default: return 'Audio';
+    }
+}
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
     // Load initial data
     await Promise.all([
+        checkAdvancedFormats(),
         refreshBuildInfo(),
         refreshStatus(),
         refreshDevices()
@@ -230,7 +356,12 @@ function setupSignalR() {
 }
 
 // API calls
-async function refreshStatus() {
+async function refreshStatus(force = false) {
+    // Skip auto-refresh while modal is open (unless forced)
+    if (isModalOpen && !force) {
+        return;
+    }
+
     try {
         const response = await fetch('./api/players');
         if (!response.ok) throw new Error('Failed to fetch players');
@@ -245,6 +376,47 @@ async function refreshStatus() {
     } catch (error) {
         console.error('Error refreshing status:', error);
         showAlert('Failed to load players', 'danger');
+    }
+}
+
+async function checkAdvancedFormats() {
+    try {
+        const response = await fetch('./api/players/formats');
+        advancedFormatsEnabled = response.ok;
+
+        if (advancedFormatsEnabled) {
+            document.getElementById('advertisedFormatGroup').style.display = 'block';
+        }
+    } catch (error) {
+        advancedFormatsEnabled = false;
+    }
+}
+
+async function refreshFormats() {
+    if (!advancedFormatsEnabled) return;
+
+    try {
+        const response = await fetch('./api/players/formats');
+        if (!response.ok) throw new Error('Failed to fetch formats');
+
+        const data = await response.json();
+        formats = data.formats || [];
+
+        const formatSelect = document.getElementById('advertisedFormat');
+        if (formatSelect) {
+            const currentValue = formatSelect.value;
+            formatSelect.innerHTML = '';
+            formats.forEach(format => {
+                const option = document.createElement('option');
+                option.value = format.id;
+                option.textContent = format.label;
+                option.title = format.description;
+                formatSelect.appendChild(option);
+            });
+            if (currentValue) formatSelect.value = currentValue;
+        }
+    } catch (error) {
+        console.error('Error refreshing formats:', error);
     }
 }
 
@@ -275,7 +447,9 @@ async function refreshDevices() {
 }
 
 // Open the modal in Add mode
-function openAddPlayerModal() {
+async function openAddPlayerModal() {
+    isModalOpen = true;
+
     // Reset form
     document.getElementById('playerForm').reset();
     document.getElementById('editingPlayerName').value = '';
@@ -287,14 +461,25 @@ function openAddPlayerModal() {
     document.getElementById('playerModalSubmitIcon').className = 'fas fa-plus me-1';
     document.getElementById('playerModalSubmitText').textContent = 'Add Player';
 
-    // Refresh devices and show modal
-    refreshDevices();
+    // Refresh devices and formats
+    await refreshDevices();
+    if (advancedFormatsEnabled) {
+        await refreshFormats();
+    }
+
     const modal = new bootstrap.Modal(document.getElementById('playerModal'));
     modal.show();
+
+    // Reset flag when modal closes
+    document.getElementById('playerModal').addEventListener('hidden.bs.modal', () => {
+        isModalOpen = false;
+    }, { once: true });
 }
 
 // Open the modal in Edit mode with player data
 async function openEditPlayerModal(playerName) {
+    isModalOpen = true;
+
     try {
         // Fetch current player data
         const response = await fetch(`./api/players/${encodeURIComponent(playerName)}`);
@@ -312,8 +497,8 @@ async function openEditPlayerModal(playerName) {
         // Populate form with current values
         document.getElementById('playerName').value = player.name;
         document.getElementById('serverUrl').value = player.serverUrl || '';
-        document.getElementById('initialVolume').value = player.volume;
-        document.getElementById('initialVolumeValue').textContent = player.volume + '%';
+        document.getElementById('initialVolume').value = player.startupVolume;
+        document.getElementById('initialVolumeValue').textContent = player.startupVolume + '%';
 
         // Set device dropdown
         await refreshDevices();
@@ -326,6 +511,22 @@ async function openEditPlayerModal(playerName) {
             }
         }
 
+        // Set advertised format dropdown (if advanced formats enabled)
+        if (advancedFormatsEnabled) {
+            // Refresh formats first to populate options
+            await refreshFormats();
+
+            // Store original format for change detection (default to flac-48000 for compatibility)
+            const originalFormat = player.advertisedFormat || 'flac-48000';
+            document.getElementById('playerForm').dataset.originalFormat = originalFormat;
+
+            // Set dropdown value AFTER options are populated
+            const formatSelect = document.getElementById('advertisedFormat');
+            if (formatSelect) {
+                formatSelect.value = originalFormat;
+            }
+        }
+
         // Set modal to Edit mode
         document.getElementById('playerModalIcon').className = 'fas fa-edit me-2';
         document.getElementById('playerModalTitleText').textContent = 'Edit Player';
@@ -334,7 +535,13 @@ async function openEditPlayerModal(playerName) {
 
         const modal = new bootstrap.Modal(document.getElementById('playerModal'));
         modal.show();
+
+        // Reset flag when modal closes
+        document.getElementById('playerModal').addEventListener('hidden.bs.modal', () => {
+            isModalOpen = false;
+        }, { once: true });
     } catch (error) {
+        isModalOpen = false;
         console.error('Error opening edit modal:', error);
         showAlert(error.message, 'danger');
     }
@@ -365,9 +572,23 @@ async function savePlayer() {
             const updatePayload = {
                 name: name !== editingName ? name : undefined,  // Only include if changed
                 device: device || '',  // Empty string = default device
-                serverUrl: serverUrl || '',  // Empty string = mDNS discovery
-                volume
+                serverUrl: serverUrl || ''  // Empty string = mDNS discovery
+                // Note: volume is NOT included here - we update startup volume separately
+                // so it doesn't affect current playback
             };
+
+            // Include advertised format if advanced formats enabled
+            if (advancedFormatsEnabled) {
+                const form = document.getElementById('playerForm');
+                const originalFormat = form.dataset.originalFormat || 'flac-48000';
+                const currentFormat = document.getElementById('advertisedFormat').value || 'flac-48000';
+
+                // Only include if changed from original
+                if (currentFormat !== originalFormat) {
+                    // Send the specific format
+                    updatePayload.advertisedFormat = currentFormat;
+                }
+            }
 
             const response = await fetch(`./api/players/${encodeURIComponent(editingName)}`, {
                 method: 'PUT',
@@ -384,47 +605,70 @@ async function savePlayer() {
             const finalName = result.playerName || name;
             const wasRenamed = name !== editingName;
 
-            // Close modal and refresh
+            // Update startup volume separately (doesn't affect current playback)
+            const startupVolumeResponse = await fetch(`./api/players/${encodeURIComponent(finalName)}/startup-volume`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ volume })
+            });
+            if (!startupVolumeResponse.ok) {
+                console.warn('Failed to update startup volume');
+            }
+
+            // Close modal and reset form
             bootstrap.Modal.getInstance(document.getElementById('playerModal')).hide();
             document.getElementById('playerForm').reset();
             document.getElementById('initialVolumeValue').textContent = '75%';
-            await refreshStatus();
 
             // Show appropriate message based on changes
             if (result.needsRestart) {
                 if (wasRenamed) {
                     // For renames, offer to restart rather than auto-restart
                     // The name change is saved locally, but Music Assistant needs a restart to see it
+                    await refreshStatus(true);
                     showAlert(
                         `Player renamed to "${finalName}". Restart the player for the name to appear in Music Assistant.`,
                         'info',
                         8000 // Show for longer since it's actionable
                     );
                 } else {
-                    // For other changes requiring restart (e.g., server URL), auto-restart
+                    // For other changes requiring restart (e.g., server URL, format), auto-restart
                     const restartResponse = await fetch(`./api/players/${encodeURIComponent(finalName)}/restart`, {
                         method: 'POST'
                     });
                     if (!restartResponse.ok) {
                         console.warn('Restart request failed, player may need manual restart');
                     }
+                    // Refresh status AFTER restart completes
+                    await refreshStatus(true);
                     showAlert(`Player "${finalName}" updated and restarted`, 'success');
                 }
             } else {
+                await refreshStatus(true);
                 showAlert(`Player "${finalName}" updated successfully`, 'success');
             }
         } else {
             // Add mode: Create new player
+            const payload = {
+                name,
+                device: device || null,
+                serverUrl: serverUrl || null,
+                volume,
+                persist: true
+            };
+
+            // Include advertised format if advanced formats enabled
+            if (advancedFormatsEnabled) {
+                const advertisedFormat = document.getElementById('advertisedFormat').value;
+                if (advertisedFormat) {
+                    payload.advertisedFormat = advertisedFormat;
+                }
+            }
+
             const response = await fetch('./api/players', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name,
-                    device: device || null,
-                    serverUrl: serverUrl || null,
-                    volume,
-                    persist: true
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
@@ -436,7 +680,7 @@ async function savePlayer() {
             bootstrap.Modal.getInstance(document.getElementById('playerModal')).hide();
             document.getElementById('playerForm').reset();
             document.getElementById('initialVolumeValue').textContent = '75%';
-            await refreshStatus();
+            await refreshStatus(true);
 
             showAlert(`Player "${name}" created successfully`, 'success');
         }
@@ -537,31 +781,71 @@ async function setVolume(name, volume) {
 }
 
 /**
- * Set the hardware volume limit for a player's audio device.
- * This controls the PulseAudio sink volume (physical output level).
+ * Get the display state for a player's mute button.
+ * Returns icon, class, and label based on mute state.
  */
-async function setStartupVolume(name, volume) {
+function getPlayerMuteDisplayState(player) {
+    const isMuted = player?.isMuted || false;
+    return {
+        isMuted,
+        label: isMuted ? 'Muted' : 'Unmuted',
+        icon: isMuted ? 'fa-volume-mute' : 'fa-volume-up',
+        iconClass: isMuted ? 'text-danger' : 'text-success'
+    };
+}
+
+/**
+ * Toggle the mute state for a player.
+ */
+function togglePlayerMute(playerName) {
+    const player = players[playerName];
+    const isMuted = player?.isMuted || false;
+    return setPlayerMute(playerName, !isMuted);
+}
+
+/**
+ * Set the mute state for a player.
+ * This is software mute on the audio pipeline (not hardware sink).
+ * Syncs bidirectionally with Music Assistant.
+ */
+async function setPlayerMute(playerName, muted) {
+    // Find and disable the button during the API call
+    const card = document.querySelector(`.player-card[data-player="${CSS.escape(playerName)}"]`);
+    const button = card?.querySelector('.card-mute-toggle');
+    if (button) button.disabled = true;
+
     try {
-        const response = await fetch(`./api/players/${encodeURIComponent(name)}/startup-volume`, {
+        const response = await fetch(`./api/players/${encodeURIComponent(playerName)}/mute`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ volume: parseInt(volume) })
+            body: JSON.stringify({ muted })
         });
 
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.message || 'Failed to set startup volume');
+            throw new Error(error.message || 'Failed to set mute state');
         }
 
         // Update local state
-        if (players[name]) {
-            players[name].startupVolume = parseInt(volume);
+        if (players[playerName]) {
+            players[playerName].isMuted = muted;
         }
 
-        showAlert(`Startup volume set to ${volume}% (takes effect on next restart)`, 'success', 2000);
+        // Update button UI
+        if (button) {
+            const state = getPlayerMuteDisplayState({ isMuted: muted });
+            const icon = button.querySelector('i');
+            if (icon) {
+                icon.className = `fas ${state.icon} ${state.iconClass}`;
+            }
+            button.setAttribute('aria-label', state.label);
+            button.setAttribute('title', state.label);
+        }
     } catch (error) {
-        console.error('Error setting startup volume:', error);
+        console.error('Error setting mute state:', error);
         showAlert(error.message, 'danger');
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -800,24 +1084,12 @@ function renderPlayers() {
                                     onchange="setVolume('${escapeHtml(name)}', this.value)"
                                     oninput="this.nextElementSibling.textContent = this.value + '%'">
                                 <span class="volume-display ms-2 small">${player.volume}%</span>
-                            </div>
-                        </div>
-
-                        <div class="startup-volume-section mb-3 pt-2 border-top">
-                            <div class="d-flex align-items-center mb-1">
-                                <i class="fas fa-power-off me-1 text-muted small"></i>
-                                <span class="small text-muted">Startup Volume</span>
-                                <i class="fas fa-info-circle ms-1 text-muted small volume-tooltip"
-                                   data-bs-toggle="tooltip"
-                                   data-bs-placement="top"
-                                   data-bs-title="Initial volume sent when player connects (on container or player restart)"></i>
-                            </div>
-                            <div class="d-flex align-items-center">
-                                <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100"
-                                       value="${player.startupVolume || player.volume}"
-                                       onchange="setStartupVolume('${escapeHtml(name)}', this.value)"
-                                       oninput="this.nextElementSibling.textContent = this.value + '%'">
-                                <span class="volume-display ms-2 small">${player.startupVolume || player.volume}%</span>
+                                <button class="btn card-mute-toggle ms-2"
+                                        title="${getPlayerMuteDisplayState(player).label}"
+                                        aria-label="${getPlayerMuteDisplayState(player).label}"
+                                        onclick="togglePlayerMute('${escapeHtml(name)}')">
+                                    <i class="fas ${getPlayerMuteDisplayState(player).icon} ${getPlayerMuteDisplayState(player).iconClass}"></i>
+                                </button>
                             </div>
                         </div>
 
@@ -967,12 +1239,119 @@ function showAlert(message, type = 'info', duration = 5000) {
     }, duration);
 }
 
+// Show a styled confirmation modal (returns a Promise that resolves to true/false)
+function showConfirm(title, message, okText = 'OK', okClass = 'btn-danger') {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirmModal');
+        const titleEl = document.getElementById('confirmModalTitle');
+        const messageEl = document.getElementById('confirmModalMessage');
+        const okBtn = document.getElementById('confirmModalOkBtn');
+
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+        okBtn.textContent = okText;
+        okBtn.className = `btn ${okClass}`;
+
+        const bsModal = new bootstrap.Modal(modal);
+
+        // Clean up any previous handlers
+        const newOkBtn = okBtn.cloneNode(true);
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+
+        let resolved = false;
+
+        newOkBtn.addEventListener('click', () => {
+            resolved = true;
+            bsModal.hide();
+            resolve(true);
+        });
+
+        modal.addEventListener('hidden.bs.modal', function handler() {
+            modal.removeEventListener('hidden.bs.modal', handler);
+            if (!resolved) {
+                resolve(false);
+            }
+        });
+
+        bsModal.show();
+    });
+}
+
+// Show a styled prompt modal for text input (returns a Promise that resolves to the input value or null)
+function showPrompt(title, label, defaultValue = '', placeholder = '') {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('promptModal');
+        const titleEl = document.getElementById('promptModalTitle');
+        const labelEl = document.getElementById('promptModalLabel');
+        const inputEl = document.getElementById('promptModalInput');
+        const okBtn = document.getElementById('promptModalOkBtn');
+
+        titleEl.textContent = title;
+        labelEl.textContent = label;
+        inputEl.value = defaultValue;
+        inputEl.placeholder = placeholder;
+
+        const bsModal = new bootstrap.Modal(modal);
+
+        // Clean up any previous handlers
+        const newOkBtn = okBtn.cloneNode(true);
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+
+        let resolved = false;
+
+        const submitValue = () => {
+            resolved = true;
+            bsModal.hide();
+            resolve(inputEl.value);
+        };
+
+        newOkBtn.addEventListener('click', submitValue);
+
+        // Allow Enter key to submit
+        const keyHandler = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitValue();
+            }
+        };
+        inputEl.addEventListener('keydown', keyHandler);
+
+        modal.addEventListener('hidden.bs.modal', function handler() {
+            modal.removeEventListener('hidden.bs.modal', handler);
+            inputEl.removeEventListener('keydown', keyHandler);
+            if (!resolved) {
+                resolve(null);
+            }
+        });
+
+        bsModal.show();
+
+        // Focus the input after modal is shown
+        modal.addEventListener('shown.bs.modal', function focusHandler() {
+            modal.removeEventListener('shown.bs.modal', focusHandler);
+            inputEl.focus();
+            inputEl.select();
+        });
+    });
+}
+
 // ========== Stats for Nerds ==========
 let statsInterval = null;
 let currentStatsPlayer = null;
+let isStatsFetching = false;
+let cachedHardwareInfo = null; // Cache hardware format info (static during playback)
+let statsPanelInitialized = false; // Track if panel structure has been created
 
 function openStatsForNerds(playerName) {
+    // Clear any existing interval first to prevent multiple polling loops
+    if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+    }
+
     currentStatsPlayer = playerName;
+    cachedHardwareInfo = null; // Clear cache - will be populated on first fetch
+    statsPanelInitialized = false; // Will rebuild panel structure on first render
 
     // Update player name in modal header
     const playerNameSpan = document.getElementById('statsPlayerName');
@@ -984,13 +1363,20 @@ function openStatsForNerds(playerName) {
     const modal = new bootstrap.Modal(document.getElementById('statsForNerdsModal'));
     modal.show();
 
-    // Start polling
-    fetchAndRenderStats();
-    statsInterval = setInterval(fetchAndRenderStats, 500);
+    // Start non-overlapping polling: waits for each request to complete
+    // before scheduling the next, preventing request pileup under load.
+    async function pollStats() {
+        if (!currentStatsPlayer) return;
+        await fetchAndRenderStats();
+        if (currentStatsPlayer) {
+            statsInterval = setTimeout(pollStats, 500);
+        }
+    }
+    pollStats();
 
     // Stop polling when modal closes
     document.getElementById('statsForNerdsModal').addEventListener('hidden.bs.modal', () => {
-        clearInterval(statsInterval);
+        clearTimeout(statsInterval);
         statsInterval = null;
         currentStatsPlayer = null;
     }, { once: true });
@@ -998,13 +1384,32 @@ function openStatsForNerds(playerName) {
 
 async function fetchAndRenderStats() {
     if (!currentStatsPlayer) return;
+    if (isStatsFetching) return; // Prevent overlapping requests
 
+    isStatsFetching = true;
     try {
         const response = await fetch(`./api/players/${encodeURIComponent(currentStatsPlayer)}/stats`);
         if (!response.ok) {
             throw new Error('Failed to fetch stats');
         }
         const stats = await response.json();
+
+        // Cache hardware info on first fetch (static during playback)
+        if (!cachedHardwareInfo && stats.audioFormat) {
+            cachedHardwareInfo = {
+                hardwareFormat: stats.audioFormat.hardwareFormat,
+                hardwareSampleRate: stats.audioFormat.hardwareSampleRate,
+                hardwareBitDepth: stats.audioFormat.hardwareBitDepth
+            };
+        }
+
+        // Use cached hardware info for rendering
+        if (cachedHardwareInfo && stats.audioFormat) {
+            stats.audioFormat.hardwareFormat = cachedHardwareInfo.hardwareFormat;
+            stats.audioFormat.hardwareSampleRate = cachedHardwareInfo.hardwareSampleRate;
+            stats.audioFormat.hardwareBitDepth = cachedHardwareInfo.hardwareBitDepth;
+        }
+
         renderStatsPanel(stats);
     } catch (error) {
         console.error('Error fetching stats:', error);
@@ -1015,173 +1420,280 @@ async function fetchAndRenderStats() {
                 <p class="text-muted mb-0">Failed to load stats</p>
             </div>
         `;
+    } finally {
+        isStatsFetching = false;
     }
 }
 
 function renderStatsPanel(stats) {
     const body = document.getElementById('statsForNerdsBody');
 
-    body.innerHTML = `
-        <!-- Audio Format Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Audio Format</div>
-            <div class="stats-row">
-                <span class="stats-label">Input</span>
-                <span class="stats-value info">${escapeHtml(stats.audioFormat.inputFormat)}</span>
+    // First render: create the full structure with IDs
+    if (!statsPanelInitialized) {
+        body.innerHTML = `
+            <!-- Audio Format Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Audio Format</div>
+                <div class="stats-row">
+                    <span class="stats-label">Input</span>
+                    <span id="stats-input-format" class="stats-value info"></span>
+                </div>
+                <div class="stats-row" id="stats-bitrate-row" style="display: none;">
+                    <span class="stats-label">Bitrate</span>
+                    <span id="stats-input-bitrate" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Output</span>
+                    <span id="stats-output-format" class="stats-value info"></span>
+                </div>
+                <div class="stats-row" id="stats-hardware-row" style="display: none;">
+                    <span class="stats-label">Hardware</span>
+                    <span id="stats-hardware-format" class="stats-value info"></span>
+                </div>
             </div>
-            ${stats.audioFormat.inputBitrate ? `
-            <div class="stats-row">
-                <span class="stats-label">Bitrate</span>
-                <span class="stats-value">${escapeHtml(stats.audioFormat.inputBitrate)}</span>
-            </div>
-            ` : ''}
-            <div class="stats-row">
-                <span class="stats-label">Output</span>
-                <span class="stats-value info">${escapeHtml(stats.audioFormat.outputFormat)}</span>
-            </div>
-        </div>
 
-        <!-- Sync Status Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Sync Status</div>
-            <div class="stats-row">
-                <span class="stats-label">Sync Error</span>
-                <span class="stats-value ${getSyncErrorClass(stats.sync.syncErrorMs)}">${formatMs(stats.sync.syncErrorMs)}</span>
+            <!-- Sync Status Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Sync Status</div>
+                <div class="stats-row">
+                    <span class="stats-label">Sync Error</span>
+                    <span id="stats-sync-error" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Status</span>
+                    <span id="stats-sync-status" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Playback Active</span>
+                    <span id="stats-playback-active" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Status</span>
-                <span class="stats-value ${stats.sync.isWithinTolerance ? 'good' : 'warning'}">${stats.sync.isWithinTolerance ? 'Within tolerance' : 'Correcting'}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Playback Active</span>
-                <span class="stats-value ${stats.sync.isPlaybackActive ? 'good' : 'muted'}">${stats.sync.isPlaybackActive ? 'Yes' : 'No'}</span>
-            </div>
-        </div>
 
-        <!-- Buffer Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Buffer</div>
-            <div class="stats-row">
-                <span class="stats-label">Buffered</span>
-                <span class="stats-value">${stats.buffer.bufferedMs}ms / ${stats.buffer.targetMs}ms</span>
+            <!-- Buffer Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Buffer</div>
+                <div class="stats-row">
+                    <span class="stats-label">Buffered</span>
+                    <span id="stats-buffered" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Underruns</span>
+                    <span id="stats-underruns" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Overruns</span>
+                    <span id="stats-overruns" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Underruns</span>
-                <span class="stats-value ${stats.buffer.underruns > 0 ? 'bad' : 'good'}">${formatCount(stats.buffer.underruns)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Overruns</span>
-                <span class="stats-value ${stats.buffer.overruns > 0 ? 'warning' : 'good'}">${formatCount(stats.buffer.overruns)}</span>
-            </div>
-        </div>
 
-        <!-- Sync Correction Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Sync Correction</div>
-            <div class="stats-row">
-                <span class="stats-label">Mode</span>
-                <span class="stats-value ${getCorrectionModeClass(stats.correction.mode)}">${escapeHtml(stats.correction.mode)}</span>
+            <!-- Sync Correction Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Sync Correction</div>
+                <div class="stats-row">
+                    <span class="stats-label">Mode</span>
+                    <span id="stats-correction-mode" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Threshold</span>
+                    <span id="stats-threshold" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Frames Dropped</span>
+                    <span id="stats-frames-dropped" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Frames Inserted</span>
+                    <span id="stats-frames-inserted" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Dropped (Overflow)</span>
+                    <span id="stats-dropped-overflow" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Threshold</span>
-                <span class="stats-value">${stats.correction.thresholdMs}ms</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Frames Dropped</span>
-                <span class="stats-value ${stats.correction.framesDropped > 0 ? 'warning' : ''}">${formatSampleCount(stats.correction.framesDropped)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Frames Inserted</span>
-                <span class="stats-value ${stats.correction.framesInserted > 0 ? 'warning' : ''}">${formatSampleCount(stats.correction.framesInserted)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Dropped (Overflow)</span>
-                <span class="stats-value ${stats.throughput.samplesDroppedOverflow > 0 ? 'bad' : ''}">${formatSampleCount(stats.throughput.samplesDroppedOverflow)}</span>
-            </div>
-        </div>
 
-        <!-- Clock Sync Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Clock Sync</div>
-            <div class="stats-row">
-                <span class="stats-label">Status</span>
-                <span class="stats-value">
-                    <span class="sync-indicator">
-                        <span class="sync-dot ${stats.clockSync.isSynchronized ? '' : (stats.clockSync.measurementCount > 0 ? 'syncing' : 'not-synced')}"></span>
-                        <span class="${stats.clockSync.isSynchronized ? 'good' : 'warning'}">${stats.clockSync.isSynchronized ? 'Synchronized' : (stats.clockSync.measurementCount > 0 ? 'Syncing...' : 'Not synced')}</span>
+            <!-- Clock Sync Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Clock Sync</div>
+                <div class="stats-row">
+                    <span class="stats-label">Status</span>
+                    <span class="stats-value">
+                        <span class="sync-indicator">
+                            <span id="stats-clock-dot" class="sync-dot"></span>
+                            <span id="stats-clock-status"></span>
+                        </span>
                     </span>
-                </span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Clock Offset</span>
+                    <span id="stats-clock-offset" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Uncertainty</span>
+                    <span id="stats-uncertainty" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Drift Rate</span>
+                    <span id="stats-drift-rate" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Measurements</span>
+                    <span id="stats-measurements" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Output Latency</span>
+                    <span id="stats-output-latency" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Static Delay</span>
+                    <span id="stats-static-delay" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Clock Offset</span>
-                <span class="stats-value">${formatMs(stats.clockSync.clockOffsetMs)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Uncertainty</span>
-                <span class="stats-value">${formatMs(stats.clockSync.uncertaintyMs)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Drift Rate</span>
-                <span class="stats-value ${stats.clockSync.isDriftReliable ? '' : 'muted'}">${stats.clockSync.driftRatePpm.toFixed(1)} ppm ${stats.clockSync.isDriftReliable ? '' : '(unstable)'}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Measurements</span>
-                <span class="stats-value">${formatCount(stats.clockSync.measurementCount)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Output Latency</span>
-                <span class="stats-value">${stats.clockSync.outputLatencyMs}ms</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Static Delay</span>
-                <span class="stats-value">${stats.clockSync.staticDelayMs}ms</span>
-            </div>
-        </div>
 
-        <!-- Throughput Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">Throughput</div>
-            <div class="stats-row">
-                <span class="stats-label">Samples Written</span>
-                <span class="stats-value">${formatSampleCount(stats.throughput.samplesWritten)}</span>
+            <!-- Throughput Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">Throughput</div>
+                <div class="stats-row">
+                    <span class="stats-label">Samples Written</span>
+                    <span id="stats-samples-written" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Samples Read</span>
+                    <span id="stats-samples-read" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">Samples Read</span>
-                <span class="stats-value">${formatSampleCount(stats.throughput.samplesRead)}</span>
-            </div>
-        </div>
 
-        <!-- Buffer Diagnostics Section -->
-        <div class="stats-section">
-            <div class="stats-section-header">
-                <i class="fas fa-stethoscope me-1"></i>Buffer Diagnostics
+            <!-- Buffer Diagnostics Section -->
+            <div class="stats-section">
+                <div class="stats-section-header">
+                    <i class="fas fa-stethoscope me-1"></i>Buffer Diagnostics
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">State</span>
+                    <span id="stats-diag-state" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Fill Level</span>
+                    <span id="stats-fill-level" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Pipeline State</span>
+                    <span id="stats-pipeline-state" class="stats-value info"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Has Received Data</span>
+                    <span id="stats-has-received" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Dropped (Overflow)</span>
+                    <span id="stats-diag-dropped" class="stats-value"></span>
+                </div>
+                <div class="stats-row">
+                    <span class="stats-label">Smoothed Sync Error</span>
+                    <span id="stats-smoothed-sync" class="stats-value"></span>
+                </div>
             </div>
-            <div class="stats-row">
-                <span class="stats-label">State</span>
-                <span class="stats-value ${getBufferStateClass(stats.diagnostics.state)}">${escapeHtml(stats.diagnostics.state)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Fill Level</span>
-                <span class="stats-value">${stats.diagnostics.fillPercent}%</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Pipeline State</span>
-                <span class="stats-value info">${escapeHtml(stats.diagnostics.pipelineState)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Has Received Data</span>
-                <span class="stats-value ${stats.diagnostics.hasReceivedSamples ? 'good' : 'warning'}">${stats.diagnostics.hasReceivedSamples ? 'Yes' : 'No'}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Dropped (Overflow)</span>
-                <span class="stats-value ${stats.diagnostics.droppedOverflow > 0 ? 'bad' : 'good'}">${formatSampleCount(stats.diagnostics.droppedOverflow)}</span>
-            </div>
-            <div class="stats-row">
-                <span class="stats-label">Smoothed Sync Error</span>
-                <span class="stats-value">${formatUs(stats.diagnostics.smoothedSyncErrorUs)}</span>
-            </div>
-        </div>
-    `;
+        `;
+        statsPanelInitialized = true;
+    }
+
+    // Update values only (no DOM structure changes)
+    updateStatsValue('stats-input-format', stats.audioFormat.inputFormat);
+
+    // Bitrate row - show/hide and update
+    const bitrateRow = document.getElementById('stats-bitrate-row');
+    if (stats.audioFormat.inputBitrate) {
+        bitrateRow.style.display = '';
+        updateStatsValue('stats-input-bitrate', stats.audioFormat.inputBitrate);
+    } else {
+        bitrateRow.style.display = 'none';
+    }
+
+    updateStatsValue('stats-output-format', stats.audioFormat.outputFormat);
+
+    // Hardware row - show/hide and update
+    const hardwareRow = document.getElementById('stats-hardware-row');
+    if (stats.audioFormat.hardwareFormat) {
+        hardwareRow.style.display = '';
+        updateStatsValue('stats-hardware-format',
+            `${stats.audioFormat.hardwareFormat} ${stats.audioFormat.hardwareSampleRate}Hz ${stats.audioFormat.hardwareBitDepth}-bit`);
+    } else {
+        hardwareRow.style.display = 'none';
+    }
+
+    // Sync Status
+    updateStatsValueWithClass('stats-sync-error', formatMs(stats.sync.syncErrorMs), getSyncErrorClass(stats.sync.syncErrorMs));
+    updateStatsValueWithClass('stats-sync-status',
+        stats.sync.isWithinTolerance ? 'Within tolerance' : 'Correcting',
+        stats.sync.isWithinTolerance ? 'good' : 'warning');
+    updateStatsValueWithClass('stats-playback-active',
+        stats.sync.isPlaybackActive ? 'Yes' : 'No',
+        stats.sync.isPlaybackActive ? 'good' : 'muted');
+
+    // Buffer
+    updateStatsValue('stats-buffered', `${stats.buffer.bufferedMs}ms / ${stats.buffer.targetMs}ms`);
+    updateStatsValueWithClass('stats-underruns', formatCount(stats.buffer.underruns),
+        stats.buffer.underruns > 0 ? 'bad' : 'good');
+    updateStatsValueWithClass('stats-overruns', formatCount(stats.buffer.overruns),
+        stats.buffer.overruns > 0 ? 'warning' : 'good');
+
+    // Sync Correction
+    updateStatsValueWithClass('stats-correction-mode', stats.correction.mode, getCorrectionModeClass(stats.correction.mode));
+    updateStatsValue('stats-threshold', `${stats.correction.thresholdMs}ms`);
+    updateStatsValueWithClass('stats-frames-dropped', formatSampleCount(stats.correction.framesDropped),
+        stats.correction.framesDropped > 0 ? 'warning' : '');
+    updateStatsValueWithClass('stats-frames-inserted', formatSampleCount(stats.correction.framesInserted),
+        stats.correction.framesInserted > 0 ? 'warning' : '');
+    updateStatsValueWithClass('stats-dropped-overflow', formatSampleCount(stats.throughput.samplesDroppedOverflow),
+        stats.throughput.samplesDroppedOverflow > 0 ? 'bad' : '');
+
+    // Clock Sync
+    const clockDot = document.getElementById('stats-clock-dot');
+    const clockStatus = document.getElementById('stats-clock-status');
+    if (clockDot && clockStatus) {
+        clockDot.className = 'sync-dot ' + (stats.clockSync.isSynchronized ? '' :
+            (stats.clockSync.measurementCount > 0 ? 'syncing' : 'not-synced'));
+        clockStatus.className = stats.clockSync.isSynchronized ? 'good' : 'warning';
+        clockStatus.textContent = stats.clockSync.isSynchronized ? 'Synchronized' :
+            (stats.clockSync.measurementCount > 0 ? 'Syncing...' : 'Not synced');
+    }
+    updateStatsValue('stats-clock-offset', formatMs(stats.clockSync.clockOffsetMs));
+    updateStatsValue('stats-uncertainty', formatMs(stats.clockSync.uncertaintyMs));
+    updateStatsValueWithClass('stats-drift-rate',
+        `${stats.clockSync.driftRatePpm.toFixed(1)} ppm ${stats.clockSync.isDriftReliable ? '' : '(unstable)'}`,
+        stats.clockSync.isDriftReliable ? '' : 'muted');
+    updateStatsValue('stats-measurements', formatCount(stats.clockSync.measurementCount));
+    updateStatsValue('stats-output-latency', `${stats.clockSync.outputLatencyMs}ms`);
+    updateStatsValue('stats-static-delay', `${stats.clockSync.staticDelayMs}ms`);
+
+    // Throughput
+    updateStatsValue('stats-samples-written', formatSampleCount(stats.throughput.samplesWritten));
+    updateStatsValue('stats-samples-read', formatSampleCount(stats.throughput.samplesRead));
+
+    // Buffer Diagnostics
+    updateStatsValueWithClass('stats-diag-state', stats.diagnostics.state, getBufferStateClass(stats.diagnostics.state));
+    updateStatsValue('stats-fill-level', `${stats.diagnostics.fillPercent}%`);
+    updateStatsValue('stats-pipeline-state', stats.diagnostics.pipelineState);
+    updateStatsValueWithClass('stats-has-received',
+        stats.diagnostics.hasReceivedSamples ? 'Yes' : 'No',
+        stats.diagnostics.hasReceivedSamples ? 'good' : 'warning');
+    updateStatsValueWithClass('stats-diag-dropped', formatSampleCount(stats.diagnostics.droppedOverflow),
+        stats.diagnostics.droppedOverflow > 0 ? 'bad' : 'good');
+    updateStatsValue('stats-smoothed-sync', formatUs(stats.diagnostics.smoothedSyncErrorUs));
+}
+
+// Helper to update a stats value by ID
+function updateStatsValue(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+// Helper to update a stats value and its CSS class
+function updateStatsValueWithClass(id, value, className) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.textContent = value;
+        el.className = 'stats-value ' + className;
+    }
 }
 
 // Stats helper functions
@@ -1485,27 +1997,43 @@ function openRemapSinkModal(editData = null) {
     nameInput.disabled = !!editData; // Disable name field when editing, enable for create
     document.getElementById('remapSinkDesc').value = editData?.description || '';
 
-    // Populate master device dropdown
+    // Populate master device dropdown (exclude remap sinks - they can't be masters of other remap sinks)
     const masterSelect = document.getElementById('remapMasterDevice');
+    const eligibleDevices = devices.filter(d => d.sinkType !== 'Remap');
     masterSelect.innerHTML = '<option value="">Select a device...</option>' +
-        devices.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)</option>`).join('');
+        eligibleDevices.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)</option>`).join('');
 
     // Set master device if editing
     if (editData?.masterSink) {
         masterSelect.value = editData.masterSink;
     }
 
+    // Determine output mode from channel mappings (mono if single 'mono' output channel)
+    const isMono = editData?.channelMappings?.length === 1 &&
+                   editData.channelMappings[0].outputChannel === 'mono';
+
+    // Set output mode toggle
+    document.getElementById('outputModeMono').checked = isMono;
+    document.getElementById('outputModeStereo').checked = !isMono;
+
     updateChannelPicker();
 
     // Set channel mappings if editing
-    if (editData?.channelMappings && editData.channelMappings.length >= 2) {
-        const leftMapping = editData.channelMappings.find(m => m.outputChannel === 'front-left');
-        const rightMapping = editData.channelMappings.find(m => m.outputChannel === 'front-right');
-        if (leftMapping) {
-            document.getElementById('leftChannel').value = leftMapping.masterChannel;
-        }
-        if (rightMapping) {
-            document.getElementById('rightChannel').value = rightMapping.masterChannel;
+    if (editData?.channelMappings) {
+        if (isMono) {
+            const monoMapping = editData.channelMappings[0];
+            if (monoMapping) {
+                document.getElementById('monoChannel').value = monoMapping.masterChannel;
+            }
+        } else if (editData.channelMappings.length >= 2) {
+            const leftMapping = editData.channelMappings.find(m => m.outputChannel === 'front-left');
+            const rightMapping = editData.channelMappings.find(m => m.outputChannel === 'front-right');
+            if (leftMapping) {
+                document.getElementById('leftChannel').value = leftMapping.masterChannel;
+            }
+            if (rightMapping) {
+                document.getElementById('rightChannel').value = rightMapping.masterChannel;
+            }
         }
     }
 
@@ -1524,11 +2052,11 @@ function openRemapSinkModal(editData = null) {
     remapSinkModalInstance.show();
 }
 
-// Update channel picker based on selected master device
+// Update channel picker based on selected master device and output mode
 function updateChannelPicker() {
     const masterSelect = document.getElementById('remapMasterDevice');
-    const leftChannel = document.getElementById('leftChannel');
-    const rightChannel = document.getElementById('rightChannel');
+    const channelPicker = document.getElementById('channelPicker');
+    const isMono = document.getElementById('outputModeMono').checked;
 
     // Get channel count from selected device
     const selectedDevice = devices.find(d => d.id === masterSelect.value);
@@ -1567,12 +2095,57 @@ function updateChannelPicker() {
         `<option value="${ch.value}">${ch.label}</option>`
     ).join('');
 
-    leftChannel.innerHTML = optionsHtml;
-    rightChannel.innerHTML = optionsHtml;
-
-    // Set defaults
-    leftChannel.value = 'front-left';
-    rightChannel.value = 'front-right';
+    if (isMono) {
+        // Mono mode: single channel picker
+        channelPicker.innerHTML = `
+            <div class="channel-pair mb-2 d-flex align-items-center">
+                <span class="output-label">Output</span>
+                <i class="fas fa-arrow-left mx-2 text-muted"></i>
+                <select class="form-select form-select-sm channel-select" id="monoChannel">
+                    ${optionsHtml}
+                </select>
+                <button class="btn btn-outline-primary btn-sm ms-2"
+                        id="monoChannelTestBtn"
+                        onclick="playChannelTestTone('mono')"
+                        title="Play test tone">
+                    <i class="fas fa-volume-up"></i>
+                </button>
+            </div>
+        `;
+        document.getElementById('monoChannel').value = 'front-left';
+    } else {
+        // Stereo mode: left and right channel pickers
+        channelPicker.innerHTML = `
+            <div class="channel-pair mb-2 d-flex align-items-center">
+                <span class="output-label">Left Output</span>
+                <i class="fas fa-arrow-left mx-2 text-muted"></i>
+                <select class="form-select form-select-sm channel-select" id="leftChannel">
+                    ${optionsHtml}
+                </select>
+                <button class="btn btn-outline-primary btn-sm ms-2"
+                        id="leftChannelTestBtn"
+                        onclick="playChannelTestTone('left')"
+                        title="Play test tone">
+                    <i class="fas fa-volume-up"></i>
+                </button>
+            </div>
+            <div class="channel-pair mb-2 d-flex align-items-center">
+                <span class="output-label">Right Output</span>
+                <i class="fas fa-arrow-left mx-2 text-muted"></i>
+                <select class="form-select form-select-sm channel-select" id="rightChannel">
+                    ${optionsHtml}
+                </select>
+                <button class="btn btn-outline-primary btn-sm ms-2"
+                        id="rightChannelTestBtn"
+                        onclick="playChannelTestTone('right')"
+                        title="Play test tone">
+                    <i class="fas fa-volume-up"></i>
+                </button>
+            </div>
+        `;
+        document.getElementById('leftChannel').value = 'front-left';
+        document.getElementById('rightChannel').value = 'front-right';
+    }
 }
 
 // Create or update combine sink
@@ -1633,8 +2206,7 @@ async function createRemapSink() {
     const name = document.getElementById('remapSinkName').value.trim();
     const description = document.getElementById('remapSinkDesc').value.trim();
     const masterSink = document.getElementById('remapMasterDevice').value;
-    const leftChannel = document.getElementById('leftChannel').value;
-    const rightChannel = document.getElementById('rightChannel').value;
+    const isMono = document.getElementById('outputModeMono').checked;
     const isEditing = !!editingRemapSink;
 
     if (!name) {
@@ -1647,10 +2219,24 @@ async function createRemapSink() {
         return;
     }
 
-    const channelMappings = [
-        { outputChannel: 'front-left', masterChannel: leftChannel },
-        { outputChannel: 'front-right', masterChannel: rightChannel }
-    ];
+    // Build channel mappings based on output mode
+    let channelMappings;
+    let channels;
+    if (isMono) {
+        const monoChannel = document.getElementById('monoChannel').value;
+        channelMappings = [
+            { outputChannel: 'mono', masterChannel: monoChannel }
+        ];
+        channels = 1;
+    } else {
+        const leftChannel = document.getElementById('leftChannel').value;
+        const rightChannel = document.getElementById('rightChannel').value;
+        channelMappings = [
+            { outputChannel: 'front-left', masterChannel: leftChannel },
+            { outputChannel: 'front-right', masterChannel: rightChannel }
+        ];
+        channels = 2;
+    }
 
     try {
         // If editing, delete the old sink first
@@ -1665,6 +2251,7 @@ async function createRemapSink() {
         }
 
         // Create the sink (new or recreated with updates)
+        // remix: true for mono (downmix stereo L+R to mono), false for stereo (1:1 mapping)
         const response = await fetch('./api/sinks/remap', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1672,9 +2259,9 @@ async function createRemapSink() {
                 name,
                 description: description || null,
                 masterSink,
-                channels: 2,
+                channels,
                 channelMappings,
-                remix: false
+                remix: isMono
             })
         });
 
@@ -1777,6 +2364,55 @@ async function playTestToneForSink(name) {
     } finally {
         btn.innerHTML = originalContent;
         btn.disabled = false;
+    }
+}
+
+// Play test tone for a specific channel in remap sink modal
+async function playChannelTestTone(channel) {
+    const masterSelect = document.getElementById('remapMasterDevice');
+    let channelSelect, btn;
+
+    if (channel === 'mono') {
+        channelSelect = document.getElementById('monoChannel');
+        btn = document.getElementById('monoChannelTestBtn');
+    } else {
+        channelSelect = document.getElementById(channel === 'left' ? 'leftChannel' : 'rightChannel');
+        btn = document.getElementById(channel === 'left' ? 'leftChannelTestBtn' : 'rightChannelTestBtn');
+    }
+
+    if (!masterSelect.value) {
+        showAlert('Please select a master device first', 'warning');
+        return;
+    }
+
+    if (!btn) return;
+
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    btn.disabled = true;
+    btn.classList.add('playing');
+
+    try {
+        const response = await fetch(`./api/devices/${encodeURIComponent(masterSelect.value)}/test-tone`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                frequencyHz: 1000,
+                durationMs: 1500,
+                channelName: channelSelect.value
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to play test tone');
+        }
+    } catch (error) {
+        showAlert(`Test tone failed: ${error.message}`, 'danger');
+    } finally {
+        btn.innerHTML = originalContent;
+        btn.disabled = false;
+        btn.classList.remove('playing');
     }
 }
 
@@ -1893,18 +2529,64 @@ async function importSelectedSinks() {
 
 let soundCardsModal = null;
 let soundCards = [];
+let soundCardDevices = []; // Devices associated with sound cards
+let pendingDeviceAliases = {}; // Track pending alias changes: { deviceId: newAlias }
 
 // Open the sound cards configuration modal
 async function openSoundCardsModal() {
     if (!soundCardsModal) {
         soundCardsModal = new bootstrap.Modal(document.getElementById('soundCardsModal'));
+        // Save aliases when modal is closed
+        document.getElementById('soundCardsModal').addEventListener('hidden.bs.modal', saveDeviceAliases);
     }
 
+    // Clear pending aliases when opening
+    pendingDeviceAliases = {};
     soundCardsModal.show();
     await loadSoundCards();
 }
 
-// Load sound cards from API
+// Mark a device alias as changed (called from input onchange)
+function markDeviceAliasChanged(input) {
+    const deviceId = input.dataset.deviceId;
+    const originalAlias = input.dataset.originalAlias;
+    const newAlias = input.value.trim();
+
+    // Only track if the alias actually changed
+    if (newAlias !== originalAlias) {
+        pendingDeviceAliases[deviceId] = newAlias;
+    } else {
+        delete pendingDeviceAliases[deviceId];
+    }
+}
+
+// Save all pending device aliases using existing device alias API
+async function saveDeviceAliases() {
+    const entries = Object.entries(pendingDeviceAliases);
+    if (entries.length === 0) {
+        return;
+    }
+
+    for (const [deviceId, alias] of entries) {
+        try {
+            await fetch(`./api/devices/${encodeURIComponent(deviceId)}/alias`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ alias: alias || null })
+            });
+        } catch (error) {
+            console.error(`Failed to save alias for device ${deviceId}:`, error);
+        }
+    }
+
+    // Clear pending after save
+    pendingDeviceAliases = {};
+
+    // Refresh global devices so hardware dropdowns show updated aliases
+    await refreshDevices();
+}
+
+// Load sound cards and their associated devices from API
 async function loadSoundCards() {
     const container = document.getElementById('soundCardsContainer');
     container.innerHTML = `
@@ -1917,13 +2599,24 @@ async function loadSoundCards() {
     `;
 
     try {
-        const response = await fetch('./api/cards');
-        if (!response.ok) {
+        // Fetch both cards and devices in parallel
+        const [cardsResponse, devicesResponse] = await Promise.all([
+            fetch('./api/cards'),
+            fetch('./api/devices')
+        ]);
+
+        if (!cardsResponse.ok) {
             throw new Error('Failed to load sound cards');
         }
+        if (!devicesResponse.ok) {
+            throw new Error('Failed to load devices');
+        }
 
-        const data = await response.json();
-        soundCards = data.cards || [];
+        const cardsData = await cardsResponse.json();
+        const devicesData = await devicesResponse.json();
+
+        soundCards = cardsData.cards || [];
+        soundCardDevices = devicesData.devices || [];
 
         renderSoundCards();
     } catch (error) {
@@ -1975,15 +2668,31 @@ function renderSoundCards() {
             ? (card.bootMuted ? 'muted' : 'unmuted')
             : 'unset';
 
+        const busType = getCardBusType(card.name, card.activeProfile);
+        const busIcon = getBusTypeIcon(busType);
+        const busLabel = getBusTypeLabel(busType);
+
+        // Find the device associated with this card using cardIndex (1:1 relationship)
+        const device = soundCardDevices.find(d => d.cardIndex === card.index);
+        const deviceAlias = device?.alias || '';
+        const deviceId = device?.id || '';
+
         return `
             <div class="card mb-3" id="settings-card-${card.index}">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start mb-2">
-                        <div>
+                        <div class="flex-grow-1">
                             <h6 class="mb-1">
-                                <i class="fas fa-sd-card text-primary me-2"></i>
+                                <i class="${busIcon} text-primary me-2" title="${busLabel}"></i>
                                 ${escapeHtml(card.description || card.name)}
                             </h6>
+                            <input type="text" class="form-control form-control-sm card-alias-input"
+                                   placeholder="Add alias (e.g., Living Room DAC)"
+                                   value="${escapeHtml(deviceAlias)}"
+                                   data-device-id="${escapeHtml(deviceId)}"
+                                   data-original-alias="${escapeHtml(deviceAlias)}"
+                                   ${deviceId ? '' : 'disabled title="No device found for this card"'}
+                                   onchange="markDeviceAliasChanged(this)">
                             <small class="text-muted">${escapeHtml(card.driver)}</small>
                         </div>
                         <span class="badge bg-secondary" id="settings-card-status-${card.index}">
@@ -2588,3 +3297,887 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+// ============================================
+// 12V TRIGGERS CONFIGURATION (Multi-Board Support)
+// ============================================
+
+let triggersModal = null;
+let addBoardModal = null;
+let triggersData = null;
+let customSinksList = [];
+let ftdiDevicesData = null;
+let triggersRefreshInterval = null;
+
+// Open the triggers configuration modal
+async function openTriggersModal() {
+    if (!triggersModal) {
+        triggersModal = new bootstrap.Modal(document.getElementById('triggersModal'));
+
+        // Set up auto-refresh when modal is shown/hidden
+        document.getElementById('triggersModal').addEventListener('shown.bs.modal', () => {
+            triggersRefreshInterval = setInterval(refreshTriggersState, 2000);
+        });
+        document.getElementById('triggersModal').addEventListener('hidden.bs.modal', () => {
+            if (triggersRefreshInterval) {
+                clearInterval(triggersRefreshInterval);
+                triggersRefreshInterval = null;
+            }
+        });
+    }
+
+    triggersModal.show();
+    await loadTriggers();
+}
+
+// Refresh only the trigger states (lightweight update without full reload)
+async function refreshTriggersState() {
+    try {
+        const response = await fetch('./api/triggers');
+        if (response.ok) {
+            const newData = await response.json();
+            if (JSON.stringify(newData.boards) !== JSON.stringify(triggersData?.boards)) {
+                triggersData = newData;
+                renderTriggers();
+            }
+        }
+    } catch (error) {
+        console.debug('Error refreshing triggers state:', error);
+    }
+}
+
+// Track which accordion boards are expanded (persists across loadTriggers calls)
+let expandedBoardsState = new Set();
+
+// Load triggers status and custom sinks from API
+async function loadTriggers() {
+    const container = document.getElementById('triggersContainer');
+
+    // Save expanded boards state BEFORE replacing with loading spinner
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
+    container.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Loading triggers...</p>
+        </div>
+    `;
+
+    try {
+        const [triggersResponse, sinksResponse, devicesResponse] = await Promise.all([
+            fetch('./api/triggers'),
+            fetch('./api/sinks'),
+            fetch('./api/triggers/devices/all')
+        ]);
+
+        if (!triggersResponse.ok) throw new Error('Failed to load triggers');
+        if (!sinksResponse.ok) throw new Error('Failed to load custom sinks');
+
+        triggersData = await triggersResponse.json();
+        const sinksData = await sinksResponse.json();
+        customSinksList = sinksData.sinks || [];
+
+        if (devicesResponse.ok) {
+            // Store unified device data (includes both FTDI and HID)
+            ftdiDevicesData = await devicesResponse.json();
+            // Ensure backwards compatibility - treat count > 0 as library available
+            if (ftdiDevicesData.count > 0) {
+                ftdiDevicesData.libraryAvailable = true;
+            }
+        } else {
+            ftdiDevicesData = { devices: [], count: 0, ftdiCount: 0, hidCount: 0 };
+        }
+
+        renderTriggers();
+    } catch (error) {
+        console.error('Error loading triggers:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Failed to load triggers: ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
+
+// Render triggers list (multi-board accordion)
+function renderTriggers() {
+    const container = document.getElementById('triggersContainer');
+    const enabledCheckbox = document.getElementById('triggersEnabled');
+    const foundBadge = document.getElementById('triggerFoundBadge');
+    const connectedBadge = document.getElementById('triggerConnectedBadge');
+    const errorDiv = document.getElementById('triggersError');
+    const errorText = document.getElementById('triggersErrorText');
+    const totalChannelsSpan = document.getElementById('triggersTotalChannels');
+
+    // Save scroll position of modal body before re-rendering
+    const modalBody = document.querySelector('#triggersModal .modal-body');
+    const scrollTop = modalBody ? modalBody.scrollTop : 0;
+
+    // Save which accordion items are currently expanded (by boardId)
+    // First check the current DOM, then fall back to the global state (for when DOM was cleared by loading spinner)
+    const expandedBoards = new Set();
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        // Extract boardId from the element id (format: board-{boardIdSafe})
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoards.add(match[1]);
+        }
+    });
+
+    // If no expanded boards found in DOM, use the global saved state
+    if (expandedBoards.size === 0 && expandedBoardsState.size > 0) {
+        expandedBoardsState.forEach(id => expandedBoards.add(id));
+    }
+
+    // Update global state to match current state (for next loadTriggers call)
+    expandedBoardsState = new Set(expandedBoards);
+
+    if (!triggersData) {
+        container.innerHTML = '<div class="text-center py-4 text-muted">No trigger data available</div>';
+        return;
+    }
+
+    const noHardware = ftdiDevicesData && !ftdiDevicesData.libraryAvailable && ftdiDevicesData.count === 0;
+    const noDevicesDetected = ftdiDevicesData && ftdiDevicesData.libraryAvailable && ftdiDevicesData.count === 0;
+
+    // Update enabled checkbox
+    enabledCheckbox.checked = triggersData.enabled;
+    enabledCheckbox.disabled = noHardware;
+
+    // Update total channels
+    if (totalChannelsSpan) {
+        totalChannelsSpan.textContent = triggersData.boards.length > 0
+            ? `${triggersData.totalChannels} channels across ${triggersData.boards.length} board(s)`
+            : '';
+    }
+
+    // Update status badges - show both "Found" and "Connected" counts
+    const detectedDeviceCount = ftdiDevicesData?.count || 0;
+
+    // "N Devices Found" badge
+    if (noHardware) {
+        foundBadge.classList.add('d-none');
+    } else {
+        foundBadge.classList.remove('d-none');
+        foundBadge.textContent = `${detectedDeviceCount} Device${detectedDeviceCount !== 1 ? 's' : ''} Found`;
+        foundBadge.className = `badge ${detectedDeviceCount > 0 ? 'bg-info' : 'bg-secondary'} me-2`;
+    }
+
+    // "N Devices Connected" badge
+    const configuredCount = triggersData.boards.length;
+    const connectedCount = triggersData.boards.filter(b => b.isConnected).length;
+
+    if (configuredCount === 0 || noHardware || !triggersData.enabled) {
+        connectedBadge.classList.add('d-none');
+    } else {
+        connectedBadge.classList.remove('d-none');
+        connectedBadge.textContent = `${connectedCount} Device${connectedCount !== 1 ? 's' : ''} Connected`;
+
+        let connectedClass = 'bg-success';
+        if (connectedCount === 0) {
+            connectedClass = 'bg-danger';
+        } else if (connectedCount < configuredCount) {
+            connectedClass = 'bg-warning';
+        }
+        connectedBadge.className = `badge ${connectedClass}`;
+    }
+
+    // Show/hide error - only show when truly no hardware support
+    if (noHardware) {
+        errorDiv.classList.remove('d-none');
+        errorText.textContent = 'No relay board hardware support detected. Install libftdi1 for FTDI boards or ensure USB HID support is available.';
+    } else {
+        errorDiv.classList.add('d-none');
+    }
+
+    // Build sink options HTML
+    const sinkOptions = customSinksList.map(sink =>
+        `<option value="${escapeHtml(sink.name)}">${escapeHtml(sink.description || sink.name)}</option>`
+    ).join('');
+
+    // Build accordion for each board
+    if (triggersData.boards.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4 text-muted">
+                <i class="fas fa-plug fa-2x mb-2"></i>
+                <p>No relay boards configured. Click "Add Relay Board" to get started.</p>
+            </div>
+        `;
+        return;
+    }
+
+    const accordionHtml = triggersData.boards.map((board, index) => {
+        const boardId = escapeHtml(board.boardId);
+        const boardIdSafe = board.boardId.replace(/[^a-zA-Z0-9]/g, '_');
+        // Preserve expanded state: if we have saved state, use it; otherwise default to first item expanded
+        const isExpanded = expandedBoards.size > 0 ? expandedBoards.has(boardIdSafe) : index === 0;
+        const controlsDisabled = noHardware || !triggersData.enabled;
+        const testButtonsDisabled = controlsDisabled || !board.isConnected;
+
+        const boardStatusClass = board.isConnected ? 'text-success' : 'text-danger';
+        const boardStatusText = board.isConnected ? 'Connected' : 'Disconnected';
+        const portWarning = board.isPortBased
+            ? '<span class="badge bg-warning text-dark ms-1" title="Identified by USB port - may change if moved"><i class="fas fa-exclamation-triangle"></i> Port-based</span>'
+            : '';
+
+        const channelsHtml = board.triggers.map(trigger => {
+            const isOn = trigger.relayState === 'On';
+            const activeStatus = isOn
+                ? '<span class="badge bg-success ms-1">On</span>'
+                : '<span class="badge bg-secondary ms-1">Off</span>';
+            const onBtnClass = isOn ? 'btn btn-success btn-sm' : 'btn btn-outline-secondary btn-sm';
+            const offBtnClass = !isOn && trigger.relayState === 'Off' ? 'btn btn-secondary btn-sm' : 'btn btn-outline-secondary btn-sm';
+
+            return `
+                <tr>
+                    <td>
+                        <span class="badge bg-primary">CH ${trigger.channel}</span>
+                        ${activeStatus}
+                    </td>
+                    <td>
+                        <select class="form-select form-select-sm"
+                                id="trigger-sink-${boardIdSafe}-${trigger.channel}"
+                                onchange="updateTriggerSink('${boardId}', ${trigger.channel}, this.value)"
+                                ${controlsDisabled ? 'disabled' : ''}>
+                            <option value="">Not assigned</option>
+                            ${sinkOptions}
+                        </select>
+                    </td>
+                    <td>
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control"
+                                   id="trigger-delay-${boardIdSafe}-${trigger.channel}"
+                                   value="${trigger.offDelaySeconds}"
+                                   min="0" max="3600" step="1"
+                                   onchange="updateTriggerDelay('${boardId}', ${trigger.channel}, this.value)"
+                                   ${controlsDisabled ? 'disabled' : ''}>
+                            <span class="input-group-text">s</span>
+                        </div>
+                    </td>
+                    <td class="text-end" style="white-space: nowrap;">
+                        <button class="${onBtnClass}"
+                                onclick="testTrigger('${boardId}', ${trigger.channel}, true)"
+                                title="Turn relay ON"
+                                ${testButtonsDisabled ? 'disabled' : ''}>
+                            <i class="fas fa-power-off"></i>
+                        </button>
+                        <button class="${offBtnClass}"
+                                onclick="testTrigger('${boardId}', ${trigger.channel}, false)"
+                                title="Turn relay OFF"
+                                ${testButtonsDisabled ? 'disabled' : ''}>
+                            <i class="fas fa-power-off"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Board type badge
+        const boardTypeLabel = board.boardType === 'Ftdi' ? 'FTDI' : (board.boardType === 'UsbHid' ? 'HID' : board.boardType);
+        const boardTypeBadge = board.boardType
+            ? `<span class="badge ${board.boardType === 'Ftdi' ? 'bg-primary' : 'bg-info'} ms-2">${boardTypeLabel}</span>`
+            : '';
+
+        return `
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button ${isExpanded ? '' : 'collapsed'}" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#board-${boardIdSafe}">
+                        <span class="me-2"><i class="fas fa-microchip"></i></span>
+                        <span class="fw-bold">${escapeHtml(board.displayName || board.boardId)}</span>
+                        ${boardTypeBadge}
+                        <span class="ms-2 small ${boardStatusClass}">${boardStatusText}</span>
+                        ${portWarning}
+                        <span class="ms-auto me-3 small text-muted">${board.channelCount} channels</span>
+                    </button>
+                </h2>
+                <div id="board-${boardIdSafe}" class="accordion-collapse collapse ${isExpanded ? 'show' : ''}"
+                     data-bs-parent="#triggersContainer">
+                    <div class="accordion-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="small text-muted">
+                                <i class="fas fa-fingerprint me-1"></i> ID: ${boardId}
+                                ${board.usbPath ? `<span class="ms-2"><i class="fas fa-usb me-1"></i> Port: ${escapeHtml(board.usbPath)}</span>` : ''}
+                            </div>
+                            <div>
+                                <button class="btn btn-outline-secondary btn-sm me-1" onclick="reconnectBoard('${boardId}')" title="Reconnect">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm me-1" onclick="editBoard('${boardId}')" title="Edit">
+                                    <i class="fas fa-cog"></i>
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm" onclick="removeBoard('${boardId}')" title="Remove">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center mb-2 small flex-wrap gap-2">
+                            <div class="d-flex align-items-center">
+                                <label class="text-muted me-2" for="startup-${boardIdSafe}">
+                                    <i class="fas fa-power-off me-1"></i>Startup:
+                                </label>
+                                <select id="startup-${boardIdSafe}" class="form-select form-select-sm" style="width: auto;"
+                                        onchange="updateBoardBehavior('${boardId}', 'startupBehavior', this.value)">
+                                    <option value="AllOff" ${board.startupBehavior === 'AllOff' ? 'selected' : ''}>All OFF</option>
+                                    <option value="AllOn" ${board.startupBehavior === 'AllOn' ? 'selected' : ''}>All ON</option>
+                                    <option value="NoChange" ${board.startupBehavior === 'NoChange' ? 'selected' : ''}>No Change</option>
+                                </select>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <label class="text-muted me-2" for="shutdown-${boardIdSafe}">
+                                    <i class="fas fa-stop-circle me-1"></i>Shutdown:
+                                </label>
+                                <select id="shutdown-${boardIdSafe}" class="form-select form-select-sm" style="width: auto;"
+                                        onchange="updateBoardBehavior('${boardId}', 'shutdownBehavior', this.value)">
+                                    <option value="AllOff" ${board.shutdownBehavior === 'AllOff' ? 'selected' : ''}>All OFF</option>
+                                    <option value="AllOn" ${board.shutdownBehavior === 'AllOn' ? 'selected' : ''}>All ON</option>
+                                    <option value="NoChange" ${board.shutdownBehavior === 'NoChange' ? 'selected' : ''}>No Change</option>
+                                </select>
+                            </div>
+                            <span class="text-muted" title="Startup: when service starts. Shutdown: when service stops gracefully.">
+                                <i class="fas fa-question-circle"></i>
+                            </span>
+                        </div>
+                        ${board.errorMessage ? `<div class="alert alert-warning small mb-2"><i class="fas fa-exclamation-triangle me-1"></i>${escapeHtml(board.errorMessage)}</div>` : ''}
+                        <table class="table table-sm table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Channel</th>
+                                    <th>Sink</th>
+                                    <th>Off Delay</th>
+                                    <th class="text-end" style="white-space: nowrap;"><span style="display: inline-block; width: 38px; text-align: center;">On</span><span style="display: inline-block; width: 38px; text-align: center;">Off</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${channelsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.innerHTML = accordionHtml;
+
+    // Set selected values for sink dropdowns
+    triggersData.boards.forEach(board => {
+        const boardIdSafe = board.boardId.replace(/[^a-zA-Z0-9]/g, '_');
+        board.triggers.forEach(trigger => {
+            const select = document.getElementById(`trigger-sink-${boardIdSafe}-${trigger.channel}`);
+            if (select && trigger.customSinkName) {
+                select.value = trigger.customSinkName;
+            }
+        });
+    });
+
+    // Restore scroll position after DOM update
+    if (modalBody && scrollTop > 0) {
+        requestAnimationFrame(() => {
+            modalBody.scrollTop = scrollTop;
+        });
+    }
+}
+
+// Toggle triggers enabled
+async function toggleTriggersEnabled(enabled) {
+    try {
+        const response = await fetch('./api/triggers/enabled', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to update triggers');
+        }
+
+        triggersData = await response.json();
+        renderTriggers();
+        showAlert(`12V triggers ${enabled ? 'enabled' : 'disabled'}`, 'success');
+    } catch (error) {
+        console.error('Error toggling triggers:', error);
+        showAlert(`Failed to ${enabled ? 'enable' : 'disable'} triggers: ${error.message}`, 'danger');
+        document.getElementById('triggersEnabled').checked = !enabled;
+    }
+}
+
+// Show add board dialog
+async function showAddBoardDialog() {
+    if (!addBoardModal) {
+        addBoardModal = new bootstrap.Modal(document.getElementById('addBoardModal'));
+    }
+
+    // Populate device selector
+    const select = document.getElementById('addBoardDeviceSelect');
+    select.innerHTML = '<option value="">Loading devices...</option>';
+
+    try {
+        const response = await fetch('./api/triggers/devices/all');
+        const data = await response.json();
+        ftdiDevicesData = data;
+
+        // Filter out already-configured devices by boardId
+        const configuredIds = triggersData?.boards?.map(b => b.boardId) || [];
+        const availableDevices = data.devices.filter(d => !configuredIds.includes(d.boardId));
+
+        if (availableDevices.length === 0) {
+            select.innerHTML = '<option value="">No available devices</option>';
+        } else {
+            select.innerHTML = '<option value="">Select a device...</option>' +
+                availableDevices.map(d => {
+                    // Use boardId as the value (consistent with RelayDeviceInfo)
+                    const id = d.boardId;
+                    // Build label showing type
+                    const typeLabel = d.boardType === 'UsbHid' ? 'HID' : 'FTDI';
+                    // For FTDI boards, don't show channel count in label (user will select model)
+                    const isFtdi = d.boardType === 'Ftdi';
+                    const channelPart = !isFtdi && d.channelCount ? ` - ${d.channelCount}ch` : '';
+                    const detectedNote = !isFtdi && d.channelCountDetected ? ' (auto)' : '';
+                    // Always show USB port for differentiation, plus serial if available
+                    const usbPort = extractUsbPort(d.usbPath);
+                    const portPart = usbPort || '';
+                    const serialPart = d.serialNumber ? `SN: ${d.serialNumber}` : '';
+                    const idParts = [portPart, serialPart].filter(Boolean).join(', ');
+                    const label = `[${typeLabel}] ${d.description || 'Relay Board'}${channelPart}${detectedNote}${idParts ? ` (${idParts})` : ''}`;
+                    return `<option value="${escapeHtml(id)}" data-port-based="${d.isPathBased}" data-board-type="${d.boardType}" data-channel-count="${d.channelCount}" data-channel-detected="${d.channelCountDetected}">${escapeHtml(label)}</option>`;
+                }).join('');
+        }
+    } catch (error) {
+        select.innerHTML = '<option value="">Failed to load devices</option>';
+    }
+
+    const channelCountSelect = document.getElementById('addBoardChannelCount');
+    const channelCountGroup = document.getElementById('addBoardChannelCountGroup');
+    const ftdiModelGroup = document.getElementById('addBoardFtdiModelGroup');
+    const ftdiModelSelect = document.getElementById('addBoardFtdiModel');
+
+    // Update port warning visibility and channel count/model selector on selection change
+    select.onchange = function() {
+        const option = this.options[this.selectedIndex];
+        const isPortBased = option?.dataset?.portBased === 'true';
+        const channelDetected = option?.dataset?.channelDetected === 'true';
+        const channelCount = option?.dataset?.channelCount;
+        const boardType = option?.dataset?.boardType;
+        const isFtdi = boardType === 'Ftdi';
+
+        document.getElementById('addBoardPortWarning').classList.toggle('d-none', !isPortBased);
+
+        // Show FTDI model selector for FTDI boards, channel count for others
+        ftdiModelGroup.classList.toggle('d-none', !isFtdi);
+        channelCountGroup.classList.toggle('d-none', isFtdi);
+
+        if (isFtdi) {
+            // For FTDI boards, default to 8-channel model
+            ftdiModelSelect.value = 'Ro8';
+        } else {
+            // Auto-fill channel count from detected value for HID boards
+            if (channelCount) {
+                channelCountSelect.value = channelCount;
+            }
+
+            // Disable channel count selector if auto-detected
+            channelCountSelect.disabled = channelDetected;
+            if (channelDetected) {
+                channelCountGroup.title = 'Channel count auto-detected from device';
+            } else {
+                channelCountGroup.title = '';
+            }
+        }
+    };
+
+    document.getElementById('addBoardDisplayName').value = '';
+    channelCountSelect.value = '8';
+    channelCountSelect.disabled = false;
+    channelCountGroup.title = '';
+    ftdiModelSelect.value = 'Ro8';
+    ftdiModelGroup.classList.add('d-none');
+    channelCountGroup.classList.remove('d-none');
+    document.getElementById('addBoardPortWarning').classList.add('d-none');
+
+    addBoardModal.show();
+}
+
+// Add a new board
+async function addBoard() {
+    const select = document.getElementById('addBoardDeviceSelect');
+    const boardId = select.value;
+    const displayName = document.getElementById('addBoardDisplayName').value.trim();
+
+    // Get board type from selected option
+    const selectedOption = select.options[select.selectedIndex];
+    const boardType = selectedOption?.dataset?.boardType || 'Unknown';
+    const isFtdi = boardType === 'Ftdi';
+
+    // Get channel count from appropriate selector based on board type
+    let channelCount;
+    if (isFtdi) {
+        // For FTDI boards, get channel count from model selector
+        const ftdiModelSelect = document.getElementById('addBoardFtdiModel');
+        const selectedModel = ftdiModelSelect.options[ftdiModelSelect.selectedIndex];
+        channelCount = parseInt(selectedModel.dataset.channels, 10);
+    } else {
+        // For HID and other boards, use the channel count selector
+        channelCount = parseInt(document.getElementById('addBoardChannelCount').value, 10);
+    }
+
+    if (!boardId) {
+        showAlert('Please select a device', 'danger');
+        return;
+    }
+
+    try {
+        const response = await fetch('./api/triggers/boards', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ boardId, displayName: displayName || null, channelCount, boardType })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to add board');
+        }
+
+        addBoardModal.hide();
+        await loadTriggers();
+        showAlert('Relay board added successfully', 'success');
+    } catch (error) {
+        console.error('Error adding board:', error);
+        showAlert(`Failed to add board: ${error.message}`, 'danger');
+    }
+}
+
+// Remove a board
+async function removeBoard(boardId) {
+    const confirmed = await showConfirm(
+        'Remove Relay Board',
+        `Remove relay board "${boardId}"? This will delete all trigger configurations for this board.`,
+        'Remove',
+        'btn-danger'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to remove board');
+        }
+
+        await loadTriggers();
+        showAlert('Relay board removed', 'success');
+    } catch (error) {
+        console.error('Error removing board:', error);
+        showAlert(`Failed to remove board: ${error.message}`, 'danger');
+    }
+}
+
+// Edit board settings (channel count, display name)
+async function editBoard(boardId) {
+    const board = triggersData?.boards?.find(b => b.boardId === boardId);
+    if (!board) return;
+
+    // Check board type
+    const isFtdi = board.boardType === 'Ftdi';
+
+    // Check if this device has auto-detected channel count (only relevant for non-FTDI)
+    // Look up the device in the detected devices list
+    let channelCountDetected = false;
+    if (!isFtdi && ftdiDevicesData?.devices) {
+        const device = ftdiDevicesData.devices.find(d => {
+            // Match by board ID (could be serial-based or path-based)
+            const deviceBoardId = d.boardId ||
+                (d.serialNumber ? `HID:${d.serialNumber}` : null) ||
+                (d.serialNumber ? d.serialNumber : null);
+            return deviceBoardId === boardId ||
+                   (d.serialNumber && boardId.includes(d.serialNumber));
+        });
+        if (device) {
+            channelCountDetected = device.channelCountDetected === true;
+        }
+    }
+
+    // Show combined edit modal
+    const modal = document.getElementById('editBoardModal');
+    const displayNameInput = document.getElementById('editBoardDisplayName');
+    const channelCountSelect = document.getElementById('editBoardChannelCount');
+    const channelCountGroup = document.getElementById('editBoardChannelCountGroup');
+    const channelCountHelp = document.getElementById('editBoardChannelCountHelp');
+    const ftdiModelGroup = document.getElementById('editBoardFtdiModelGroup');
+    const ftdiModelSelect = document.getElementById('editBoardFtdiModel');
+    const boardIdInput = document.getElementById('editBoardId');
+    const boardTypeInput = document.getElementById('editBoardType');
+    const saveBtn = document.getElementById('editBoardSaveBtn');
+
+    // Populate form
+    boardIdInput.value = boardId;
+    boardTypeInput.value = board.boardType || '';
+    displayNameInput.value = board.displayName || '';
+
+    // Show appropriate selector based on board type
+    if (isFtdi) {
+        // For FTDI boards, show model selector
+        ftdiModelGroup.classList.remove('d-none');
+        channelCountGroup.classList.add('d-none');
+        // Set model based on current channel count (4 = Ro4, 8 = Ro8 or Generic8)
+        ftdiModelSelect.value = board.channelCount === 4 ? 'Ro4' : 'Ro8';
+    } else {
+        // For HID and other boards, show channel count selector
+        ftdiModelGroup.classList.add('d-none');
+        channelCountGroup.classList.remove('d-none');
+        channelCountSelect.value = String(board.channelCount);
+        // Disable channel count if auto-detected
+        channelCountSelect.disabled = channelCountDetected;
+        channelCountHelp.classList.toggle('d-none', !channelCountDetected);
+    }
+
+    const bsModal = new bootstrap.Modal(modal);
+
+    // Clean up any previous handlers by cloning the button
+    const newSaveBtn = saveBtn.cloneNode(true);
+    saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+
+    newSaveBtn.addEventListener('click', async () => {
+        const newName = displayNameInput.value.trim();
+
+        // Get channel count from appropriate selector based on board type
+        let newCount;
+        if (isFtdi) {
+            const selectedModel = ftdiModelSelect.options[ftdiModelSelect.selectedIndex];
+            newCount = parseInt(selectedModel.dataset.channels, 10);
+        } else {
+            newCount = parseInt(channelCountSelect.value, 10);
+        }
+
+        try {
+            const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    displayName: newName || null,
+                    channelCount: channelCountDetected ? null : newCount
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to update board');
+            }
+
+            bsModal.hide();
+            await loadTriggers();
+            showAlert('Board settings updated', 'success');
+        } catch (error) {
+            console.error('Error updating board:', error);
+            showAlert(`Failed to update board: ${error.message}`, 'danger');
+        }
+    });
+
+    bsModal.show();
+
+    // Focus display name input when modal is shown
+    modal.addEventListener('shown.bs.modal', function focusHandler() {
+        modal.removeEventListener('shown.bs.modal', focusHandler);
+        displayNameInput.focus();
+        displayNameInput.select();
+    });
+}
+
+// Update board startup or shutdown behavior
+async function updateBoardBehavior(boardId, behaviorType, value) {
+    const isStartup = behaviorType === 'startupBehavior';
+    const typeName = isStartup ? 'Startup' : 'Shutdown';
+
+    try {
+        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [behaviorType]: value })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || `Failed to update ${typeName.toLowerCase()} behavior`);
+        }
+
+        // Update local data
+        const board = triggersData?.boards?.find(b => b.boardId === boardId);
+        if (board) {
+            board[behaviorType] = value;
+        }
+
+        const label = value === 'AllOff' ? 'All OFF' :
+                      value === 'AllOn' ? 'All ON' : 'No Change';
+        showAlert(`${typeName} behavior set to "${label}"`, 'success');
+    } catch (error) {
+        console.error(`Error updating ${typeName.toLowerCase()} behavior:`, error);
+        showAlert(`Failed to update ${typeName.toLowerCase()} behavior: ${error.message}`, 'danger');
+        // Revert the dropdown by reloading
+        await loadTriggers();
+    }
+}
+
+// Reconnect a specific board
+async function reconnectBoard(boardId) {
+    // Save expanded state before any async operations
+    const container = document.getElementById('triggersContainer');
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
+    try {
+        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}/reconnect`, {
+            method: 'POST'
+        });
+
+        const boardStatus = await response.json();
+        await loadTriggers();
+
+        if (boardStatus.isConnected) {
+            showAlert(`Board "${boardId}" reconnected`, 'success');
+        } else {
+            showAlert(`Reconnection failed: ${boardStatus.errorMessage || 'Unknown error'}`, 'warning');
+        }
+    } catch (error) {
+        console.error('Error reconnecting board:', error);
+        showAlert(`Failed to reconnect: ${error.message}`, 'danger');
+    }
+}
+
+// Update trigger sink assignment (multi-board)
+async function updateTriggerSink(boardId, channel, sinkName) {
+    const boardIdSafe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
+    const delayInput = document.getElementById(`trigger-delay-${boardIdSafe}-${channel}`);
+    const delay = delayInput ? parseInt(delayInput.value, 10) : 60;
+
+    try {
+        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                channel,
+                customSinkName: sinkName || null,
+                offDelaySeconds: delay
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to update trigger');
+        }
+
+        showAlert(`Trigger updated`, 'success', 2000);
+    } catch (error) {
+        console.error('Error updating trigger:', error);
+        showAlert(`Failed to update trigger: ${error.message}`, 'danger');
+    }
+}
+
+// Update trigger off delay (multi-board)
+async function updateTriggerDelay(boardId, channel, delay) {
+    const boardIdSafe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
+    const sinkSelect = document.getElementById(`trigger-sink-${boardIdSafe}-${channel}`);
+    const sinkName = sinkSelect ? sinkSelect.value : null;
+
+    try {
+        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                channel,
+                customSinkName: sinkName || null,
+                offDelaySeconds: parseInt(delay, 10)
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to update trigger');
+        }
+
+        showAlert(`Delay updated`, 'success', 2000);
+    } catch (error) {
+        console.error('Error updating trigger delay:', error);
+        showAlert(`Failed to update trigger: ${error.message}`, 'danger');
+    }
+}
+
+// Test a trigger relay (multi-board)
+async function testTrigger(boardId, channel, on) {
+    // Save expanded state before any async operations
+    const container = document.getElementById('triggersContainer');
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
+    try {
+        // Use query params for board IDs that contain slashes (e.g., MODBUS:/dev/ttyUSB0)
+        const url = boardId.includes('/')
+            ? `./api/triggers/boards/test?boardId=${encodeURIComponent(boardId)}&channel=${channel}`
+            : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}/test`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ on })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to test relay');
+        }
+
+        showAlert(`Relay ${channel} turned ${on ? 'ON' : 'OFF'}`, 'success', 2000);
+        await loadTriggers();
+    } catch (error) {
+        console.error('Error testing trigger:', error);
+        showAlert(`Failed to test relay: ${error.message}`, 'danger');
+    }
+}
+
+// Reconnect all boards (legacy function for compatibility)
+async function reconnectTriggerBoard() {
+    try {
+        const response = await fetch('./api/triggers/reconnect', {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to reconnect');
+        }
+
+        triggersData = await response.json();
+        renderTriggers();
+
+        const connectedCount = triggersData.boards.filter(b => b.isConnected).length;
+        if (connectedCount === triggersData.boards.length) {
+            showAlert('All boards reconnected', 'success');
+        } else {
+            showAlert(`Reconnected ${connectedCount}/${triggersData.boards.length} boards`, 'warning');
+        }
+    } catch (error) {
+        console.error('Error reconnecting:', error);
+        showAlert(`Failed to reconnect: ${error.message}`, 'danger');
+    }
+}

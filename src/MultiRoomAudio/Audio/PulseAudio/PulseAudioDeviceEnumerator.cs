@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 using MultiRoomAudio.Models;
 
@@ -6,6 +5,7 @@ namespace MultiRoomAudio.Audio.PulseAudio;
 
 /// <summary>
 /// Enumerates available audio output devices (sinks) using PulseAudio's pactl command.
+/// Uses PactlCommandRunner for command execution with retry logic.
 /// </summary>
 public static partial class PulseAudioDeviceEnumerator
 {
@@ -17,6 +17,7 @@ public static partial class PulseAudioDeviceEnumerator
     public static void SetLogger(ILogger? logger)
     {
         _logger = logger;
+        PactlCommandRunner.SetLogger(logger);
     }
 
     /// <summary>
@@ -175,11 +176,19 @@ public static partial class PulseAudioDeviceEnumerator
         var sampleSpecMatch = SampleSpecRegex().Match(block);
         var sampleRate = 48000;
         var channels = 2;
+        string? sampleFormat = null;
 
         if (sampleSpecMatch.Success)
         {
             // Format: "s16le 2ch 48000Hz" or "float32le 2ch 44100Hz"
             var specParts = sampleSpecMatch.Groups[1].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            // First part is always the sample format (e.g., "s16le", "s32le", "float32le")
+            if (specParts.Length > 0)
+            {
+                sampleFormat = specParts[0];
+            }
+
             foreach (var part in specParts)
             {
                 if (part.EndsWith("ch") && int.TryParse(part[..^2], out var ch))
@@ -193,8 +202,35 @@ public static partial class PulseAudioDeviceEnumerator
             }
         }
 
+        // Extract channel map (e.g., "front-left,front-right,rear-left,rear-right,front-center,lfe,side-left,side-right")
+        string[]? channelMap = null;
+        var channelMapMatch = ChannelMapRegex().Match(block);
+        if (channelMapMatch.Success)
+        {
+            channelMap = channelMapMatch.Groups[1].Value
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(c => c.Trim())
+                .ToArray();
+        }
+
         // Extract stable device identifiers from Properties section
         var identifiers = ParseDeviceIdentifiers(block);
+
+        // Extract card index from alsa.card or device.card property
+        int? cardIndex = null;
+        var alsaCardMatch = AlsaCardRegex().Match(block);
+        if (alsaCardMatch.Success)
+        {
+            cardIndex = int.Parse(alsaCardMatch.Groups[1].Value);
+        }
+        else
+        {
+            var deviceCardMatch = DeviceCardRegex().Match(block);
+            if (deviceCardMatch.Success)
+            {
+                cardIndex = int.Parse(deviceCardMatch.Groups[1].Value);
+            }
+        }
 
         var isDefault = sinkName.Equals(defaultSink, StringComparison.OrdinalIgnoreCase);
 
@@ -207,7 +243,10 @@ public static partial class PulseAudioDeviceEnumerator
             DefaultLowLatencyMs: 50,   // Reasonable default for PulseAudio
             DefaultHighLatencyMs: 200, // Reasonable default for PulseAudio
             IsDefault: isDefault,
-            Identifiers: identifiers
+            Identifiers: identifiers,
+            ChannelMap: channelMap,
+            SampleFormat: sampleFormat,
+            CardIndex: cardIndex
         );
     }
 
@@ -239,97 +278,7 @@ public static partial class PulseAudioDeviceEnumerator
         );
     }
 
-    /// <summary>
-    /// Maximum retries for pactl commands when PulseAudio is temporarily unavailable.
-    /// </summary>
-    private const int MaxPactlRetries = 3;
-
-    /// <summary>
-    /// Delay between pactl retry attempts in milliseconds.
-    /// </summary>
-    private const int PactlRetryDelayMs = 500;
-
-    private static string? RunPactl(string arguments)
-    {
-        Exception? lastException = null;
-        string? lastError = null;
-
-        for (int attempt = 1; attempt <= MaxPactlRetries; attempt++)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "pactl",
-                    Arguments = arguments,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using var process = Process.Start(psi);
-                if (process == null)
-                {
-                    lastError = "Failed to start pactl process";
-                    continue;
-                }
-
-                var output = process.StandardOutput.ReadToEnd();
-                var error = process.StandardError.ReadToEnd();
-                process.WaitForExit(5000);
-
-                if (process.ExitCode != 0)
-                {
-                    lastError = error.Trim();
-
-                    // Check if this is a connection error that might be transient
-                    if (error.Contains("Connection refused") ||
-                        error.Contains("Connection failure") ||
-                        error.Contains("No PulseAudio daemon running"))
-                    {
-                        if (attempt < MaxPactlRetries)
-                        {
-                            _logger?.LogDebug(
-                                "pactl {Args} failed (attempt {Attempt}/{Max}): {Error}. Retrying...",
-                                arguments, attempt, MaxPactlRetries, lastError);
-                            Thread.Sleep(PactlRetryDelayMs);
-                            continue;
-                        }
-                    }
-
-                    _logger?.LogWarning("pactl {Args} failed: {Error}", arguments, lastError);
-                    return null;
-                }
-
-                // Success - return output
-                return output;
-            }
-            catch (Exception ex)
-            {
-                lastException = ex;
-                if (attempt < MaxPactlRetries)
-                {
-                    _logger?.LogDebug(ex,
-                        "pactl {Args} threw exception (attempt {Attempt}/{Max}). Retrying...",
-                        arguments, attempt, MaxPactlRetries);
-                    Thread.Sleep(PactlRetryDelayMs);
-                }
-            }
-        }
-
-        // All retries exhausted
-        if (lastException != null)
-        {
-            _logger?.LogError(lastException, "Failed to run pactl {Args} after {Attempts} attempts", arguments, MaxPactlRetries);
-        }
-        else if (lastError != null)
-        {
-            _logger?.LogWarning("pactl {Args} failed after {Attempts} attempts: {Error}", arguments, MaxPactlRetries, lastError);
-        }
-
-        return null;
-    }
+    private static string? RunPactl(string arguments) => PactlCommandRunner.Run(arguments);
 
     // Regex patterns for parsing pactl output
     [GeneratedRegex(@"^(\d+)", RegexOptions.Multiline)]
@@ -343,6 +292,9 @@ public static partial class PulseAudioDeviceEnumerator
 
     [GeneratedRegex(@"Sample Specification:\s*(.+)$", RegexOptions.Multiline)]
     private static partial Regex SampleSpecRegex();
+
+    [GeneratedRegex(@"Channel Map:\s*(.+)$", RegexOptions.Multiline)]
+    private static partial Regex ChannelMapRegex();
 
     [GeneratedRegex(@"Default Sink:\s*(.+)$", RegexOptions.Multiline)]
     private static partial Regex DefaultSinkRegex();
@@ -362,4 +314,11 @@ public static partial class PulseAudioDeviceEnumerator
 
     [GeneratedRegex(@"alsa\.long_card_name\s*=\s*""([^""]+)""", RegexOptions.Multiline)]
     private static partial Regex AlsaLongCardNameRegex();
+
+    // Regex patterns for card index (links device to sound card)
+    [GeneratedRegex(@"alsa\.card\s*=\s*""(\d+)""", RegexOptions.Multiline)]
+    private static partial Regex AlsaCardRegex();
+
+    [GeneratedRegex(@"device\.card\s*=\s*""(\d+)""", RegexOptions.Multiline)]
+    private static partial Regex DeviceCardRegex();
 }

@@ -57,6 +57,7 @@ This project enables you to run a single centralized server (like a NAS, Raspber
 - **Health Monitoring**: Built-in container health checks at `/api/health`
 - **Logging**: Comprehensive logging for troubleshooting
 - **Home Assistant**: Native add-on for HAOS
+- **12V Trigger Control**: Automatic amplifier power via USB relay boards
 
 
 ### Audio Support
@@ -65,6 +66,12 @@ This project enables you to run a single centralized server (like a NAS, Raspber
 - **Built-in Audio**: Support for motherboard audio outputs
 - **HDMI Audio**: Multi-channel HDMI audio output support
 - **Virtual Devices**: Null devices for testing, software defined ALSA devices
+
+### Hardware Control
+
+- **12V Triggers**: Automatic amplifier power control via USB relay boards
+- Supports FTDI, USB HID, and Modbus (CH340) relay boards
+- See [12V Trigger Guide](docs/12V-TRIGGERS.md) for setup
 
 
 ## Docker Hub Images

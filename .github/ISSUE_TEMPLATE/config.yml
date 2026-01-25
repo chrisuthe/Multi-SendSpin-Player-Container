@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/DOCS.md
+    about: Check the documentation before opening an issue

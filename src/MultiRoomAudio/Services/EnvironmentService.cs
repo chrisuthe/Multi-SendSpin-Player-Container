@@ -15,6 +15,8 @@ public class EnvironmentService
 {
     private readonly ILogger<EnvironmentService> _logger;
     private readonly bool _isHaos;
+    private readonly bool _isMockHardware;
+    private readonly bool _enableAdvancedFormats;
     private readonly string _configPath;
     private readonly string _logPath;
     private readonly Dictionary<string, JsonElement>? _haosOptions;
@@ -24,6 +26,8 @@ public class EnvironmentService
 
     private const string HaosOptionsFile = "/data/options.json";
     private const string HaosSupervisorTokenEnv = "SUPERVISOR_TOKEN";
+    private const string MockHardwareEnv = "MOCK_HARDWARE";
+    private const string AdvancedFormatsEnv = "ENABLE_ADVANCED_FORMATS";
 
     public EnvironmentService(ILogger<EnvironmentService> logger)
     {
@@ -49,13 +53,51 @@ public class EnvironmentService
         {
             _logger.LogDebug("No HAOS markers found, configuring for standalone Docker mode");
             _haosOptions = null;
-            _configPath = Environment.GetEnvironmentVariable("CONFIG_PATH") ?? "/app/config";
-            _logPath = Environment.GetEnvironmentVariable("LOG_PATH") ?? "/app/logs";
 
-            _logger.LogDebug("CONFIG_PATH env: {ConfigPathEnv}",
-                Environment.GetEnvironmentVariable("CONFIG_PATH") ?? "(not set, using default)");
-            _logger.LogDebug("LOG_PATH env: {LogPathEnv}",
-                Environment.GetEnvironmentVariable("LOG_PATH") ?? "(not set, using default)");
+            // Try environment variables first, then default Docker path, then local fallback
+            var configPathEnv = Environment.GetEnvironmentVariable("CONFIG_PATH");
+            var logPathEnv = Environment.GetEnvironmentVariable("LOG_PATH");
+
+            if (!string.IsNullOrEmpty(configPathEnv))
+            {
+                _configPath = configPathEnv;
+                _logPath = logPathEnv ?? "/app/logs";
+                _logger.LogDebug("Using CONFIG_PATH from environment: {ConfigPath}", _configPath);
+            }
+            else
+            {
+                // Try default Docker path first, fall back to local if not writable
+                _configPath = "/app/config";
+                _logPath = "/app/logs";
+
+                if (!IsDirectoryWritable("/app"))
+                {
+                    // Fall back to local development paths
+                    var localBasePath = Path.Combine(Directory.GetCurrentDirectory(), "test-config");
+                    _configPath = Path.Combine(localBasePath, "config");
+                    _logPath = Path.Combine(localBasePath, "logs");
+                    _logger.LogDebug("Using local development paths (/app not writable)");
+                }
+            }
+
+            _logger.LogDebug("CONFIG_PATH: {ConfigPath}", _configPath);
+            _logger.LogDebug("LOG_PATH: {LogPath}", _logPath);
+        }
+
+        // Detect mock hardware after HAOS options are loaded (so we can check both env var and HAOS config)
+        _isMockHardware = DetectMockHardware();
+
+        if (_isMockHardware)
+        {
+            _logger.LogInformation("MOCK_HARDWARE mode enabled - using simulated audio devices and relay board");
+        }
+
+        // Detect advanced formats feature flag
+        _enableAdvancedFormats = DetectAdvancedFormats();
+
+        if (_enableAdvancedFormats)
+        {
+            _logger.LogInformation("ENABLE_ADVANCED_FORMATS mode enabled - per-player format selection available");
         }
     }
 
@@ -63,6 +105,18 @@ public class EnvironmentService
     /// Whether running in Home Assistant OS add-on mode.
     /// </summary>
     public bool IsHaos => _isHaos;
+
+    /// <summary>
+    /// Whether mock hardware mode is enabled (for testing without real devices).
+    /// When true, the application uses simulated audio devices and relay boards.
+    /// </summary>
+    public bool IsMockHardware => _isMockHardware;
+
+    /// <summary>
+    /// Whether advanced audio formats feature is enabled (dev-only feature).
+    /// When true, the application exposes per-player format selection UI and API endpoints.
+    /// </summary>
+    public bool EnableAdvancedFormats => _enableAdvancedFormats;
 
     /// <summary>
     /// Current environment name ("haos" or "standalone").
@@ -88,6 +142,12 @@ public class EnvironmentService
     /// Full path to onboarding.yaml configuration file (wizard state).
     /// </summary>
     public string OnboardingConfigPath => Path.Combine(_configPath, "onboarding.yaml");
+
+    /// <summary>
+    /// Full path to mock_hardware.yaml configuration file.
+    /// Only used when IsMockHardware is true.
+    /// </summary>
+    public string MockHardwareConfigPath => Path.Combine(_configPath, "mock_hardware.yaml");
 
     /// <summary>
     /// Path to log directory.
@@ -159,6 +219,29 @@ public class EnvironmentService
             _logger.LogError(ex,
                 "Failed to create directories. ConfigPath: {ConfigPath}, LogPath: {LogPath}",
                 _configPath, _logPath);
+        }
+    }
+
+    private static bool IsDirectoryWritable(string path)
+    {
+        try
+        {
+            // Check if directory exists or can be created
+            if (!Directory.Exists(path))
+            {
+                Directory.CreateDirectory(path);
+                return true;
+            }
+
+            // Directory exists, check if we can write to it
+            var testFile = Path.Combine(path, ".write-test-" + Guid.NewGuid().ToString("N"));
+            File.WriteAllText(testFile, "test");
+            File.Delete(testFile);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -235,5 +318,106 @@ public class EnvironmentService
                 HaosOptionsFile);
             return null;
         }
+    }
+
+    private bool DetectMockHardware()
+    {
+        // Check environment variable first (works for both Docker and HAOS)
+        var mockHardwareValue = Environment.GetEnvironmentVariable(MockHardwareEnv);
+        if (!string.IsNullOrEmpty(mockHardwareValue))
+        {
+            // Accept "true", "1", "yes" as truthy values (case-insensitive)
+            var isMock = mockHardwareValue.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                         mockHardwareValue == "1" ||
+                         mockHardwareValue.Equals("yes", StringComparison.OrdinalIgnoreCase);
+
+            if (isMock)
+            {
+                _logger.LogDebug("{EnvVar} detected: {Value}", MockHardwareEnv, mockHardwareValue);
+                return true;
+            }
+            else
+            {
+                _logger.LogDebug("{EnvVar} set to {Value}, not enabling mock mode", MockHardwareEnv, mockHardwareValue);
+            }
+        }
+        else
+        {
+            _logger.LogDebug("{EnvVar} environment variable not set", MockHardwareEnv);
+        }
+
+        // Check HAOS options (for add-on UI toggle)
+        if (_isHaos && _haosOptions != null)
+        {
+            if (_haosOptions.TryGetValue("mock_hardware", out var element))
+            {
+                try
+                {
+                    var haosValue = element.GetBoolean();
+                    if (haosValue)
+                    {
+                        _logger.LogDebug("Mock hardware enabled via HAOS options (mock_hardware: true)");
+                        return true;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    _logger.LogWarning("HAOS option 'mock_hardware' is not a boolean value");
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool DetectAdvancedFormats()
+    {
+        // Check environment variable first (works for both Docker and HAOS)
+        var advancedFormatsValue = Environment.GetEnvironmentVariable(AdvancedFormatsEnv);
+        if (!string.IsNullOrEmpty(advancedFormatsValue))
+        {
+            // Accept "true", "1", "yes" as truthy values (case-insensitive)
+            var isEnabled = advancedFormatsValue.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                           advancedFormatsValue == "1" ||
+                           advancedFormatsValue.Equals("yes", StringComparison.OrdinalIgnoreCase);
+
+            if (isEnabled)
+            {
+                _logger.LogDebug("{EnvVar} detected: {Value}", AdvancedFormatsEnv, advancedFormatsValue);
+                return true;
+            }
+            else
+            {
+                _logger.LogDebug("{EnvVar} set to {Value}, not enabling advanced formats", AdvancedFormatsEnv, advancedFormatsValue);
+            }
+        }
+        else
+        {
+            _logger.LogDebug("{EnvVar} environment variable not set", AdvancedFormatsEnv);
+        }
+
+        // Check HAOS options (for add-on UI toggle)
+        if (_isHaos && _haosOptions != null)
+        {
+            if (_haosOptions.TryGetValue("enable_advanced_formats", out var element))
+            {
+                try
+                {
+                    var haosValue = element.GetBoolean();
+                    if (haosValue)
+                    {
+                        _logger.LogDebug("Advanced formats enabled via HAOS options (enable_advanced_formats: true)");
+                        return true;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    _logger.LogWarning("HAOS option 'enable_advanced_formats' is not a boolean value");
+                }
+            }
+        }
+
+        // Default: disabled
+        return false;
     }
 }
