@@ -248,12 +248,16 @@ public class DeviceMatchingService
     {
         var enriched = device;
 
-        // Check if this device is a custom sink and use its name as display name
+        // Check if this device is a custom sink and use its name and type
         var customSink = _customSinks.GetSink(device.Id);
         if (customSink != null)
         {
-            // Use the custom sink's user-provided name instead of PulseAudio's auto-generated description
-            enriched = enriched with { Name = customSink.Name };
+            // Use the custom sink's user-provided name and mark its type
+            enriched = enriched with
+            {
+                Name = customSink.Name,
+                SinkType = customSink.Type.ToString()
+            };
         }
 
         // Apply device config (alias, hidden status) if present
