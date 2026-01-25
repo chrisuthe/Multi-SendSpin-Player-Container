@@ -139,6 +139,14 @@ When testing locally on macOS/Windows (where PulseAudio is not available):
 
 ---
 
+## AI Agent Guidelines
+
+1. **Remembering things**: When the user asks to "remember" something, add it to this CLAUDE.md file so it persists across sessions.
+
+2. **UI changes and onboarding wizard**: When adding new UI elements to the main app, ask if the same change should also be applied to the onboarding wizard (`wwwroot/js/wizard.js`). Skip asking if explicitly told to add it there.
+
+---
+
 ## Code Style Guidelines
 
 ### C#
