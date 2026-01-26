@@ -1870,20 +1870,18 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
-    /// Logs GroupState events for debugging.
-    /// SDK 5.4.0: GroupState now represents the average volume displayed to controllers,
-    /// NOT individual player volume commands. Volume control is handled by PlayerStateChanged.
+    /// Handles GroupState events from the SDK.
+    /// GroupState contains group-level data (average volume, muted, metadata).
+    /// This is for logging/diagnostics — individual player commands come via PlayerStateChanged.
     /// </summary>
     private EventHandler<GroupState> CreateGroupStateHandler(
         string name, PlayerContext context)
     {
         return (_, group) =>
         {
-            // SDK 5.4.0: GroupState represents average volume shown to controllers, not player commands
-            // Log for debugging but don't take action - PlayerStateChanged handles player control
             _logger.LogDebug(
-                "GROUPSTATE Player '{Name}': group average vol={GroupVol}% muted={GroupMuted} (local vol={LocalVol}%)",
-                name, group.Volume, group.Muted, context.Config.Volume);
+                "GROUPSTATE Player '{Name}': GroupId={GroupId} vol={GroupVol}% muted={GroupMuted} (local vol={LocalVol}%)",
+                name, group.GroupId, group.Volume, group.Muted, context.Config.Volume);
         };
     }
 
@@ -1984,8 +1982,6 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 context.Pipeline.SetMuted(playerState.Muted);
                 context.Player.IsMuted = playerState.Muted;
                 context.LastConfirmedMuted = playerState.Muted;
-
-                // Note: SDK 5.4.0 auto-acknowledges, no manual echo needed
 
                 _ = BroadcastStatusAsync();
             }
