@@ -16,13 +16,16 @@ const string AppName = "Multi-Room Audio Controller";
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure logging for HAOS compatibility
-// Console logging goes to supervisor logs when running as add-on
+// Configure logging
+// HAOS: supervisor adds its own timestamps, so use simple format without ours
+// Standalone Docker: add HH:mm:ss timestamps for console readability
+var isHaos = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SUPERVISOR_TOKEN"))
+             || File.Exists("/data/options.json");
 builder.Logging.ClearProviders();
-builder.Logging.AddConsole(options =>
+builder.Logging.AddSimpleConsole(options =>
 {
-    // Use simple format for better readability in HA logs
-    options.FormatterName = "simple";
+    if (!isHaos)
+        options.TimestampFormat = "HH:mm:ss ";
 });
 builder.Logging.AddDebug();
 
