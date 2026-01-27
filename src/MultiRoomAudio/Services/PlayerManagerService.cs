@@ -1716,7 +1716,16 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to connect player '{Name}'", name);
+            if (ex is TimeoutException or InvalidOperationException)
+            {
+                _logger.LogWarning("Player '{Name}' could not find server: {Message}", name, ex.Message);
+            }
+            else
+            {
+                _logger.LogWarning("Player '{Name}' failed to connect: {Message}", name, ex.Message);
+            }
+            _logger.LogDebug(ex, "Player '{Name}' connection failure details", name);
+
             context.State = Models.PlayerState.Error;
             context.ErrorMessage = ex.Message;
             _ = BroadcastStatusAsync();
@@ -2668,8 +2677,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Reconnection attempt {Attempt} failed for player '{Name}'",
-                state.RetryCount, name);
+            _logger.LogWarning("Reconnection attempt {Attempt} failed for player '{Name}': {Message}",
+                state.RetryCount, name, ex.Message);
+            _logger.LogDebug(ex, "Player '{Name}' reconnection failure details", name);
 
             // Remove the failed player so the UI shows "Reconnecting (attempt N)"
             // instead of "Error: ..." during the backoff period. Without this cleanup,
