@@ -153,26 +153,19 @@ builder.Services.AddSingleton<DefaultPaParser>();
 // Startup diagnostics service
 builder.Services.AddSingleton<StartupDiagnosticsService>();
 
-// IMPORTANT: Hosted services start in registration order.
-// Correct order: CardProfiles → CustomSinks → Players
-// - Card profiles must be set before sinks can use surround channels
-// - Sinks must exist before players can use them
-
-// 1. CardProfileService - restore saved card profiles (e.g., surround 7.1) FIRST
+// Service singletons (no longer IHostedService — initialization is handled by StartupOrchestrator)
 builder.Services.AddSingleton<CardProfileService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<CardProfileService>());
-
-// 2. CustomSinksService - load remap/combine sinks SECOND (depends on profiles)
 builder.Services.AddSingleton<CustomSinksService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<CustomSinksService>());
-
-// 3. PlayerManagerService - autostart players LAST (depends on sinks existing)
 builder.Services.AddSingleton<PlayerManagerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<PlayerManagerService>());
-
-// 4. TriggerService - 12V relay trigger control (depends on sinks for mapping)
 builder.Services.AddSingleton<TriggerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TriggerService>());
+
+// Startup progress tracking (broadcasts phase changes to web clients via SignalR)
+builder.Services.AddSingleton<StartupProgressService>();
+
+// StartupOrchestrator runs initialization in the background AFTER Kestrel starts.
+// This ensures the web UI is immediately available while services initialize.
+// Dependency order preserved: CardProfiles → CustomSinks → Devices → Players → Triggers
+builder.Services.AddHostedService<StartupOrchestrator>();
 
 // Static files are served via UseStaticFiles() middleware below
 
@@ -281,6 +274,12 @@ app.MapCardsEndpoints();
 app.MapLogsEndpoints();
 app.MapTriggersEndpoints();
 
+// Startup progress endpoint (for web UI to show initialization status)
+app.MapGet("/api/startup", (StartupProgressService startup) => Results.Ok(startup.GetProgress()))
+    .WithTags("Health")
+    .WithName("StartupProgress")
+    .WithOpenApi();
+
 // Root endpoint redirects to index.html or shows API info
 app.MapGet("/api", () => Results.Ok(new
 {
@@ -351,6 +350,15 @@ diagnosticsService.RunPulseAudioDiagnostics();
 
 logger.LogInformation("API documentation available at /docs");
 logger.LogInformation("========================================");
+
+// Broadcast shutdown notification to all connected web clients
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(() =>
+{
+    logger.LogInformation("Broadcasting server shutdown to connected clients...");
+    var hubContext = app.Services.GetRequiredService<IHubContext<PlayerStatusHub>>();
+    hubContext.Clients.All.SendAsync("ServerShuttingDown").GetAwaiter().GetResult();
+});
 
 app.Run();
 

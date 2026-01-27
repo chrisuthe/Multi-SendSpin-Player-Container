@@ -13,7 +13,7 @@ namespace MultiRoomAudio.Services;
 /// Maps custom sinks to relay channels and controls power based on playback state.
 /// Supports multiple relay boards simultaneously.
 /// </summary>
-public class TriggerService : IHostedService, IAsyncDisposable
+public class TriggerService : IAsyncDisposable
 {
     private readonly ILogger<TriggerService> _logger;
     private readonly ILoggerFactory _loggerFactory;
@@ -74,9 +74,13 @@ public class TriggerService : IHostedService, IAsyncDisposable
             .Build();
     }
 
-    #region IHostedService
+    #region Lifecycle
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Loads trigger configuration and connects to relay boards.
+    /// Called by StartupOrchestrator during background initialization.
+    /// </summary>
+    public Task InitializeAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("TriggerService starting...");
 
@@ -99,7 +103,11 @@ public class TriggerService : IHostedService, IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Gracefully stops all relay boards and applies shutdown behavior.
+    /// Called by StartupOrchestrator during shutdown.
+    /// </summary>
+    public Task ShutdownAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("TriggerService stopping...");
 
@@ -1164,7 +1172,7 @@ public class TriggerService : IHostedService, IAsyncDisposable
             return;
 
         _disposed = true;
-        await StopAsync(CancellationToken.None);
+        await ShutdownAsync(CancellationToken.None);
         GC.SuppressFinalize(this);
     }
 }

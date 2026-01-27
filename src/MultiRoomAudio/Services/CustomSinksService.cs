@@ -11,7 +11,7 @@ namespace MultiRoomAudio.Services;
 /// Manages custom PulseAudio sinks (combine-sink and remap-sink).
 /// Implements IHostedService for startup sink creation and shutdown cleanup.
 /// </summary>
-public class CustomSinksService : IHostedService, IAsyncDisposable
+public class CustomSinksService : IAsyncDisposable
 {
     private readonly ILogger<CustomSinksService> _logger;
     private readonly IPaModuleRunner _moduleRunner;
@@ -60,8 +60,9 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
     /// <summary>
     /// Load and start persisted sinks on startup.
+    /// Called by StartupOrchestrator during background initialization.
     /// </summary>
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("CustomSinksService starting...");
 
@@ -110,8 +111,9 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
 
     /// <summary>
     /// Unload all sinks on shutdown.
+    /// Called by StartupOrchestrator during graceful shutdown.
     /// </summary>
-    public async Task StopAsync(CancellationToken cancellationToken)
+    public async Task ShutdownAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("CustomSinksService stopping...");
 
@@ -765,7 +767,7 @@ public class CustomSinksService : IHostedService, IAsyncDisposable
             return;
 
         _disposed = true;
-        await StopAsync(CancellationToken.None);
+        await ShutdownAsync(CancellationToken.None);
         GC.SuppressFinalize(this);
     }
 }

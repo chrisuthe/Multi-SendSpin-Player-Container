@@ -153,6 +153,8 @@ When testing locally on macOS (where PulseAudio is not available):
 
 2. **UI changes and onboarding wizard**: When adding new UI elements to the main app, ask if the same change should also be applied to the onboarding wizard (`wwwroot/js/wizard.js`). Skip asking if explicitly told to add it there.
 
+3. **Non-blocking startup**: Failure of player creation, sink creation, trigger detection, or any other startup phase must never block the user from reaching a useable UI. The `StartupOrchestrator` catches per-phase exceptions and marks them as `Failed` so subsequent phases still run and the web UI becomes interactive regardless.
+
 ---
 
 ## Code Style Guidelines

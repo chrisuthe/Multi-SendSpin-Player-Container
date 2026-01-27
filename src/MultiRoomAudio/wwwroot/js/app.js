@@ -10,6 +10,10 @@ let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
 let pendingUpdate = null; // Store pending updates during interaction
 let isModalOpen = false; // Pause auto-refresh while modal is open
+let serverAvailable = true; // Track whether the backend is reachable
+let disconnectedSince = null; // Timestamp when server became unavailable
+let gracefulShutdown = false; // True when server sent explicit shutdown notice
+let startupComplete = false; // Track whether backend startup is finished
 
 function formatBuildVersion(apiInfo) {
     const version = apiInfo?.version;
@@ -80,6 +84,181 @@ async function checkVersionAndReload() {
     } catch (error) {
         // Silently fail - backend might be restarting
         console.debug('Version check failed (backend might be restarting):', error);
+    }
+}
+
+/**
+ * Sets the server availability state and updates the UI accordingly.
+ * When unavailable: dims player cards, shows reconnecting banner, disables controls.
+ * When available again: removes overlay, hides banner, refreshes state.
+ * @param {boolean} available - Whether the server is reachable
+ */
+function setServerAvailable(available) {
+    if (serverAvailable === available) return; // No change
+    serverAvailable = available;
+
+    const playersContainer = document.getElementById('players-container');
+    const banner = document.getElementById('reconnect-banner');
+    const bannerText = document.getElementById('reconnect-banner-text');
+    const elapsedEl = document.getElementById('reconnect-elapsed');
+
+    if (!available) {
+        // Server went away — reset startup tracking so restart shows progress
+        startupComplete = false;
+        disconnectedSince = Date.now();
+        playersContainer.classList.add('server-unavailable');
+        banner.classList.add('visible');
+        if (bannerText) {
+            bannerText.textContent = gracefulShutdown
+                ? 'Server shutting down — waiting for restart...'
+                : 'Server unavailable — reconnecting...';
+        }
+        updateReconnectElapsed(); // Start elapsed timer
+    } else {
+        // Server is back
+        const downtimeSec = disconnectedSince ? Math.round((Date.now() - disconnectedSince) / 1000) : 0;
+        disconnectedSince = null;
+        gracefulShutdown = false;
+        playersContainer.classList.remove('server-unavailable');
+        banner.classList.remove('visible');
+        if (elapsedEl) elapsedEl.textContent = '';
+
+        // Update connection badge immediately (don't wait for SignalR handshake)
+        const statusBadge = document.getElementById('connection-status');
+        if (statusBadge) {
+            statusBadge.textContent = 'Connected';
+            statusBadge.className = 'badge bg-success me-2';
+        }
+
+        console.log(`Server reconnected after ${downtimeSec}s`);
+
+        // Check if backend startup is still in progress before loading data
+        checkStartupAndRecover();
+    }
+}
+
+/**
+ * Checks startup status after reconnection. If backend is still initializing,
+ * shows the startup overlay. Otherwise does a full data refresh.
+ */
+async function checkStartupAndRecover() {
+    try {
+        const response = await fetch('./api/startup');
+        if (response.ok) {
+            const progress = await response.json();
+            if (!progress.complete) {
+                // Backend still starting — show startup overlay, let SignalR events handle transition
+                console.log('Server is back but still starting — showing startup overlay');
+                renderStartupProgress(progress);
+                return;
+            }
+        }
+    } catch {
+        // Fetch failed — fall through to normal recovery
+    }
+
+    // Startup already complete (or couldn't check) — normal recovery
+    startupComplete = true;
+    setStartupOverlayVisible(false);
+
+    showAlert('Reconnected to server', 'success', 3000);
+    refreshStatus(true);
+    refreshDevices();
+    checkVersionAndReload();
+}
+
+/**
+ * Updates the elapsed time shown in the reconnect banner.
+ * Runs every second while disconnected.
+ */
+function updateReconnectElapsed() {
+    if (!disconnectedSince) return;
+
+    const elapsedEl = document.getElementById('reconnect-elapsed');
+    if (elapsedEl) {
+        const seconds = Math.round((Date.now() - disconnectedSince) / 1000);
+        if (seconds < 60) {
+            elapsedEl.textContent = `(${seconds}s)`;
+        } else {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            elapsedEl.textContent = `(${mins}m ${secs}s)`;
+        }
+    }
+
+    setTimeout(updateReconnectElapsed, 1000);
+}
+
+/**
+ * Shows or hides the startup overlay modal.
+ * Content remains visible behind the semi-transparent backdrop.
+ * @param {boolean} visible - Whether the overlay should be visible
+ */
+function setStartupOverlayVisible(visible) {
+    const overlay = document.getElementById('startup-overlay');
+    if (overlay) {
+        if (visible) {
+            overlay.classList.remove('hidden');
+        } else {
+            overlay.classList.add('hidden');
+        }
+    }
+}
+
+/**
+ * Renders the startup progress overlay.
+ * Shows phase list with status icons. Hides overlay when startup completes.
+ * @param {object} progress - { complete: bool, phases: [{ id, name, status, detail }] }
+ */
+function renderStartupProgress(progress) {
+    const overlay = document.getElementById('startup-overlay');
+    const phasesEl = document.getElementById('startup-phases');
+    if (!overlay || !phasesEl) return;
+
+    if (progress.complete) {
+        setStartupOverlayVisible(false);
+        return;
+    }
+
+    setStartupOverlayVisible(true);
+
+    // Build phase list using DOM manipulation
+    phasesEl.innerHTML = '';
+    for (const phase of progress.phases) {
+        const row = document.createElement('div');
+        row.className = 'startup-phase';
+
+        const icon = document.createElement('span');
+        icon.className = 'phase-icon';
+
+        if (phase.status === 'InProgress') {
+            row.classList.add('active');
+            icon.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        } else if (phase.status === 'Completed') {
+            row.classList.add('completed');
+            icon.innerHTML = '<i class="fas fa-check-circle"></i>';
+        } else if (phase.status === 'Failed') {
+            row.classList.add('failed');
+            icon.innerHTML = '<i class="fas fa-times-circle"></i>';
+        } else {
+            // Pending
+            icon.innerHTML = '<i class="fas fa-circle" style="font-size: 0.5rem;"></i>';
+        }
+
+        const label = document.createElement('span');
+        label.textContent = phase.name;
+
+        row.appendChild(icon);
+        row.appendChild(label);
+
+        if (phase.detail) {
+            const detail = document.createElement('span');
+            detail.className = 'phase-detail';
+            detail.textContent = `— ${phase.detail}`;
+            row.appendChild(detail);
+        }
+
+        phasesEl.appendChild(row);
     }
 }
 
@@ -254,13 +433,53 @@ function getBusTypeLabel(busType) {
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
-    // Load initial data
+    // Set up SignalR connection immediately (available before startup completes)
+    setupSignalR();
+
+    // Check startup progress first — show overlay if backend is still initializing
+    try {
+        const startupResponse = await fetch('./api/startup');
+        if (startupResponse.ok) {
+            const progress = await startupResponse.json();
+            renderStartupProgress(progress);
+
+            if (progress.complete) {
+                startupComplete = true;
+            }
+        } else {
+            // Endpoint not available (shouldn't happen) — assume complete
+            startupComplete = true;
+            setStartupOverlayVisible(false);
+        }
+    } catch {
+        // Server not reachable yet — show overlay, hide main content
+        startupComplete = false;
+        setStartupOverlayVisible(true);
+    }
+
+    // Load data that doesn't depend on startup completion
     await Promise.all([
         checkAdvancedFormats(),
-        refreshBuildInfo(),
-        refreshStatus(),
-        refreshDevices()
+        refreshBuildInfo()
     ]);
+
+    // Only load player/device data if startup is already complete
+    if (startupComplete) {
+        setStartupOverlayVisible(false);
+
+        await Promise.all([
+            refreshStatus(),
+            refreshDevices()
+        ]);
+
+        // Check if onboarding wizard should show
+        if (typeof Wizard !== 'undefined') {
+            const shouldShow = await Wizard.shouldShow();
+            if (shouldShow) {
+                await Wizard.show();
+            }
+        }
+    }
 
     // Set up volume slider preview
     const volumeSlider = document.getElementById('initialVolume');
@@ -269,17 +488,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         volumeSlider.addEventListener('input', () => {
             volumeValue.textContent = volumeSlider.value + '%';
         });
-    }
-
-    // Set up SignalR connection
-    setupSignalR();
-
-    // Check if onboarding wizard should show on fresh install
-    if (typeof Wizard !== 'undefined') {
-        const shouldShow = await Wizard.shouldShow();
-        if (shouldShow) {
-            await Wizard.show();
-        }
     }
 
     // Poll for status updates as fallback
@@ -303,8 +511,43 @@ function setupSignalR() {
 
     connection = new signalR.HubConnectionBuilder()
         .withUrl('./hubs/status')
-        .withAutomaticReconnect()
+        .withAutomaticReconnect({
+            nextRetryDelayInMilliseconds: (retryContext) => {
+                // Exponential backoff: 1s, 2s, 4s, 8s, 16s, capped at 30s
+                // Retries forever (never returns null)
+                return Math.min(1000 * Math.pow(2, retryContext.previousRetryCount), 30000);
+            }
+        })
         .build();
+
+    connection.on('ServerShuttingDown', () => {
+        console.log('Server sent graceful shutdown notification');
+        gracefulShutdown = true;
+        setServerAvailable(false);
+    });
+
+    connection.on('StartupProgress', (progress) => {
+        console.log('Startup progress:', progress);
+        renderStartupProgress(progress);
+
+        if (progress.complete && !startupComplete) {
+            startupComplete = true;
+            console.log('Startup complete — loading initial data');
+
+            // Hide overlay and show main content
+            setStartupOverlayVisible(false);
+
+            refreshStatus(true);
+            refreshDevices();
+
+            // Check onboarding wizard
+            if (typeof Wizard !== 'undefined') {
+                Wizard.shouldShow().then(shouldShow => {
+                    if (shouldShow) Wizard.show();
+                });
+            }
+        }
+    });
 
     connection.on('PlayerStatusUpdate', (data) => {
         console.log('Status update:', data);
@@ -328,19 +571,39 @@ function setupSignalR() {
     connection.onreconnecting(() => {
         statusBadge.textContent = 'Reconnecting...';
         statusBadge.className = 'badge bg-warning me-2';
+        setServerAvailable(false);
+
+        // Connection dropped — if graceful shutdown, transition message after a short delay
+        // so user sees "shutting down..." before it changes to "shut down..."
+        if (gracefulShutdown) {
+            setTimeout(() => {
+                if (gracefulShutdown && !serverAvailable) {
+                    const bannerText = document.getElementById('reconnect-banner-text');
+                    if (bannerText) bannerText.textContent = 'Server shut down — waiting for restart...';
+                }
+            }, 3000);
+        }
     });
 
     connection.onreconnected(() => {
         statusBadge.textContent = 'Connected';
         statusBadge.className = 'badge bg-success me-2';
-
-        // Check if backend version changed after reconnection
-        checkVersionAndReload();
+        setServerAvailable(true);
     });
 
     connection.onclose(() => {
         statusBadge.textContent = 'Disconnected';
         statusBadge.className = 'badge bg-danger me-2';
+        setServerAvailable(false);
+
+        if (gracefulShutdown) {
+            setTimeout(() => {
+                if (gracefulShutdown && !serverAvailable) {
+                    const bannerText = document.getElementById('reconnect-banner-text');
+                    if (bannerText) bannerText.textContent = 'Server shut down — waiting for restart...';
+                }
+            }, 3000);
+        }
     });
 
     connection.start()
@@ -372,10 +635,39 @@ async function refreshStatus(force = false) {
             players[p.name] = p;
         });
 
+        // Server responded successfully — if it was previously unavailable, recover
+        if (!serverAvailable) {
+            setServerAvailable(true);
+
+            // Restart SignalR if not connected (server restart invalidates old connection)
+            if (connection && connection.state !== signalR.HubConnectionState.Connected) {
+                console.log(`Server is back — restarting SignalR (was ${connection.state})`);
+                const statusBadge = document.getElementById('connection-status');
+                // Stop the stale connection (cancels any in-flight reconnect attempts)
+                connection.stop()
+                    .catch(() => {})
+                    .then(() => connection.start())
+                    .then(() => {
+                        statusBadge.textContent = 'Connected';
+                        statusBadge.className = 'badge bg-success me-2';
+                    })
+                    .catch(err => {
+                        console.log('SignalR restart failed, will retry on next poll:', err);
+                    });
+            }
+        }
+
         renderPlayers();
     } catch (error) {
         console.error('Error refreshing status:', error);
-        showAlert('Failed to load players', 'danger');
+
+        // During startup, errors are expected — don't trigger server-unavailable state
+        if (!startupComplete) return;
+
+        // Mark server as unavailable (only on polling failures, not forced refresh)
+        if (!force && serverAvailable) {
+            setServerAvailable(false);
+        }
     }
 }
 
@@ -1015,6 +1307,7 @@ async function showPlayerStats(name) {
 
 // Render players
 function renderPlayers() {
+
     const container = document.getElementById('players-container');
     const playerNames = Object.keys(players);
 
