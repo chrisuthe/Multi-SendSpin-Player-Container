@@ -490,8 +490,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Poll for status updates as fallback
-    setInterval(refreshStatus, 5000);
+    // Adaptive polling: fast (500ms) when server is unavailable, normal (5s) otherwise
+    let pollTimer = null;
+    function schedulePoll() {
+        const delay = serverAvailable ? 5000 : 500;
+        pollTimer = setTimeout(async () => {
+            await refreshStatus();
+            schedulePoll();
+        }, delay);
+    }
+    schedulePoll();
 
     // Periodic version check (every 30 seconds) as fallback
     setInterval(checkVersionAndReload, 30000);

@@ -50,6 +50,7 @@ if (logLevel > LogLevel.Debug)
 {
     builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
     builder.Logging.AddFilter("Microsoft.Hosting", LogLevel.Warning);
+    builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information); // Keep "Now listening on" visible
     builder.Logging.AddFilter("System.Net.Http", LogLevel.Warning);
 }
 

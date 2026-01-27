@@ -6,32 +6,33 @@ namespace MultiRoomAudio.Services;
 /// Phases execute sequentially to honor dependency ordering:
 /// CardProfiles → CustomSinks → Devices → Players → Triggers.
 /// </summary>
+/// <remarks>
+/// Dependencies are resolved lazily via IServiceProvider rather than constructor
+/// injection. This prevents the DI container from constructing heavy singletons
+/// (ConfigurationService, BackendFactory, PlayerManagerService, etc.) during
+/// hosted-service resolution, which runs before Kestrel starts listening.
+/// </remarks>
 public class StartupOrchestrator : BackgroundService
 {
     private readonly ILogger<StartupOrchestrator> _logger;
     private readonly IHostApplicationLifetime _lifetime;
-    private readonly StartupProgressService _progress;
-    private readonly CardProfileService _cardProfiles;
-    private readonly CustomSinksService _customSinks;
-    private readonly PlayerManagerService _playerManager;
-    private readonly TriggerService _triggers;
+    private readonly IServiceProvider _services;
+
+    // Lazily resolved after Kestrel is listening
+    private StartupProgressService _progress = null!;
+    private CardProfileService _cardProfiles = null!;
+    private CustomSinksService _customSinks = null!;
+    private PlayerManagerService _playerManager = null!;
+    private TriggerService _triggers = null!;
 
     public StartupOrchestrator(
         ILogger<StartupOrchestrator> logger,
         IHostApplicationLifetime lifetime,
-        StartupProgressService progress,
-        CardProfileService cardProfiles,
-        CustomSinksService customSinks,
-        PlayerManagerService playerManager,
-        TriggerService triggers)
+        IServiceProvider services)
     {
         _logger = logger;
         _lifetime = lifetime;
-        _progress = progress;
-        _cardProfiles = cardProfiles;
-        _customSinks = customSinks;
-        _playerManager = playerManager;
-        _triggers = triggers;
+        _services = services;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,6 +42,14 @@ public class StartupOrchestrator : BackgroundService
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var reg = _lifetime.ApplicationStarted.Register(() => tcs.SetResult());
         await tcs.Task.WaitAsync(stoppingToken);
+
+        // Now resolve services — their constructors (ConfigurationService, BackendFactory, etc.)
+        // run here, after the web server is already serving pages
+        _progress = _services.GetRequiredService<StartupProgressService>();
+        _cardProfiles = _services.GetRequiredService<CardProfileService>();
+        _customSinks = _services.GetRequiredService<CustomSinksService>();
+        _playerManager = _services.GetRequiredService<PlayerManagerService>();
+        _triggers = _services.GetRequiredService<TriggerService>();
 
         _logger.LogInformation("StartupOrchestrator: beginning background initialization...");
 
@@ -97,10 +106,10 @@ public class StartupOrchestrator : BackgroundService
     {
         _logger.LogInformation("StartupOrchestrator: shutting down services...");
 
-        // Stop in reverse order
-        await _triggers.ShutdownAsync(cancellationToken);
-        await _playerManager.ShutdownAsync(cancellationToken);
-        await _customSinks.ShutdownAsync(cancellationToken);
+        // Services may not have been resolved yet if shutdown occurs during early startup
+        if (_triggers != null) await _triggers.ShutdownAsync(cancellationToken);
+        if (_playerManager != null) await _playerManager.ShutdownAsync(cancellationToken);
+        if (_customSinks != null) await _customSinks.ShutdownAsync(cancellationToken);
         // CardProfileService has no shutdown logic
 
         await base.StopAsync(cancellationToken);
