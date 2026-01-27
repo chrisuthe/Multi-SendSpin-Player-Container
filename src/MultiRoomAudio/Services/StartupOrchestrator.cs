@@ -9,6 +9,7 @@ namespace MultiRoomAudio.Services;
 public class StartupOrchestrator : BackgroundService
 {
     private readonly ILogger<StartupOrchestrator> _logger;
+    private readonly IHostApplicationLifetime _lifetime;
     private readonly StartupProgressService _progress;
     private readonly CardProfileService _cardProfiles;
     private readonly CustomSinksService _customSinks;
@@ -17,6 +18,7 @@ public class StartupOrchestrator : BackgroundService
 
     public StartupOrchestrator(
         ILogger<StartupOrchestrator> logger,
+        IHostApplicationLifetime lifetime,
         StartupProgressService progress,
         CardProfileService cardProfiles,
         CustomSinksService customSinks,
@@ -24,6 +26,7 @@ public class StartupOrchestrator : BackgroundService
         TriggerService triggers)
     {
         _logger = logger;
+        _lifetime = lifetime;
         _progress = progress;
         _cardProfiles = cardProfiles;
         _customSinks = customSinks;
@@ -33,6 +36,12 @@ public class StartupOrchestrator : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Wait for Kestrel to be fully listening before starting initialization
+        // so the web UI is available immediately to show startup progress
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reg = _lifetime.ApplicationStarted.Register(() => tcs.SetResult());
+        await tcs.Task.WaitAsync(stoppingToken);
+
         _logger.LogInformation("StartupOrchestrator: beginning background initialization...");
 
         try
