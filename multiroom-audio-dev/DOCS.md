@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-fd9766c
+## Development Build: sha-5d514a5
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #123 from scyto/dev
+- Add robust reconnection with mDNS watch and WaitingForServer state
 - Merge pull request #122 from scyto/fix/cleanup-stale-sdk-comments
 - Clean up stale SDK version comments and add GroupId to diagnostics
 - Merge pull request #121 from scyto/dev
@@ -13,8 +15,6 @@
 - Update SendSpin.SDK from 5.4.1 to 6.0.0
 - Update to 5.4.1 attempt to fix volume issues so @Scyto doesn't send me angry emojis
 - Merge pull request #118 from scyto/dev
-- Fix startup volume being overwritten by current volume in edit modal
-- Add GitHub issue templates for bug reports and feature requests
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
