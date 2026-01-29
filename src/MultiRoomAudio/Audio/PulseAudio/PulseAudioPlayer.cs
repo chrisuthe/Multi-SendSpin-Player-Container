@@ -97,6 +97,7 @@ public class PulseAudioPlayer : IAudioPlayer
     private long _zeroReadCount;
     private DateTime _playbackStartTime;
     private bool _hasLoggedFirstAudio;
+    private bool _hasLoggedHighLatency;
 
     public AudioPlayerState State { get; private set; } = AudioPlayerState.Uninitialized;
 
@@ -386,6 +387,7 @@ public class PulseAudioPlayer : IAudioPlayer
             _zeroReadCount = 0;
             _underflowCount = 0;
             _hasLoggedFirstAudio = false;
+            _hasLoggedHighLatency = false;
             _playbackStartTime = DateTime.UtcNow;
 
             // Uncork the stream to start/resume playback.
@@ -590,16 +592,53 @@ public class PulseAudioPlayer : IAudioPlayer
         // The 'negative' out param indicates if latency is negative (stream ahead of playback).
         // With INTERPOLATE_TIMING + AUTO_TIMING_UPDATE flags, this gives accurate values
         // interpolated between the ~100ms server updates.
-        if (StreamGetLatency(stream, out var latencyUs, out var negative) == 0 && negative == 0)
+        var latencyResult = StreamGetLatency(stream, out var latencyUs, out var negative);
+        if (latencyResult == 0 && negative == 0)
         {
             _lastMeasuredLatencyUs = latencyUs;
             var newLatencyMs = (int)(latencyUs / 1000);
+
+            // Log abnormally high latency (>1 second) - this indicates a problem
+            if (newLatencyMs > 1000)
+            {
+                if (!_hasLoggedHighLatency)
+                {
+                    _hasLoggedHighLatency = true;
+                    _logger.LogError(
+                        "ABNORMAL PA LATENCY DETECTED: {Latency}ms ({LatencyUs}μs). " +
+                        "Expected ~{Expected}ms. This will cause clock sync issues. " +
+                        "callbacks={Callbacks}, sink={Sink}",
+                        newLatencyMs, latencyUs, BufferMs, _callbackCount, _sinkName ?? "default");
+                }
+                else if (_callbackCount % DiagnosticLogInterval == 0)
+                {
+                    _logger.LogWarning(
+                        "High PA latency continues: {Latency}ms, callbacks={Callbacks}",
+                        newLatencyMs, _callbackCount);
+                }
+            }
 
             // Hysteresis: Only update if change exceeds 5ms to avoid jitter in reported latency
             if (Math.Abs(newLatencyMs - OutputLatencyMs) > 5)
             {
                 OutputLatencyMs = newLatencyMs;
                 _logger.LogDebug("Measured latency: {Latency}ms", newLatencyMs);
+            }
+        }
+        else if (_callbackCount % DiagnosticLogInterval == 0)
+        {
+            // Log latency query failures periodically
+            if (latencyResult != 0)
+            {
+                _logger.LogDebug(
+                    "PA latency query failed: result={Result}, callbacks={Callbacks}",
+                    latencyResult, _callbackCount);
+            }
+            else if (negative != 0)
+            {
+                _logger.LogDebug(
+                    "PA latency is negative (stream ahead): latencyUs={LatencyUs}, callbacks={Callbacks}",
+                    latencyUs, _callbackCount);
             }
         }
 
