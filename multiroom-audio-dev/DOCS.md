@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-f52f3c5
+## Development Build: sha-ae089eb
 
 **Current Dev Build Changes** (recent)
 
+- Expose HAOS add-on options as environment variables
 - Update SDK to 6.1.1 and fix scheduled start timing issue
 - Merge pull request #125 from scyto/feature/handle-all-pipeline-states
 - Merge pull request #124 from chrisuthe/feature/graceful-start-stop-and-disconnects
@@ -14,7 +15,6 @@
 - Handle all SDK pipeline states instead of logging warnings
 - Suppress noisy SDK mDNS errors and improve connection failure logging
 - Log mDNS discovery failures as warnings instead of errors
-- Serve web UI before any service initialization and speed up reconnection
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
