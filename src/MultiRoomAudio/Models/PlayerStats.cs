@@ -76,7 +76,7 @@ public record ThroughputStats(
 
 /// <summary>
 /// Sync correction statistics.
-/// Uses frame drop/insert when sync error exceeds 5ms threshold.
+/// Uses frame drop/insert when sync error exceeds 15ms threshold.
 /// </summary>
 public record SyncCorrectionStats(
     string Mode,

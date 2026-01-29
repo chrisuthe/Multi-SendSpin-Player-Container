@@ -58,7 +58,7 @@ namespace MultiRoomAudio.Audio;
 ///     Positive error means playback is behind; negative means it's ahead.
 ///   </description></item>
 ///   <item><description>
-///     If error is within the deadband (+/- 5ms), no correction is applied. This prevents
+///     If error is within the deadband (+/- 15ms), no correction is applied. This prevents
 ///     unnecessary processing when sync is acceptable.
 ///   </description></item>
 ///   <item><description>
