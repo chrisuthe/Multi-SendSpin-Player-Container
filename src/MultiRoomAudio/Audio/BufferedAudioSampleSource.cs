@@ -116,6 +116,13 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     private int _framesSinceLastCorrection;
     private float[]? _lastOutputFrame;
 
+    // Anti-oscillation: track correction direction and debounce
+    // Prevents rapid alternation between dropping and inserting when overshoots occur
+    private enum CorrectionDirection { None, Dropping, Inserting }
+    private CorrectionDirection _currentDirection = CorrectionDirection.None;
+    private int _directionChangeDebounceCounter;
+    private const int DirectionChangeDebounceFrames = 500;  // ~10ms at 48kHz stereo
+
     // Debug logging rate limiter
     private long _lastDebugLogTime;
     private const long DebugLogIntervalMicroseconds = 1_000_000; // 1 second
@@ -311,9 +318,12 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         var syncError = _buffer.SmoothedSyncErrorMicroseconds;
         var absError = Math.Abs((long)syncError);
 
-        // No correction needed if within deadband
+        // No correction needed if within deadband - reset direction tracking
         if (absError < CorrectionThresholdMicroseconds)
         {
+            _currentDirection = CorrectionDirection.None;
+            _directionChangeDebounceCounter = 0;
+
             // Just copy input to output
             var toCopy = Math.Min(inputCount, output.Length);
             input.AsSpan(0, toCopy).CopyTo(output);
@@ -327,10 +337,43 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
             return (toCopy, 0, 0);
         }
 
+        // Determine desired direction based on error sign
+        var desiredDirection = syncError > 0 ? CorrectionDirection.Dropping : CorrectionDirection.Inserting;
+
+        // Check if direction would change (anti-oscillation debounce)
+        if (_currentDirection != CorrectionDirection.None && _currentDirection != desiredDirection)
+        {
+            // Direction change detected - apply debounce
+            _directionChangeDebounceCounter++;
+
+            if (_directionChangeDebounceCounter < DirectionChangeDebounceFrames)
+            {
+                // Still in debounce period - don't correct, just copy
+                var toCopy = Math.Min(inputCount, output.Length);
+                input.AsSpan(0, toCopy).CopyTo(output);
+                if (toCopy >= _channels)
+                {
+                    input.AsSpan(toCopy - _channels, _channels).CopyTo(_lastOutputFrame);
+                }
+                return (toCopy, 0, 0);
+            }
+
+            // Debounce satisfied - allow direction change
+            _directionChangeDebounceCounter = 0;
+        }
+        else
+        {
+            // Same direction or first correction - reset debounce counter
+            _directionChangeDebounceCounter = 0;
+        }
+
+        // Update current direction
+        _currentDirection = desiredDirection;
+
         // Calculate correction rate based on error magnitude
         var correctionInterval = CalculateCorrectionInterval(absError);
-        var shouldDrop = syncError > 0;  // Positive = behind, need to drop
-        var shouldInsert = syncError < 0; // Negative = ahead, need to insert
+        var shouldDrop = desiredDirection == CorrectionDirection.Dropping;
+        var shouldInsert = desiredDirection == CorrectionDirection.Inserting;
 
         // Process frame by frame
         var inputPos = 0;
@@ -571,5 +614,9 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         _totalDropped = 0;
         _totalInserted = 0;
         _hasLoggedOverrunStart = false;  // Allow ERROR level logging on next overrun
+
+        // Reset anti-oscillation state
+        _currentDirection = CorrectionDirection.None;
+        _directionChangeDebounceCounter = 0;
     }
 }
