@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-1b65f21
+## Development Build: sha-f8f69af
 
 **Current Dev Build Changes** (recent)
 
+- Persist volume changes to survive container restarts
 - Add anti-oscillation debounce to sync correction
 - Update stats display to match 15ms correction threshold
 - Add latency lock-in to reduce sync corrections from PulseAudio jitter
@@ -14,7 +15,6 @@
 - Merge pull request #124 from chrisuthe/feature/graceful-start-stop-and-disconnects
 - Update SendSpin.SDK package version to 6.0.1
 - Merge pull request #123 from scyto/dev
-- Downgrade expected PulseAudio disconnect logs from warning to debug
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
