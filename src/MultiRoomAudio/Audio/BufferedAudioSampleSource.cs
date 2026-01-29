@@ -104,12 +104,12 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     private readonly int _sampleRate;
 
     // Correction thresholds with hysteresis to prevent oscillation.
-    // Entry threshold matches SDK Tier 3 boundary (15ms) - below this the CLI uses smooth rate
-    // adjustment which is imperceptible. We don't have rate adjustment, so we avoid correcting
-    // small errors entirely since frame drop/insert is audible.
-    // Also tolerates PulseAudio latency measurement jitter on HAOS.
-    private const long EntryThresholdMicroseconds = 15_000;  // 15ms - start correcting
-    private const long ExitThresholdMicroseconds = 3_000;     // 3ms - stop correcting
+    // Entry threshold set high (50ms) to tolerate VM jitter - on Proxmox VMs,
+    // pa_stream_get_latency() returns noisy values (±20-50ms). Lower thresholds
+    // cause oscillating corrections that produce audible warbling.
+    // Exit threshold wider (10ms) for stability once corrections stop.
+    private const long EntryThresholdMicroseconds = 50_000;  // 50ms - only correct large drift
+    private const long ExitThresholdMicroseconds = 10_000;   // 10ms - wider exit band
 
     // Correction rate constants matching SDK's TimedAudioBuffer.UpdateCorrectionRate()
     private const double CorrectionTargetSeconds = 2.0;  // Time to eliminate error (CLI default)

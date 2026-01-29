@@ -618,25 +618,20 @@ public class PulseAudioPlayer : IAudioPlayer
             _lastMeasuredLatencyUs = latencyUs;
             var newLatencyMs = (int)(latencyUs / 1000);
 
-            // Log abnormally high latency (>1 second) - this indicates a problem
-            // that will cause clock sync issues (e.g., the 190-second latency bug on HAOS)
-            if (newLatencyMs > 1000)
+            // Cap absurd latency values - if PA reports > 500ms, use buffer size instead.
+            // This prevents the "190 second latency" bug on HAOS VMs from breaking clock sync.
+            // The latency lock-in will then freeze to a sane value.
+            if (newLatencyMs > 500)
             {
                 if (!_hasLoggedHighLatency)
                 {
                     _hasLoggedHighLatency = true;
-                    _logger.LogError(
-                        "ABNORMAL PA LATENCY DETECTED: {Latency}ms ({LatencyUs}μs). " +
-                        "Expected ~{Expected}ms. This will cause clock sync issues. " +
-                        "callbacks={Callbacks}, sink={Sink}",
-                        newLatencyMs, latencyUs, BufferMs, _callbackCount, _sinkName ?? "default");
-                }
-                else if (_callbackCount % DiagnosticLogInterval == 0)
-                {
                     _logger.LogWarning(
-                        "High PA latency continues: {Latency}ms, callbacks={Callbacks}",
-                        newLatencyMs, _callbackCount);
+                        "Capping absurd PA latency: {Reported}ms -> {Capped}ms. " +
+                        "This may indicate PA timing issues. callbacks={Callbacks}, sink={Sink}",
+                        newLatencyMs, BufferMs, _callbackCount, _sinkName ?? "default");
                 }
+                newLatencyMs = BufferMs;  // Use our buffer size as fallback
             }
 
             if (!_latencyLocked)
