@@ -17,18 +17,27 @@ public class PlayerStatusHub : Hub
 {
     private readonly ILogger<PlayerStatusHub> _logger;
     private readonly PlayerManagerService _playerManager;
+    private readonly StartupProgressService _startupProgress;
 
     public PlayerStatusHub(
         ILogger<PlayerStatusHub> logger,
-        PlayerManagerService playerManager)
+        PlayerManagerService playerManager,
+        StartupProgressService startupProgress)
     {
         _logger = logger;
         _playerManager = playerManager;
+        _startupProgress = startupProgress;
     }
 
     public override async Task OnConnectedAsync()
     {
         _logger.LogDebug("Client connected: {ConnectionId}", Context.ConnectionId);
+
+        // If startup is still in progress, send current progress first
+        if (!_startupProgress.IsStartupComplete)
+        {
+            await Clients.Caller.SendAsync("StartupProgress", _startupProgress.GetProgress());
+        }
 
         // Send current state to newly connected client
         var players = _playerManager.GetAllPlayers();

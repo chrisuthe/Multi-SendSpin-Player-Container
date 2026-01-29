@@ -12,7 +12,7 @@ namespace MultiRoomAudio.Services;
 /// Manages PulseAudio card profile selections with persistence.
 /// Implements IHostedService to restore saved profiles on startup.
 /// </summary>
-public class CardProfileService : IHostedService
+public class CardProfileService
 {
     private readonly ILogger<CardProfileService> _logger;
     private readonly EnvironmentService _environment;
@@ -54,8 +54,9 @@ public class CardProfileService : IHostedService
 
     /// <summary>
     /// Restore saved card profiles on startup.
+    /// Called by StartupOrchestrator during background initialization.
     /// </summary>
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("CardProfileService starting...");
 
@@ -181,15 +182,6 @@ public class CardProfileService : IHostedService
         await ApplyDeviceVolumeLimitsAsync();
 
         await Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// No-op on shutdown (profiles persist in PulseAudio until system restart).
-    /// </summary>
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("CardProfileService stopped");
-        return Task.CompletedTask;
     }
 
     /// <summary>

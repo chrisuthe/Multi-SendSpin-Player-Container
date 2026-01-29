@@ -75,7 +75,25 @@
 
     <!-- Players View (default view) -->
     <div id="playersView" class="container">
+        <!-- Startup Progress Overlay (visible until backend initialization completes) -->
+        <div id="startup-overlay" class="startup-overlay">
+            <div class="startup-content">
+                <div class="startup-icon">
+                    <i class="fas fa-music"></i>
+                </div>
+                <h3 class="startup-title">Starting Multi-Room Audio</h3>
+                <div id="startup-phases" class="startup-phases"></div>
+            </div>
+        </div>
+
+        <div id="players-main-content">
         <div id="alert-container"></div>
+
+        <div id="reconnect-banner" class="reconnect-banner">
+            <div class="spinner-border text-warning" role="status"></div>
+            <span id="reconnect-banner-text">Server unavailable — reconnecting...</span>
+            <span class="reconnect-time" id="reconnect-elapsed"></span>
+        </div>
 
         <div class="row">
             <div class="col-12">
@@ -98,6 +116,7 @@
                     </div>
                 </div>
             </div>
+        </div>
         </div>
     </div>
 

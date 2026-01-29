@@ -23,7 +23,7 @@ namespace MultiRoomAudio.Services;
 /// Handles creation, connection, state management, and disposal.
 /// Integrates with ConfigurationService for persistence and autostart.
 /// </summary>
-public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposable
+public class PlayerManagerService : IAsyncDisposable, IDisposable
 {
     private readonly ILogger<PlayerManagerService> _logger;
     private readonly ILoggerFactory _loggerFactory;
@@ -408,13 +408,11 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
-    /// Initializes all audio device hardware volumes to a fixed level.
-    /// This is called once at container startup to set a safe volume level
-    /// that avoids clipping. The server (Music Assistant) then controls the
-    /// actual volume level via its own volume control.
-    /// Devices with configured MaxVolume limits in devices.yaml are skipped.
+    /// Initializes all audio device hardware volumes to a safe level (80% or configured max).
+    /// Called by StartupOrchestrator during background initialization.
+    /// Devices with configured MaxVolume limits in devices.yaml use their limit instead.
     /// </summary>
-    private async Task InitializeHardwareVolumesAsync(CancellationToken cancellationToken)
+    public async Task InitializeHardwareAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Initializing hardware volumes to {Volume}%...", HardwareVolumePercent);
 
@@ -482,47 +480,56 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         }
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Autostarts configured players and begins the background reconnection task.
+    /// Called by StartupOrchestrator during background initialization.
+    /// </summary>
+    public async Task AutostartPlayersAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("PlayerManagerService starting...");
 
-        // Initialize all audio device hardware volumes to 80% to avoid clipping
-        await InitializeHardwareVolumesAsync(cancellationToken);
+        // Autostart configured players (creates player objects; connections are async)
+        var autostartPlayers = _config.GetAutostartPlayers();
+        if (autostartPlayers.Count == 0)
+        {
+            _logger.LogInformation("No players configured for autostart");
+        }
+        else
+        {
+            _logger.LogInformation("Found {AutostartCount} players configured for autostart",
+                autostartPlayers.Count);
 
-        // Autostart configured players
-        await AutostartConfiguredPlayersAsync(cancellationToken);
+            foreach (var playerConfig in autostartPlayers)
+            {
+                await TryAutostartPlayerAsync(playerConfig, cancellationToken);
+            }
+        }
 
-        // Start the background reconnection task
+        // Start background task: check for failed connections then run reconnection loop.
+        // This runs AFTER the startup phase completes so the UI becomes usable immediately.
         _reconnectionCts = new CancellationTokenSource();
-        _reconnectionTask = ProcessReconnectionsAsync(_reconnectionCts.Token);
+        _reconnectionTask = PostAutostartAndReconnectAsync(autostartPlayers, _reconnectionCts.Token);
 
         _logger.LogInformation("PlayerManagerService started with {PlayerCount} active players, {PendingCount} pending reconnection",
             _players.Count, _pendingReconnections.Count);
     }
 
     /// <summary>
-    /// Autostarts all players configured for autostart.
-    /// Handles errors gracefully and queues failed players for reconnection.
+    /// Background task that waits for initial connections to settle, then runs the reconnection loop.
+    /// Runs after the startup "players" phase completes so the UI is immediately usable.
     /// </summary>
-    private async Task AutostartConfiguredPlayersAsync(CancellationToken cancellationToken)
+    private async Task PostAutostartAndReconnectAsync(
+        IReadOnlyList<PlayerConfiguration> autostartPlayers,
+        CancellationToken cancellationToken)
     {
-        var autostartPlayers = _config.GetAutostartPlayers();
-        if (autostartPlayers.Count == 0)
+        // Check for failed connections after mDNS discovery timeout
+        if (autostartPlayers.Count > 0)
         {
-            _logger.LogInformation("No players configured for autostart");
-            return;
+            await CheckForFailedConnectionsAsync(autostartPlayers, cancellationToken);
         }
 
-        _logger.LogInformation("Found {AutostartCount} players configured for autostart",
-            autostartPlayers.Count);
-
-        foreach (var playerConfig in autostartPlayers)
-        {
-            await TryAutostartPlayerAsync(playerConfig, cancellationToken);
-        }
-
-        // Check for any players that failed to connect after mDNS discovery timeout
-        await CheckForFailedConnectionsAsync(autostartPlayers, cancellationToken);
+        // Then run the reconnection loop
+        await ProcessReconnectionsAsync(cancellationToken);
     }
 
     /// <summary>
@@ -604,7 +611,11 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         }
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Gracefully stops all players and the reconnection task.
+    /// Called by StartupOrchestrator during shutdown.
+    /// </summary>
+    public async Task ShutdownAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("PlayerManagerService stopping with {PlayerCount} active players, {PendingCount} pending reconnection...",
             _players.Count, _pendingReconnections.Count);
@@ -1705,7 +1716,16 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to connect player '{Name}'", name);
+            if (ex is TimeoutException or InvalidOperationException)
+            {
+                _logger.LogWarning("Player '{Name}' could not find server: {Message}", name, ex.Message);
+            }
+            else
+            {
+                _logger.LogWarning("Player '{Name}' failed to connect: {Message}", name, ex.Message);
+            }
+            _logger.LogDebug(ex, "Player '{Name}' connection failure details", name);
+
             context.State = Models.PlayerState.Error;
             context.ErrorMessage = ex.Message;
             _ = BroadcastStatusAsync();
@@ -2657,8 +2677,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Reconnection attempt {Attempt} failed for player '{Name}'",
-                state.RetryCount, name);
+            _logger.LogWarning("Reconnection attempt {Attempt} failed for player '{Name}': {Message}",
+                state.RetryCount, name, ex.Message);
+            _logger.LogDebug(ex, "Player '{Name}' reconnection failure details", name);
 
             // Remove the failed player so the UI shows "Reconnecting (attempt N)"
             // instead of "Error: ..." during the backoff period. Without this cleanup,
