@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-d950c72
+## Development Build: sha-d278cad
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #125 from scyto/feature/handle-all-pipeline-states
 - Merge pull request #124 from chrisuthe/feature/graceful-start-stop-and-disconnects
 - Update SendSpin.SDK package version to 6.0.1
 - Merge pull request #123 from scyto/dev
+- Downgrade expected PulseAudio disconnect logs from warning to debug
+- Handle all SDK pipeline states instead of logging warnings
 - Suppress noisy SDK mDNS errors and improve connection failure logging
 - Log mDNS discovery failures as warnings instead of errors
 - Serve web UI before any service initialization and speed up reconnection
 - Defer startup orchestration until Kestrel is listening
-- Add HH:mm:ss timestamps to console logs in standalone Docker mode
-- Add startup progress overlay, disconnection UX, and graceful shutdown
-- Add robust reconnection with mDNS watch and WaitingForServer state
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
