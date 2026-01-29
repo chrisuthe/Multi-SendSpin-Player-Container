@@ -54,6 +54,16 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     private Task? _reconnectionTask;
 
     /// <summary>
+    /// Whether continuous mDNS discovery is running to detect server reappearance.
+    /// </summary>
+    private bool _mdnsWatchActive;
+
+    /// <summary>
+    /// Signal to wake the reconnection loop immediately (e.g. when mDNS discovers a server).
+    /// </summary>
+    private readonly SemaphoreSlim _reconnectionSignal = new(0, 1);
+
+    /// <summary>
     /// Cached server URI from mDNS discovery to avoid race conditions.
     /// </summary>
     private Uri? _cachedServerUri;
@@ -357,7 +367,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         PlayerConfiguration Config,
         int RetryCount = 0,
         DateTime? NextRetryTime = null,
-        bool WasUserStopped = false
+        bool WasUserStopped = false,
+        bool MdnsOnly = false
     );
 
     /// <summary>
@@ -559,7 +570,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 playerConfig.Device ?? "(default)",
                 playerConfig.Server ?? "(auto-discover)");
 
-            QueueForReconnection(playerConfig, isInitialFailure: true);
+            QueueForReconnection(playerConfig, mdnsOnly: string.IsNullOrEmpty(playerConfig.Server));
         }
     }
 
@@ -581,10 +592,13 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 // Queue for reconnection if player is in error state and never connected
                 if (context.State == Models.PlayerState.Error && context.ConnectedAt == null)
                 {
+                    var isMdnsOnly = string.IsNullOrEmpty(playerConfig.Server);
                     _logger.LogWarning(
-                        "Player '{PlayerName}' failed to connect during autostart (mDNS discovery failed), queuing for reconnection",
+                        isMdnsOnly
+                            ? "Player '{PlayerName}' waiting for mDNS discovery (no server configured)"
+                            : "Player '{PlayerName}' failed to connect during autostart, queuing for reconnection",
                         playerConfig.Name);
-                    QueueForReconnection(playerConfig, isInitialFailure: true);
+                    QueueForReconnection(playerConfig, mdnsOnly: isMdnsOnly);
                 }
             }
         }
@@ -829,9 +843,12 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             waitForConvergence: true,
             convergenceTimeoutMs: 1000);
 
-        // Create WebSocket connection
+        // Create WebSocket connection.
+        // AutoReconnect disabled: the app's own reconnection logic handles recovery
+        // with fresh mDNS discovery and clean player contexts (see QueueForReconnection).
         var connection = new SendspinConnection(
-            _loggerFactory.CreateLogger<SendspinConnection>());
+            _loggerFactory.CreateLogger<SendspinConnection>(),
+            new ConnectionOptions { AutoReconnect = false });
 
         // Create SDK client
         var client = new SendspinClientService(
@@ -1054,12 +1071,26 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 // Player is configured but not active (failed to start or was stopped)
                 // Check if it's pending reconnection
                 var isPendingReconnection = _pendingReconnections.TryGetValue(name, out var reconnectState);
-                var state = isPendingReconnection && !reconnectState!.WasUserStopped
-                    ? Models.PlayerState.Reconnecting
-                    : Models.PlayerState.Error;
-                var errorMessage = isPendingReconnection && !reconnectState!.WasUserStopped
-                    ? $"Reconnecting... (attempt {reconnectState.RetryCount})"
-                    : "Player not running. Device may be unavailable or misconfigured.";
+                Models.PlayerState state;
+                string errorMessage;
+                if (isPendingReconnection && !reconnectState!.WasUserStopped)
+                {
+                    if (reconnectState.MdnsOnly)
+                    {
+                        state = Models.PlayerState.WaitingForServer;
+                        errorMessage = "Waiting for mDNS discovery...";
+                    }
+                    else
+                    {
+                        state = Models.PlayerState.Reconnecting;
+                        errorMessage = $"Reconnecting... (attempt {reconnectState.RetryCount})";
+                    }
+                }
+                else
+                {
+                    state = Models.PlayerState.Error;
+                    errorMessage = "Player not running. Device may be unavailable or misconfigured.";
+                }
 
                 // Return a placeholder response so user can edit/reconfigure it
                 var volume = config.Volume ?? 100;
@@ -1678,6 +1709,34 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             context.State = Models.PlayerState.Error;
             context.ErrorMessage = ex.Message;
             _ = BroadcastStatusAsync();
+
+            // If this is an initial connection failure (not managed by TryReconnectPlayerAsync),
+            // queue for reconnection so the player doesn't stay in Error state forever.
+            // TryReconnectPlayerAsync has its own re-queuing logic, so skip if already pending.
+            if (!_pendingReconnections.ContainsKey(name))
+            {
+                var persistedConfig = _config.Players.TryGetValue(name, out var cfg) ? cfg : null;
+                if (persistedConfig != null)
+                {
+                    // Players without a configured server URL rely on mDNS discovery —
+                    // any failure should wait passively for mDNS rather than active retries
+                    var isMdnsFailure = string.IsNullOrEmpty(persistedConfig.Server);
+
+                    if (isMdnsFailure)
+                    {
+                        _logger.LogInformation(
+                            "Player '{Name}' waiting for server discovery via mDNS", name);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "Player '{Name}' initial connection failed, queuing for reconnection", name);
+                    }
+
+                    await RemoveAndDisposePlayerAsync(name);
+                    QueueForReconnection(persistedConfig, mdnsOnly: isMdnsFailure);
+                }
+            }
         }
     }
 
@@ -1732,7 +1791,11 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             context.State = args.NewState switch
             {
                 ConnectionState.Connected => Models.PlayerState.Connected,
+                ConnectionState.Connecting => Models.PlayerState.Connecting,
+                ConnectionState.Handshaking => Models.PlayerState.Connecting,
+                ConnectionState.Reconnecting => Models.PlayerState.Reconnecting,
                 ConnectionState.Disconnected => Models.PlayerState.Stopped,
+                ConnectionState.Disconnecting => context.State, // Brief transition, keep current
                 _ => context.State
             };
 
@@ -1749,7 +1812,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             // Handle disconnection - queue for reconnection if appropriate
             if (args.NewState == ConnectionState.Disconnected &&
                 previousState != Models.PlayerState.Stopped &&  // Not user-stopped
-                previousState != Models.PlayerState.Error)       // Not already errored
+                previousState != Models.PlayerState.Error &&    // Not already errored
+                !_pendingReconnections.ContainsKey(name))        // Not already pending reconnection
             {
                 _logger.LogWarning("Player '{Name}' disconnected unexpectedly, queuing for reconnection", name);
 
@@ -2040,6 +2104,18 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         // Check if player is pending reconnection
         var isPendingReconnection = _pendingReconnections.TryGetValue(name, out var reconnectState);
 
+        // During reconnection, override transitional/error states so the UI doesn't flicker
+        var displayState = context.State;
+        if (isPendingReconnection && !reconnectState!.WasUserStopped &&
+            displayState is Models.PlayerState.Starting or Models.PlayerState.Connecting
+                        or Models.PlayerState.Created or Models.PlayerState.Error
+                        or Models.PlayerState.Stopped)
+        {
+            displayState = reconnectState.MdnsOnly
+                ? Models.PlayerState.WaitingForServer
+                : Models.PlayerState.Reconnecting;
+        }
+
         // Get startup volume from persisted config (not runtime config which changes with MA)
         var startupVolume = _config.Players.TryGetValue(name, out var persistedConfig)
             ? persistedConfig.Volume ?? 100
@@ -2047,7 +2123,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
         return new PlayerResponse(
             Name: name,
-            State: context.State,
+            State: displayState,
             Device: context.Config.DeviceId,
             ClientId: context.Capabilities.ClientId,
             ServerUrl: context.Config.ServerUrl,
@@ -2058,7 +2134,8 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             OutputLatencyMs: context.Player.OutputLatencyMs,
             CreatedAt: context.CreatedAt,
             ConnectedAt: context.ConnectedAt,
-            ErrorMessage: context.ErrorMessage,
+            ErrorMessage: displayState is Models.PlayerState.Reconnecting or Models.PlayerState.WaitingForServer
+                ? null : context.ErrorMessage,
             IsClockSynced: context.Client.IsClockSynced,
             Metrics: bufferStats != null ? new PlayerMetrics(
                 BufferLevel: (int)bufferStats.BufferedMs,
@@ -2279,26 +2356,48 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     /// <summary>
     /// Queues a player for automatic reconnection.
     /// </summary>
-    private void QueueForReconnection(PlayerConfiguration config, bool isInitialFailure = false)
+    private void QueueForReconnection(PlayerConfiguration config, bool mdnsOnly = false)
     {
         if (_disposed)
             return;
 
         var state = _pendingReconnections.GetOrAdd(config.Name, _ => new ReconnectionState(config));
 
-        // Calculate next retry time with exponential backoff
-        var delay = CalculateBackoffDelay(state.RetryCount);
-        var nextRetry = DateTime.UtcNow.Add(delay);
-
-        _pendingReconnections[config.Name] = state with
+        if (mdnsOnly)
         {
-            RetryCount = state.RetryCount + 1,
-            NextRetryTime = nextRetry
-        };
+            // mDNS-only mode: no polling retries, just wait passively for mDNS watch.
+            // NextRetryTime set to MaxValue so the polling loop never picks this up.
+            _pendingReconnections[config.Name] = state with
+            {
+                RetryCount = 0,
+                NextRetryTime = DateTime.MaxValue,
+                MdnsOnly = true
+            };
 
-        _logger.LogInformation(
-            "Player '{Name}' queued for reconnection (attempt {Attempt}, next retry in {Delay:F0}s)",
-            config.Name, state.RetryCount + 1, delay.TotalSeconds);
+            _logger.LogInformation(
+                "Player '{Name}' waiting for server discovery via mDNS (no active retries)",
+                config.Name);
+        }
+        else
+        {
+            // Normal reconnection: exponential backoff polling + mDNS watch
+            var delay = CalculateBackoffDelay(state.RetryCount);
+            var nextRetry = DateTime.UtcNow.Add(delay);
+
+            _pendingReconnections[config.Name] = state with
+            {
+                RetryCount = state.RetryCount + 1,
+                NextRetryTime = nextRetry,
+                MdnsOnly = false
+            };
+
+            _logger.LogInformation(
+                "Player '{Name}' queued for reconnection (attempt {Attempt}, next retry in {Delay:F0}s)",
+                config.Name, state.RetryCount + 1, delay.TotalSeconds);
+        }
+
+        // Start mDNS watch to detect server reappearance immediately
+        StartMdnsWatch();
 
         // Broadcast status so UI shows reconnection state
         _ = BroadcastStatusAsync();
@@ -2312,7 +2411,96 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         if (_pendingReconnections.TryRemove(name, out _))
         {
             _logger.LogDebug("Player '{Name}' removed from reconnection queue", name);
+
+            // Stop mDNS watch if no more players are pending
+            if (_pendingReconnections.IsEmpty)
+            {
+                StopMdnsWatch();
+            }
         }
+    }
+
+    /// <summary>
+    /// Starts continuous mDNS discovery to detect when a server reappears.
+    /// When a server is found, all pending players' backoff timers are reset
+    /// to trigger immediate reconnection.
+    /// </summary>
+    private void StartMdnsWatch()
+    {
+        if (_mdnsWatchActive || _disposed)
+            return;
+
+        _mdnsWatchActive = true;
+        // Subscribe to both Found (new server) and Updated (returning server already in cache)
+        _serverDiscovery.ServerFound += OnMdnsServerFound;
+        _serverDiscovery.ServerUpdated += OnMdnsServerFound;
+        _serverDiscovery.StartAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+                _logger.LogWarning(t.Exception, "Failed to start mDNS watch");
+            else
+                _logger.LogInformation("mDNS watch started - listening for server reappearance");
+        });
+    }
+
+    /// <summary>
+    /// Stops continuous mDNS discovery when no players are pending reconnection.
+    /// </summary>
+    private void StopMdnsWatch()
+    {
+        if (!_mdnsWatchActive)
+            return;
+
+        _mdnsWatchActive = false;
+        _serverDiscovery.ServerFound -= OnMdnsServerFound;
+        _serverDiscovery.ServerUpdated -= OnMdnsServerFound;
+        _serverDiscovery.StopAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+                _logger.LogWarning(t.Exception, "Failed to stop mDNS watch");
+            else
+                _logger.LogDebug("mDNS watch stopped");
+        });
+    }
+
+    /// <summary>
+    /// Called when mDNS discovers a server while players are pending reconnection.
+    /// Resets all pending players' backoff timers to trigger immediate reconnection.
+    /// </summary>
+    private void OnMdnsServerFound(object? sender, DiscoveredServer server)
+    {
+        var pendingCount = _pendingReconnections.Count;
+        if (pendingCount == 0)
+            return;
+
+        _logger.LogInformation(
+            "mDNS discovered server '{Name}' at {Host}:{Port} - triggering immediate reconnection for {Count} player(s)",
+            server.Name, server.Host, server.Port, pendingCount);
+
+        // Stop watching now that we've found the server.
+        // If reconnection fails, QueueForReconnection will restart the watch.
+        StopMdnsWatch();
+
+        // Cache the discovered server URI so reconnection attempts use it directly
+        var host = server.IpAddresses.FirstOrDefault() ?? server.Host;
+        _cachedServerUri = new Uri($"ws://{host}:{server.Port}/sendspin");
+        _cachedServerUriExpiry = DateTime.UtcNow.Add(CachedServerTtl);
+
+        // Reset all pending players' backoff timers to now and clear mDNS-only mode.
+        // After mDNS discovery, if connection still fails, normal backoff retries kick in.
+        foreach (var kvp in _pendingReconnections)
+        {
+            _pendingReconnections[kvp.Key] = kvp.Value with
+            {
+                NextRetryTime = DateTime.UtcNow,
+                MdnsOnly = false
+            };
+        }
+
+        // Wake the reconnection loop immediately instead of waiting for the 1s poll
+        SignalReconnectionLoop();
+
+        _ = BroadcastStatusAsync();
     }
 
     /// <summary>
@@ -2327,7 +2515,19 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
+    /// Wakes the reconnection loop to process pending players immediately.
+    /// Called by OnMdnsServerFound when a server is discovered.
+    /// </summary>
+    private void SignalReconnectionLoop()
+    {
+        // Release the semaphore if it's not already signaled (max count is 1)
+        try { _reconnectionSignal.Release(); }
+        catch (SemaphoreFullException) { /* Already signaled */ }
+    }
+
+    /// <summary>
     /// Background task that processes pending reconnection attempts.
+    /// Wakes on 1-second polling interval OR immediately when signaled (e.g. mDNS discovery).
     /// </summary>
     private async Task ProcessReconnectionsAsync(CancellationToken ct)
     {
@@ -2337,21 +2537,25 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                // Wait up to 1 second, but wake immediately if signaled
+                try { await _reconnectionSignal.WaitAsync(TimeSpan.FromSeconds(1), ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
 
                 var now = DateTime.UtcNow;
                 var playersToReconnect = _pendingReconnections
                     .Where(kvp => kvp.Value.NextRetryTime <= now && !kvp.Value.WasUserStopped)
-                    .Select(kvp => kvp.Key)
+                    .Select(kvp => (kvp.Key, kvp.Value))
                     .ToList();
 
-                foreach (var name in playersToReconnect)
+                if (playersToReconnect.Count == 0)
+                    continue;
+
+                // Reconnect all ready players concurrently
+                var tasks = new List<Task>();
+                foreach (var (name, state) in playersToReconnect)
                 {
                     if (ct.IsCancellationRequested || _disposed)
                         break;
-
-                    if (!_pendingReconnections.TryGetValue(name, out var state))
-                        continue;
 
                     // Check if max attempts reached (if configured)
                     if (MaxReconnectAttempts > 0 && state.RetryCount >= MaxReconnectAttempts)
@@ -2363,8 +2567,11 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                         continue;
                     }
 
-                    await TryReconnectPlayerAsync(name, state, ct);
+                    tasks.Add(TryReconnectPlayerAsync(name, state, ct));
                 }
+
+                if (tasks.Count > 0)
+                    await Task.WhenAll(tasks);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -2397,6 +2604,13 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
                 await RemoveAndDisposePlayerAsync(name);
             }
 
+            // Only invalidate cached server URI if the mDNS watch hasn't found a server.
+            // If the watch already found one, use that cached URI for fast reconnection.
+            if (!_mdnsWatchActive || _cachedServerUri == null)
+            {
+                _cachedServerUri = null;
+            }
+
             var request = new PlayerCreateRequest
             {
                 Name = state.Config.Name,
@@ -2411,10 +2625,20 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
 
             await CreatePlayerAsync(request, ct);
 
-            // Success - remove from queue
-            _pendingReconnections.TryRemove(name, out _);
-            _logger.LogInformation("Player '{Name}' reconnected successfully after {Attempts} attempt(s)",
-                name, state.RetryCount);
+            // CreatePlayerAsync returns before the connection completes (it's fire-and-forget).
+            // Wait for the actual connection to succeed or fail before deciding.
+            var connected = await WaitForPlayerConnectionAsync(name, TimeSpan.FromSeconds(20), ct);
+
+            if (connected)
+            {
+                _pendingReconnections.TryRemove(name, out _);
+                _logger.LogInformation("Player '{Name}' reconnected successfully after {Attempts} attempt(s)",
+                    name, state.RetryCount);
+            }
+            else
+            {
+                throw new InvalidOperationException("Connection did not succeed within timeout");
+            }
         }
         catch (EntityAlreadyExistsException)
         {
@@ -2436,9 +2660,42 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             _logger.LogWarning(ex, "Reconnection attempt {Attempt} failed for player '{Name}'",
                 state.RetryCount, name);
 
-            // Queue next attempt
+            // Remove the failed player so the UI shows "Reconnecting (attempt N)"
+            // instead of "Error: ..." during the backoff period. Without this cleanup,
+            // the player sits in _players with Error state and the API shows the live
+            // player state instead of the reconnection queue state.
+            if (_players.ContainsKey(name))
+                await RemoveAndDisposePlayerAsync(name);
+
+            // Queue next attempt with incremented retry count
             QueueForReconnection(state.Config);
         }
+    }
+
+    /// <summary>
+    /// Waits for a player's background connection to reach a terminal state.
+    /// CreatePlayerAsync starts the connection via fire-and-forget, so we need
+    /// to poll the player state to know if it actually connected.
+    /// </summary>
+    private async Task<bool> WaitForPlayerConnectionAsync(string name, TimeSpan timeout, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+
+        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+        {
+            await Task.Delay(500, ct);
+
+            if (!_players.TryGetValue(name, out var ctx))
+                return false; // Player was removed (disposed during connection)
+
+            if (ctx.State is Models.PlayerState.Connected or Models.PlayerState.Playing or Models.PlayerState.Buffering)
+                return true;
+
+            if (ctx.State is Models.PlayerState.Error or Models.PlayerState.Stopped)
+                return false;
+        }
+
+        return false;
     }
 
     #endregion
@@ -2470,6 +2727,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             _players.Clear();
         }
 
+        // Stop mDNS watch outside lock
+        StopMdnsWatch();
+
         // Dispose outside lock to avoid potential deadlocks
         foreach (var context in contextsToDispose)
         {
@@ -2488,6 +2748,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             }
         }
 
+        _reconnectionSignal.Dispose();
         _logger.LogInformation("PlayerManagerService disposed");
     }
 
@@ -2514,6 +2775,9 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             _players.Clear();
         }
 
+        // Stop mDNS watch outside lock
+        StopMdnsWatch();
+
         // Dispose outside lock to avoid potential deadlocks
         foreach (var context in contextsToDispose)
         {
@@ -2530,6 +2794,7 @@ public class PlayerManagerService : IHostedService, IAsyncDisposable, IDisposabl
             }
         }
 
+        _reconnectionSignal.Dispose();
         _logger.LogInformation("PlayerManagerService disposed asynchronously");
     }
 

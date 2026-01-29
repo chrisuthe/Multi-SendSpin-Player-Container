@@ -945,7 +945,7 @@ async function showPlayerStats(name) {
             <div class="col-md-6">
                 <h6 class="text-muted text-uppercase small">Status</h6>
                 <table class="table table-sm">
-                    <tr><td><strong>State</strong></td><td><span class="badge bg-${getStateBadgeClass(player.state)}">${player.state}</span></td></tr>
+                    <tr><td><strong>State</strong></td><td><span class="badge bg-${getStateBadgeClass(player.state)}">${getStateDisplayName(player)}</span></td></tr>
                     <tr><td><strong>Clock Synced</strong></td><td>${player.isClockSynced ? '<i class="fas fa-check text-success"></i> Yes' : '<i class="fas fa-times text-danger"></i> No'}</td></tr>
                     <tr><td><strong>Muted</strong></td><td>${player.isMuted ? 'Yes' : 'No'}</td></tr>
                     <tr><td><strong>Output Latency</strong></td><td>${player.outputLatencyMs}ms</td></tr>
@@ -1066,7 +1066,7 @@ function renderPlayers() {
 
                         <div class="status-container mb-3">
                             <span class="status-indicator ${stateClass}"></span>
-                            <span class="badge bg-${stateBadgeClass}">${player.state}</span>
+                            <span class="badge bg-${stateBadgeClass}">${getStateDisplayName(player)}</span>
                             <small class="text-muted ms-2">${escapeHtml(getDeviceDisplayName(player.device))}</small>
                         </div>
 
@@ -1202,7 +1202,9 @@ function getStateClass(state) {
         'Starting': 'status-starting',
         'Connecting': 'status-connecting',
         'Stopped': 'status-stopped',
-        'Error': 'status-error'
+        'Error': 'status-error',
+        'Reconnecting': 'status-connecting',
+        'WaitingForServer': 'status-connecting'
     };
     return stateMap[state] || 'status-stopped';
 }
@@ -1216,9 +1218,19 @@ function getStateBadgeClass(state) {
         'Connecting': 'info',
         'Created': 'secondary',
         'Stopped': 'secondary',
-        'Error': 'danger'
+        'Error': 'danger',
+        'Reconnecting': 'warning',
+        'WaitingForServer': 'info'
     };
     return stateMap[state] || 'secondary';
+}
+
+function getStateDisplayName(player) {
+    if (player.state === 'WaitingForServer') return 'Waiting for mDNS discovery';
+    if (player.state === 'Reconnecting' && player.reconnectionAttempts) {
+        return `Reconnecting (attempt ${player.reconnectionAttempts})`;
+    }
+    return player.state;
 }
 
 // Alert helpers

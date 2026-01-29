@@ -14,7 +14,8 @@ public enum PlayerState
     Paused,
     Stopped,
     Error,
-    Reconnecting
+    Reconnecting,
+    WaitingForServer
 }
 
 /// <summary>
