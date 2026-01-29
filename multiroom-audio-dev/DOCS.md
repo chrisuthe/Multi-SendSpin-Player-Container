@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-d278cad
+## Development Build: sha-f52f3c5
 
 **Current Dev Build Changes** (recent)
 
+- Update SDK to 6.1.1 and fix scheduled start timing issue
 - Merge pull request #125 from scyto/feature/handle-all-pipeline-states
 - Merge pull request #124 from chrisuthe/feature/graceful-start-stop-and-disconnects
 - Update SendSpin.SDK package version to 6.0.1
@@ -14,7 +15,6 @@
 - Suppress noisy SDK mDNS errors and improve connection failure logging
 - Log mDNS discovery failures as warnings instead of errors
 - Serve web UI before any service initialization and speed up reconnection
-- Defer startup orchestration until Kestrel is listening
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
