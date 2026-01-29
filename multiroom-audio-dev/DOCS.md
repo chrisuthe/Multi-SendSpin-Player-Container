@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-5d514a5
+## Development Build: sha-a7d4ef2
 
 **Current Dev Build Changes** (recent)
 
+- Update SendSpin.SDK package version to 6.0.1
 - Merge pull request #123 from scyto/dev
 - Add robust reconnection with mDNS watch and WaitingForServer state
 - Merge pull request #122 from scyto/fix/cleanup-stale-sdk-comments
@@ -14,7 +15,6 @@
 - Fix volume delta bug during seek/skip for grouped players
 - Update SendSpin.SDK from 5.4.1 to 6.0.0
 - Update to 5.4.1 attempt to fix volume issues so @Scyto doesn't send me angry emojis
-- Merge pull request #118 from scyto/dev
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
