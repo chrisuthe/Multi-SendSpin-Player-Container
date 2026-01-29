@@ -517,7 +517,11 @@ public class PulseAudioPlayer : IAudioPlayer
         {
             _contextReady = false;
             ThreadedMainloopSignal(_mainloop, 0);
-            _logger.LogWarning("PulseAudio context disconnected: {State}", state);
+
+            if (state == ContextState.Terminated && (_disposed || !_isPlaying))
+                _logger.LogDebug("PulseAudio context disconnected (expected): {State}", state);
+            else
+                _logger.LogWarning("PulseAudio context disconnected: {State}", state);
         }
     }
 
@@ -541,8 +545,13 @@ public class PulseAudioPlayer : IAudioPlayer
 
             // Get actual error from PulseAudio context
             var errorMsg = _context != IntPtr.Zero ? GetContextError(_context) : "Unknown";
-            _logger.LogWarning("PulseAudio stream disconnected: {State}. Error: {Error}. Sink: {Sink}",
-                state, errorMsg, _sinkName ?? "default");
+
+            if (state == StreamState.Terminated && (_disposed || !_isPlaying))
+                _logger.LogDebug("PulseAudio stream disconnected (expected): {State}. Sink: {Sink}",
+                    state, _sinkName ?? "default");
+            else
+                _logger.LogWarning("PulseAudio stream disconnected: {State}. Error: {Error}. Sink: {Sink}",
+                    state, errorMsg, _sinkName ?? "default");
         }
     }
 

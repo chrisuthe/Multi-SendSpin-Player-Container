@@ -1875,26 +1875,40 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
             var previousState = context.State;
 
+            var stateStr = state.ToString();
+
             if (state == AudioPipelineState.Playing)
                 context.State = Models.PlayerState.Playing;
             else if (state == AudioPipelineState.Buffering)
                 context.State = Models.PlayerState.Buffering;
             else if (state == AudioPipelineState.Idle)
                 context.State = Models.PlayerState.Connected;
+            else if (stateStr is "Starting")
+            {
+                context.State = Models.PlayerState.Starting;
+                _logger.LogInformation("Player '{Name}' pipeline is starting", name);
+            }
+            else if (stateStr is "Stopping")
+            {
+                context.State = Models.PlayerState.Connected;
+                _logger.LogInformation("Player '{Name}' pipeline is stopping", name);
+            }
+            else if (stateStr is "Dropping" or "Disconnecting")
+                _logger.LogInformation("Player '{Name}' pipeline state: {State}", name, stateStr);
+            else if (stateStr is "Inserting")
+                _logger.LogWarning("Player '{Name}' pipeline is inserting frames (possible sync issue)", name);
             else
             {
-                // Log unknown states so we can track SDK changes
-                _logger.LogWarning("Player '{Name}' received unknown pipeline state: {State}", name, state);
+                // Truly unknown state — log as warning so we notice SDK changes
+                _logger.LogWarning("Player '{Name}' received unknown pipeline state: {State}", name, stateStr);
             }
 
             // Notify trigger service of playback state changes
             // Activate when transitioning TO an active state (Playing/Buffering) from inactive
             // Deactivate when transitioning TO a stopped state (Idle/Stopping) from active
-            var stateStr = state.ToString();
             var isActiveState = state == AudioPipelineState.Playing || state == AudioPipelineState.Buffering;
             var wasInactiveState = previousState != Models.PlayerState.Playing && previousState != Models.PlayerState.Buffering;
-            var isStoppedState = state == AudioPipelineState.Idle ||
-                                 stateStr.Equals("Stopping", StringComparison.OrdinalIgnoreCase);
+            var isStoppedState = state == AudioPipelineState.Idle || stateStr is "Stopping";
             var wasActiveState = previousState == Models.PlayerState.Playing || previousState == Models.PlayerState.Buffering;
 
             if (isActiveState && wasInactiveState)
