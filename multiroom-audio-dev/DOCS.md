@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-f8f69af
+## Development Build: sha-46629bc
 
 **Current Dev Build Changes** (recent)
 
+- Add adaptive resampling for clock drift compensation
 - Persist volume changes to survive container restarts
 - Add anti-oscillation debounce to sync correction
 - Update stats display to match 15ms correction threshold
@@ -14,7 +15,6 @@
 - Merge pull request #125 from scyto/feature/handle-all-pipeline-states
 - Merge pull request #124 from chrisuthe/feature/graceful-start-stop-and-disconnects
 - Update SendSpin.SDK package version to 6.0.1
-- Merge pull request #123 from scyto/dev
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
