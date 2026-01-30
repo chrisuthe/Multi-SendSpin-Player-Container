@@ -210,11 +210,12 @@ public sealed class AdaptiveSampleRateConverter : IDisposable
         }
 
         // Copy output from pinned buffer
-        var outputSamples = srcData.OutputFramesGen * _channels;
+        // Cast from nint to int - frame counts will never exceed int range for audio
+        var outputSamples = (int)srcData.OutputFramesGen * _channels;
         _pinnedOutputBuffer.AsSpan(0, outputSamples).CopyTo(output);
 
-        inputFramesUsed = srcData.InputFramesUsed;
-        return srcData.OutputFramesGen;
+        inputFramesUsed = (int)srcData.InputFramesUsed;
+        return (int)srcData.OutputFramesGen;
     }
 
     /// <summary>
