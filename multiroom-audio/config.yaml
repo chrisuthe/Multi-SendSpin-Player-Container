@@ -43,7 +43,6 @@ options:
   mock_hardware: false
   enable_advanced_formats: false
   use_adaptive_resampling: false
-  relay_serial_port: null
   relay_devices: []
 
 schema:
