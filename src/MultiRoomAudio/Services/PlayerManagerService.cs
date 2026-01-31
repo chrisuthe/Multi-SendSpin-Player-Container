@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Hubs;
+using MultiRoomAudio.Logging;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Utilities;
 using Sendspin.SDK.Audio;
@@ -853,9 +854,24 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             InitialMuted = false // Players start unmuted
         };
 
+        // Create player-context loggers that prepend [PlayerName] to all messages.
+        // This makes SDK log messages like "Re-anchoring required" identifiable by player.
+        var playerName = request.Name;
+        var clockSyncLogger = new PlayerContextLogger<KalmanClockSynchronizer>(
+            _loggerFactory.CreateLogger<KalmanClockSynchronizer>(), playerName);
+        var pipelineLogger = new PlayerContextLogger<AudioPipeline>(
+            _loggerFactory.CreateLogger<AudioPipeline>(), playerName);
+        var connectionLogger = new PlayerContextLogger<SendspinConnection>(
+            _loggerFactory.CreateLogger<SendspinConnection>(), playerName);
+        var clientLogger = new PlayerContextLogger<SendspinClientService>(
+            _loggerFactory.CreateLogger<SendspinClientService>(), playerName);
+        var adaptiveSourceLogger = new PlayerContextLogger<AdaptiveResampledAudioSource>(
+            _loggerFactory.CreateLogger<AdaptiveResampledAudioSource>(), playerName);
+        var bufferedSourceLogger = new PlayerContextLogger<BufferedAudioSampleSource>(
+            _loggerFactory.CreateLogger<BufferedAudioSampleSource>(), playerName);
+
         // Create clock synchronizer
-        var clockSync = new KalmanClockSynchronizer(
-            _loggerFactory.CreateLogger<KalmanClockSynchronizer>());
+        var clockSync = new KalmanClockSynchronizer(clockSyncLogger);
 
         // Create audio player using the appropriate backend
         var player = _backendFactory.CreatePlayer(request.Device, _loggerFactory);
@@ -866,7 +882,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         // Create audio pipeline with proper factories
         var decoderFactory = new AudioDecoderFactory();
         var pipeline = new AudioPipeline(
-            _loggerFactory.CreateLogger<AudioPipeline>(),
+            pipelineLogger,
             decoderFactory,
             clockSync,
             bufferFactory: (format, sync) =>
@@ -898,7 +914,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     var source = new AdaptiveResampledAudioSource(
                         buffer,
                         timeFunc,
-                        _loggerFactory.CreateLogger<AdaptiveResampledAudioSource>(),
+                        adaptiveSourceLogger,
                         getDriftRate);
                     adaptiveSourceHolder.Source = source;  // Capture for stats access
                     return source;
@@ -907,7 +923,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 return new BufferedAudioSampleSource(
                     buffer,
                     timeFunc,
-                    _loggerFactory.CreateLogger<BufferedAudioSampleSource>());
+                    bufferedSourceLogger);
             },
             waitForConvergence: true,
             convergenceTimeoutMs: 1000);
@@ -916,12 +932,12 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         // AutoReconnect disabled: the app's own reconnection logic handles recovery
         // with fresh mDNS discovery and clean player contexts (see QueueForReconnection).
         var connection = new SendspinConnection(
-            _loggerFactory.CreateLogger<SendspinConnection>(),
+            connectionLogger,
             new ConnectionOptions { AutoReconnect = false });
 
         // Create SDK client
         var client = new SendspinClientService(
-            _loggerFactory.CreateLogger<SendspinClientService>(),
+            clientLogger,
             connection,
             clockSync,
             clientCapabilities,
