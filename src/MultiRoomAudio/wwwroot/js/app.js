@@ -1413,6 +1413,57 @@ function renderPlayers() {
 
     // Attach interaction tracking to all volume sliders
     attachSliderInteractionHandlers();
+
+    // Update multi-room sync summary
+    updateSyncSummary();
+}
+
+/**
+ * Updates the multi-room sync summary section.
+ * Shows inter-room drift when 2+ players are playing.
+ */
+function updateSyncSummary() {
+    const summaryEl = document.getElementById('sync-summary');
+    if (!summaryEl) return;
+
+    // Get players that are playing and have sync data
+    const playerList = Object.values(players);
+    const playingPlayers = playerList.filter(p =>
+        p.state === 'Playing' && p.syncErrorMs != null && p.isClockSynced
+    );
+
+    // Hide if fewer than 2 synced players playing
+    if (playingPlayers.length < 2) {
+        summaryEl.classList.add('d-none');
+        return;
+    }
+
+    summaryEl.classList.remove('d-none');
+
+    // Calculate worst-case inter-room drift
+    const errors = playingPlayers.map(p => p.syncErrorMs);
+    const maxError = Math.max(...errors);
+    const minError = Math.min(...errors);
+    const worstDrift = Math.abs(maxError - minError);
+
+    // Update drift display with color coding
+    const driftEl = document.getElementById('worst-drift');
+    driftEl.textContent = `${worstDrift.toFixed(1)}ms`;
+    driftEl.className = 'h5 mb-0 ' + (
+        worstDrift < 10 ? 'text-success' :
+        worstDrift < 20 ? 'text-warning' : 'text-danger'
+    );
+
+    // Update player count
+    document.getElementById('sync-count').textContent =
+        `${playingPlayers.length}/${playerList.length}`;
+
+    // Show per-player breakdown
+    const details = playingPlayers.map(p => {
+        const sign = p.syncErrorMs >= 0 ? '+' : '';
+        return `${p.name}: ${sign}${p.syncErrorMs.toFixed(1)}ms`;
+    }).join(' \u2022 '); // bullet separator
+    document.getElementById('sync-details').textContent = details;
 }
 
 /**

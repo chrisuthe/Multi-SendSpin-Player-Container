@@ -1159,6 +1159,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     ConnectedAt: null,
                     ErrorMessage: errorMessage,
                     IsClockSynced: false,
+                    SyncErrorMs: null,
                     Metrics: null,
                     DeviceCapabilities: null,
                     IsPendingReconnection: isPendingReconnection,
@@ -2216,6 +2217,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             ErrorMessage: displayState is Models.PlayerState.Reconnecting or Models.PlayerState.WaitingForServer
                 ? null : context.ErrorMessage,
             IsClockSynced: context.Client.IsClockSynced,
+            SyncErrorMs: bufferStats?.SyncErrorMs,
             Metrics: bufferStats != null ? new PlayerMetrics(
                 BufferLevel: (int)bufferStats.BufferedMs,
                 BufferCapacity: (int)bufferStats.TargetMs,

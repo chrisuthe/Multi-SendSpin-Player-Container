@@ -36,6 +36,7 @@ public record PlayerResponse(
     DateTime? ConnectedAt,
     string? ErrorMessage,
     bool IsClockSynced,
+    double? SyncErrorMs,
     PlayerMetrics? Metrics,
     DeviceCapabilities? DeviceCapabilities = null,
     bool IsPendingReconnection = false,
