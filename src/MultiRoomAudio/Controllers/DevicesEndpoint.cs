@@ -162,6 +162,10 @@ public static class DevicesEndpoint
             {
                 logger.LogInformation("Refreshing audio device list via {Backend} backend...",
                     backendFactory.BackendName);
+
+                // Invalidate cache first so we get fresh data from pactl
+                matchingService.InvalidateDeviceCache();
+
                 backendFactory.RefreshDevices();
                 var devices = matchingService.GetEnrichedDevices().ToList();
 

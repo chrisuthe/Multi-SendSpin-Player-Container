@@ -14,6 +14,13 @@ public class DeviceMatchingService
     private readonly BackendFactory _backend;
     private readonly CustomSinksService _customSinks;
 
+    // Device enumeration cache to avoid running pactl on every page load
+    // This prevents audio underflows when grouped players are active
+    private List<AudioDevice>? _cachedDevices;
+    private DateTime _cacheExpiry = DateTime.MinValue;
+    private readonly object _cacheLock = new();
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(10);
+
     public DeviceMatchingService(
         ILogger<DeviceMatchingService> logger,
         ConfigurationService config,
@@ -323,15 +330,44 @@ public class DeviceMatchingService
     /// <summary>
     /// Get all output devices enriched with their aliases and hidden status.
     /// Includes both hardware devices and custom sinks.
+    /// Results are cached for 10 seconds to avoid running pactl on every page load,
+    /// which can cause audio underflows when grouped players are active.
     /// </summary>
     public IEnumerable<AudioDevice> GetEnrichedDevices()
     {
-        // Get hardware devices
-        var hardwareDevices = _backend.GetOutputDevices().Select(EnrichWithConfig);
+        lock (_cacheLock)
+        {
+            var now = DateTime.UtcNow;
+            if (_cachedDevices != null && now < _cacheExpiry)
+            {
+                _logger.LogDebug("Returning cached device list ({Count} devices)", _cachedDevices.Count);
+                return _cachedDevices;
+            }
 
-        // Get custom sinks and convert to AudioDevice format
+            // Cache miss - enumerate devices
+            _logger.LogDebug("Device cache miss, enumerating devices via pactl");
+
+            // Get hardware devices
+            var hardwareDevices = _backend.GetOutputDevices().Select(EnrichWithConfig);
+
+            // Get custom sinks and convert to AudioDevice format
+            var customSinkDevices = GetCustomSinkDevices();
+
+            // Combine and cache
+            _cachedDevices = hardwareDevices.Concat(customSinkDevices).ToList();
+            _cacheExpiry = now + CacheTtl;
+
+            return _cachedDevices;
+        }
+    }
+
+    /// <summary>
+    /// Gets custom sinks as AudioDevice objects.
+    /// </summary>
+    private IEnumerable<AudioDevice> GetCustomSinkDevices()
+    {
         var customSinksResponse = _customSinks.GetAllSinks();
-        var customSinkDevices = customSinksResponse.Sinks
+        return customSinksResponse.Sinks
             .Where(sink => sink.State == CustomSinkState.Loaded && !string.IsNullOrEmpty(sink.PulseAudioSinkName))
             .Select(sink => new AudioDevice(
                 Index: -1,  // Custom sinks don't have an index
@@ -348,8 +384,20 @@ public class DeviceMatchingService
                 Hidden: false,
                 SinkType: sink.Type.ToString()  // "Combine" or "Remap"
             ));
+    }
 
-        // Combine and return
-        return hardwareDevices.Concat(customSinkDevices);
+    /// <summary>
+    /// Invalidates the device cache, forcing the next GetEnrichedDevices call
+    /// to re-enumerate devices via pactl.
+    /// Call this when devices might have changed (refresh button, sink creation/deletion).
+    /// </summary>
+    public void InvalidateDeviceCache()
+    {
+        lock (_cacheLock)
+        {
+            _cachedDevices = null;
+            _cacheExpiry = DateTime.MinValue;
+            _logger.LogDebug("Device cache invalidated");
+        }
     }
 }

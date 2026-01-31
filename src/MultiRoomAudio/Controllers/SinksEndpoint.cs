@@ -94,6 +94,7 @@ public static class SinksEndpoint
         group.MapPost("/combine", async (
             CombineSinkCreateRequest request,
             CustomSinksService service,
+            DeviceMatchingService deviceMatching,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -102,6 +103,10 @@ public static class SinksEndpoint
             return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var sink = await service.CreateCombineSinkAsync(request, ct);
+
+                // Invalidate device cache so the new sink appears in device lists
+                deviceMatching.InvalidateDeviceCache();
+
                 logger.LogInformation("API: Combine-sink {SinkName} created successfully", sink.Name);
                 return Results.Created($"/api/sinks/{sink.Name}", sink);
             }, logger, "create combine-sink", request.Name);
@@ -113,6 +118,7 @@ public static class SinksEndpoint
         group.MapPost("/remap", async (
             RemapSinkCreateRequest request,
             CustomSinksService service,
+            DeviceMatchingService deviceMatching,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -121,6 +127,10 @@ public static class SinksEndpoint
             return await ApiExceptionHandler.ExecuteAsync(async () =>
             {
                 var sink = await service.CreateRemapSinkAsync(request, ct);
+
+                // Invalidate device cache so the new sink appears in device lists
+                deviceMatching.InvalidateDeviceCache();
+
                 logger.LogInformation("API: Remap-sink {SinkName} created successfully", sink.Name);
                 return Results.Created($"/api/sinks/{sink.Name}", sink);
             }, logger, "create remap-sink", request.Name);
@@ -132,6 +142,7 @@ public static class SinksEndpoint
         group.MapDelete("/{name}", async (
             string name,
             CustomSinksService service,
+            DeviceMatchingService deviceMatching,
             TriggerService triggerService,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
@@ -141,6 +152,9 @@ public static class SinksEndpoint
             var deleted = await service.DeleteSinkAsync(name, ct);
             if (!deleted)
                 return SinkNotFoundResult(name, logger, "delete");
+
+            // Invalidate device cache so the deleted sink is removed from device lists
+            deviceMatching.InvalidateDeviceCache();
 
             // Notify trigger service to unassign any triggers using this sink
             triggerService.OnSinkDeleted(name);
