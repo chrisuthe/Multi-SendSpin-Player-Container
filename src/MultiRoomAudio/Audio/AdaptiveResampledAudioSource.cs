@@ -281,10 +281,13 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
 
     /// <summary>
     /// Resets the source state. Call when starting a new audio stream.
+    /// Preserves drift rate from Kalman filter for faster re-lock after reanchoring.
     /// </summary>
     public void Reset()
     {
-        _resampler.Reset();
+        // Preserve drift knowledge so we don't have to wait for Kalman to reconverge
+        // This enables faster audio sync recovery after reanchoring
+        _resampler.Reset(preserveDrift: true);
         _totalReads = 0;
         _zeroReads = 0;
         _successfulReads = 0;
@@ -296,7 +299,7 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
         _hasLoggedOverrunStart = false;
         _leftoverCount = 0;
 
-        _logger?.LogDebug("AdaptiveResampledAudioSource reset");
+        _logger?.LogDebug("AdaptiveResampledAudioSource reset (drift preserved)");
     }
 
     private void EnsureInputBuffer(int minSize)

@@ -54,6 +54,18 @@ public sealed class AdaptiveSampleRateConverter : IDisposable
     /// </summary>
     private const long OffsetDeadbandMicroseconds = 30000;
 
+    /// <summary>
+    /// Maximum deviation during fast acquisition mode (±2% = 20,000 ppm).
+    /// Allows faster initial sync when starting playback or after reanchoring.
+    /// </summary>
+    private const double FastAcquisitionMaxRatio = 0.02;
+
+    /// <summary>
+    /// Number of Process calls for fast acquisition mode (~10 seconds at typical rates).
+    /// At 48kHz with 1024-frame buffers, ~47 calls/second, so 500 calls ≈ 10 seconds.
+    /// </summary>
+    private const int FastAcquisitionCalls = 500;
+
     // Current state
     private double _currentRatio = 1.0;
     private double _targetRatio = 1.0;
@@ -183,8 +195,14 @@ public sealed class AdaptiveSampleRateConverter : IDisposable
         // === Combined ratio ===
         _targetRatio = 1.0 + driftTerm + offsetTerm;
 
+        // Use higher limit during fast acquisition mode (first ~10 seconds)
+        // This allows faster initial sync without affecting steady-state stability
+        var maxDeviation = _processCallCount < FastAcquisitionCalls
+            ? FastAcquisitionMaxRatio
+            : MaxRatioDeviation;
+
         // Clamp to maximum deviation
-        _targetRatio = Math.Clamp(_targetRatio, 1.0 - MaxRatioDeviation, 1.0 + MaxRatioDeviation);
+        _targetRatio = Math.Clamp(_targetRatio, 1.0 - maxDeviation, 1.0 + maxDeviation);
 
         // Smooth transition using exponential moving average (low-pass filter)
         // This prevents sudden ratio changes that could cause pitch wobble
@@ -252,7 +270,11 @@ public sealed class AdaptiveSampleRateConverter : IDisposable
     /// <summary>
     /// Resets the converter state. Call when starting a new audio stream.
     /// </summary>
-    public void Reset()
+    /// <param name="preserveDrift">
+    /// If true, keeps the drift rate from the Kalman filter for faster re-lock after reanchoring.
+    /// If false (default), clears all state including drift information.
+    /// </param>
+    public void Reset(bool preserveDrift = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -260,11 +282,18 @@ public sealed class AdaptiveSampleRateConverter : IDisposable
         _currentRatio = 1.0;
         _targetRatio = 1.0;
         _lastSyncErrorUs = 0;
-        _processCallCount = 0;
-        _driftRatePpm = 0;
-        _isDriftReliable = false;
+        _processCallCount = 0;  // Reset to re-enable fast acquisition mode
 
-        _logger?.LogDebug("Adaptive resampler reset");
+        if (!preserveDrift)
+        {
+            _driftRatePpm = 0;
+            _isDriftReliable = false;
+        }
+        // Else: keep drift rate for faster re-lock after reanchoring
+
+        _logger?.LogDebug(
+            "Adaptive resampler reset (preserveDrift={PreserveDrift}, driftPpm={DriftPpm:F1})",
+            preserveDrift, _driftRatePpm);
     }
 
     private void EnsurePinnedBuffers(int inputSize, int outputSize)
