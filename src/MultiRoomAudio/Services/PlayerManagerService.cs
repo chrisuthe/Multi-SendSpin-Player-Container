@@ -144,6 +144,15 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     };
 
     /// <summary>
+    /// Whether to use adaptive resampling for clock drift compensation.
+    /// Set USE_ADAPTIVE_RESAMPLING=true to enable libsamplerate-based adaptive resampling
+    /// which spreads corrections across every sample for inaudible adjustment.
+    /// Default is false (use frame drop/insert correction).
+    /// </summary>
+    private static readonly bool UseAdaptiveResampling =
+        string.Equals(Environment.GetEnvironmentVariable("USE_ADAPTIVE_RESAMPLING"), "true", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Timeout for mDNS server discovery.
     /// </summary>
     private static readonly TimeSpan MdnsDiscoveryTimeout = TimeSpan.FromSeconds(5);
@@ -335,7 +344,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         DateTime CreatedAt,
         CancellationTokenSource Cts,
         DeviceCapabilities? DeviceCapabilities = null,
-        AudioDevice? CachedDevice = null
+        AudioDevice? CachedDevice = null,
+        AdaptiveSourceHolder? AdaptiveSourceHolder = null
     )
     {
         public Models.PlayerState State { get; set; } = Models.PlayerState.Created;
@@ -379,8 +389,19 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         IAudioPipeline Pipeline,
         SendspinConnection Connection,
         ISendspinClient Client,
-        DeviceCapabilities? DeviceCapabilities
+        DeviceCapabilities? DeviceCapabilities,
+        AdaptiveSourceHolder? AdaptiveSourceHolder = null
     );
+
+    /// <summary>
+    /// Mutable holder for AdaptiveResampledAudioSource to capture from closure.
+    /// The sourceFactory closure runs lazily when the pipeline starts, so we need
+    /// a mutable container to capture the source reference for stats access.
+    /// </summary>
+    private class AdaptiveSourceHolder
+    {
+        public AdaptiveResampledAudioSource? Source { get; set; }
+    }
 
     public PlayerManagerService(
         ILogger<PlayerManagerService> logger,
@@ -402,6 +423,20 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _triggerService = triggerService;
         _serverDiscovery = new MdnsServerDiscovery(
             loggerFactory.CreateLogger<MdnsServerDiscovery>());
+
+        // Log which sync correction mode is in use
+        if (UseAdaptiveResampling)
+        {
+            _logger.LogInformation(
+                "Sync correction mode: ADAPTIVE RESAMPLING (libsamplerate). " +
+                "Corrections spread across every sample for inaudible adjustment.");
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Sync correction mode: Frame drop/insert with interpolation. " +
+                "Set USE_ADAPTIVE_RESAMPLING=true to use adaptive resampling.");
+        }
     }
 
     /// <summary>
@@ -742,7 +777,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 DateTime.UtcNow,
                 cts,
                 components.DeviceCapabilities,
-                cachedDevice)
+                cachedDevice,
+                components.AdaptiveSourceHolder)
             {
                 State = Models.PlayerState.Created,
                 InitialVolume = request.Volume
@@ -824,6 +860,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         // Create audio player using the appropriate backend
         var player = _backendFactory.CreatePlayer(request.Device, _loggerFactory);
 
+        // Use a holder to capture adaptive source from closure (closure runs later when pipeline starts)
+        var adaptiveSourceHolder = new AdaptiveSourceHolder();
+
         // Create audio pipeline with proper factories
         var decoderFactory = new AudioDecoderFactory();
         var pipeline = new AudioPipeline(
@@ -843,6 +882,19 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             playerFactory: () => player,
             sourceFactory: (buffer, timeFunc) =>
             {
+                // Use adaptive resampling if enabled via USE_ADAPTIVE_RESAMPLING env var.
+                // Adaptive resampling spreads corrections across every sample for inaudible
+                // adjustment, which works better on VMs with timing jitter.
+                if (UseAdaptiveResampling)
+                {
+                    var source = new AdaptiveResampledAudioSource(
+                        buffer,
+                        timeFunc,
+                        _loggerFactory.CreateLogger<AdaptiveResampledAudioSource>());
+                    adaptiveSourceHolder.Source = source;  // Capture for stats access
+                    return source;
+                }
+
                 return new BufferedAudioSampleSource(
                     buffer,
                     timeFunc,
@@ -873,7 +925,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             pipeline,
             connection,
             client,
-            deviceCapabilities);
+            deviceCapabilities,
+            adaptiveSourceHolder);
     }
 
     /// <summary>
@@ -1117,6 +1170,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     ConnectedAt: null,
                     ErrorMessage: errorMessage,
                     IsClockSynced: false,
+                    SyncErrorMs: null,
                     Metrics: null,
                     DeviceCapabilities: null,
                     IsPendingReconnection: isPendingReconnection,
@@ -2174,6 +2228,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             ErrorMessage: displayState is Models.PlayerState.Reconnecting or Models.PlayerState.WaitingForServer
                 ? null : context.ErrorMessage,
             IsClockSynced: context.Client.IsClockSynced,
+            SyncErrorMs: bufferStats?.SyncErrorMs,
             Metrics: bufferStats != null ? new PlayerMetrics(
                 BufferLevel: (int)bufferStats.BufferedMs,
                 BufferCapacity: (int)bufferStats.TargetMs,
@@ -2199,6 +2254,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         if (!_players.TryGetValue(name, out var context))
             return null;
 
+        // Get resample ratio if using adaptive resampling
+        var resampleRatio = context.AdaptiveSourceHolder?.Source?.CurrentResampleRatio;
+
         // Use cached device info (captured at player creation)
         // This avoids running pactl every time stats are requested
         return PlayerStatsMapper.BuildStats(
@@ -2206,7 +2264,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             context.Pipeline,
             context.ClockSync,
             context.Player,
-            context.CachedDevice);
+            context.CachedDevice,
+            resampleRatio);
     }
 
     private static string GenerateClientId(string name)

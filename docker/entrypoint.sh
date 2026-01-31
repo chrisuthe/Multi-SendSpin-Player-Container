@@ -39,6 +39,13 @@ if [ -f "/data/options.json" ] || [ -n "$SUPERVISOR_TOKEN" ]; then
             export ENABLE_ADVANCED_FORMATS=true
             echo "Advanced formats: enabled"
         fi
+
+        # Adaptive resampling (experimental sync correction using libsamplerate)
+        USE_ADAPTIVE_RESAMPLING=$(cat /data/options.json | grep -o '"use_adaptive_resampling"[[:space:]]*:[[:space:]]*[a-z]*' | sed 's/.*:[[:space:]]*//')
+        if [ "$USE_ADAPTIVE_RESAMPLING" = "true" ]; then
+            export USE_ADAPTIVE_RESAMPLING=true
+            echo "Adaptive resampling: enabled"
+        fi
     fi
 
     # HAOS supervisor mounts:

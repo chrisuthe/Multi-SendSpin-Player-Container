@@ -29,13 +29,15 @@ internal static class PlayerStatsMapper
     /// <param name="clockSync">The clock synchronizer providing timing stats.</param>
     /// <param name="player">The audio player providing output latency.</param>
     /// <param name="device">The audio device for hardware format info (optional).</param>
+    /// <param name="resampleRatio">Current resampling ratio if using adaptive resampling (optional).</param>
     /// <returns>Complete stats response for the UI.</returns>
     public static PlayerStatsResponse BuildStats(
         string playerName,
         IAudioPipeline pipeline,
         IClockSynchronizer clockSync,
         IAudioPlayer player,
-        AudioDevice? device = null)
+        AudioDevice? device = null,
+        double? resampleRatio = null)
     {
         // Single snapshot of buffer stats — one lock acquisition instead of five.
         // This matches the Windows version's pattern of snapshotting the struct once
@@ -53,7 +55,7 @@ internal static class PlayerStatsMapper
             Buffer: BuildBufferStats(bufferStats),
             ClockSync: BuildClockSyncStats(clockStatus, player, clockSync),
             Throughput: BuildThroughputStats(bufferStats),
-            Correction: BuildSyncCorrectionStats(bufferStats),
+            Correction: BuildSyncCorrectionStats(bufferStats, resampleRatio),
             Diagnostics: BuildBufferDiagnostics(bufferStats, pipelineState)
         );
     }
@@ -147,19 +149,24 @@ internal static class PlayerStatsMapper
     }
 
     /// <summary>
-    /// Builds sync correction statistics showing frame drop/insert mode.
+    /// Builds sync correction statistics showing frame drop/insert mode or adaptive resampling.
     /// </summary>
-    private static SyncCorrectionStats BuildSyncCorrectionStats(AudioBufferStats? bufferStats)
+    /// <param name="bufferStats">Buffer statistics from the pipeline.</param>
+    /// <param name="resampleRatio">Current resampling ratio if using adaptive mode (null for frame drop/insert).</param>
+    private static SyncCorrectionStats BuildSyncCorrectionStats(AudioBufferStats? bufferStats, double? resampleRatio)
     {
         var syncErrorMs = bufferStats?.SyncErrorMs ?? 0;
         var framesDropped = bufferStats?.SamplesDroppedForSync ?? 0;
         var framesInserted = bufferStats?.SamplesInsertedForSync ?? 0;
 
-        // Determine correction mode based on CURRENT sync error, not cumulative totals
-        // Positive sync error = behind schedule (need to drop frames to catch up)
-        // Negative sync error = ahead of schedule (need to insert frames to slow down)
+        // Determine correction mode
         string correctionMode;
-        if (Math.Abs(syncErrorMs) <= SyncToleranceMs)
+        if (resampleRatio.HasValue)
+        {
+            // Adaptive resampling mode - ratio indicates direction
+            correctionMode = "Adaptive";
+        }
+        else if (Math.Abs(syncErrorMs) <= SyncToleranceMs)
         {
             correctionMode = "None";
         }
@@ -176,7 +183,8 @@ internal static class PlayerStatsMapper
             Mode: correctionMode,
             FramesDropped: framesDropped,
             FramesInserted: framesInserted,
-            ThresholdMs: 15  // Our 15ms threshold
+            ThresholdMs: resampleRatio.HasValue ? 0 : 15,  // No threshold with adaptive resampling
+            ResampleRatio: resampleRatio
         );
     }
 

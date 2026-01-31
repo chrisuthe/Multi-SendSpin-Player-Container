@@ -107,6 +107,28 @@
                     </div>
                 </div>
 
+                <!-- Multi-Room Sync Summary (hidden when <2 players playing) -->
+                <div id="sync-summary" class="card mb-3 d-none">
+                    <div class="card-header py-2">
+                        <h6 class="mb-0"><i class="fas fa-sync-alt me-2"></i>Multi-Room Sync</h6>
+                    </div>
+                    <div class="card-body py-2">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <small class="text-muted d-block">Inter-Room Drift</small>
+                                <span id="worst-drift" class="h5 mb-0">--</span>
+                            </div>
+                            <div class="col-auto">
+                                <small class="text-muted d-block">Players Synced</small>
+                                <span id="sync-count" class="h5 mb-0">--</span>
+                            </div>
+                            <div class="col">
+                                <small id="sync-details" class="text-muted"></small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="players-container" class="row">
                     <div class="col-12 text-center py-5">
                         <div class="spinner-border text-primary" role="status">

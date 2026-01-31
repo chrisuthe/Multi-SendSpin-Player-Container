@@ -76,13 +76,20 @@ public record ThroughputStats(
 
 /// <summary>
 /// Sync correction statistics.
-/// Uses frame drop/insert when sync error exceeds 15ms threshold.
+/// Mode can be: "None", "Dropping", "Inserting", or "Adaptive".
+/// When Mode is "Adaptive", ResampleRatio shows the current ratio (1.0 = no change).
 /// </summary>
 public record SyncCorrectionStats(
     string Mode,
     long FramesDropped,
     long FramesInserted,
-    int ThresholdMs
+    int ThresholdMs,
+    /// <summary>
+    /// Current resampling ratio when using adaptive resampling (null otherwise).
+    /// 1.0 = no change, &lt;1.0 = speeding up (catching up), >1.0 = slowing down.
+    /// Typical values are within ±0.1% (1000 ppm) of 1.0.
+    /// </summary>
+    double? ResampleRatio = null
 );
 
 /// <summary>

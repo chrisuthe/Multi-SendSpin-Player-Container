@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 using static MultiRoomAudio.Audio.PulseAudio.PulseAudioNative;
@@ -126,6 +127,13 @@ public class PulseAudioPlayer : IAudioPlayer
     /// to prevent PulseAudio measurement jitter from causing constant sync corrections.
     /// </summary>
     public int OutputLatencyMs { get; private set; }
+
+    /// <summary>
+    /// Gets the current resampling ratio if using adaptive resampling, or null if using frame drop/insert.
+    /// 1.0 = no change, >1.0 = speeding up (behind schedule), &lt;1.0 = slowing down (ahead of schedule).
+    /// </summary>
+    public double? AdaptiveResampleRatio =>
+        _sampleSource is AdaptiveResampledAudioSource adaptive ? adaptive.CurrentResampleRatio : null;
 
     /// <summary>
     /// Gets whether the output latency has stabilized and locked.
