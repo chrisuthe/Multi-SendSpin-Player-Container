@@ -278,6 +278,42 @@ function getDeviceDisplayName(deviceId) {
     return deviceId;  // Fallback to ID if device not found
 }
 
+/**
+ * Get detailed connection info for a device ID.
+ * Returns formatted string with Sink/Device prefix and description/alias.
+ * @param {string} deviceId - The device ID (sink name)
+ * @returns {string} Formatted connection info (e.g., "Sink: zone1 (Left Channel)")
+ */
+function getConnectionInfo(deviceId) {
+    if (!deviceId) return 'Device: Default';
+
+    const device = devices.find(d => d.id === deviceId);
+    if (!device) return deviceId;
+
+    // Determine if this is a custom sink or hardware device
+    if (device.sinkType) {
+        // Custom sink: show "Sink: name (description)" or just "Sink: name"
+        if (device.alias) {
+            return `Sink: ${device.name} (${device.alias})`;
+        }
+        return `Sink: ${device.name}`;
+    } else {
+        // Hardware device: get card description if available
+        let cardName = device.name;
+        if (device.cardIndex !== null && device.cardIndex !== undefined && soundCards.length > 0) {
+            const card = soundCards.find(c => c.index === device.cardIndex);
+            if (card) {
+                cardName = card.description || card.name;
+            }
+        }
+        // Show "Device: cardName (alias)" or just "Device: cardName"
+        if (device.alias) {
+            return `Device: ${cardName} (${device.alias})`;
+        }
+        return `Device: ${cardName}`;
+    }
+}
+
 // XSS protection
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -467,10 +503,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (startupComplete) {
         setStartupOverlayVisible(false);
 
-        await Promise.all([
-            refreshStatus(),
-            refreshDevices()
-        ]);
+        // Load devices/cards first so player cards can display connection info correctly
+        await refreshDevices();
+        await refreshStatus();
 
         // Check if onboarding wizard should show
         if (typeof Wizard !== 'undefined') {
@@ -722,21 +757,75 @@ async function refreshFormats() {
 
 async function refreshDevices() {
     try {
-        const response = await fetch('./api/devices');
-        if (!response.ok) throw new Error('Failed to fetch devices');
+        // Fetch devices, cards, and sinks in parallel
+        const [devicesResponse, cardsResponse, sinksResponse] = await Promise.all([
+            fetch('./api/devices'),
+            fetch('./api/cards'),
+            fetch('./api/sinks')
+        ]);
 
-        const data = await response.json();
-        devices = data.devices || [];
+        if (!devicesResponse.ok) throw new Error('Failed to fetch devices');
+
+        const devicesData = await devicesResponse.json();
+        devices = devicesData.devices || [];
+
+        // Build card description map if cards request succeeded
+        let cardDescriptions = new Map(); // cardIndex -> description
+        if (cardsResponse.ok) {
+            const cardsData = await cardsResponse.json();
+            const cards = cardsData.cards || [];
+            // Update global soundCards for use by getConnectionInfo()
+            soundCards = cards;
+            // Build map of card index to description
+            cards.forEach(c => {
+                cardDescriptions.set(c.index, c.description || c.name);
+            });
+        }
+
+        // Get remap master sinks to auto-hide from player creation
+        let remapMasterSinks = new Set();
+        if (sinksResponse.ok) {
+            const sinksData = await sinksResponse.json();
+            const sinks = sinksData.sinks || [];
+            // Collect all masterSink values from loaded remap sinks
+            sinks.forEach(sink => {
+                if (sink.type === 'Remap' && sink.state === 'Loaded' && sink.masterSink) {
+                    remapMasterSinks.add(sink.masterSink);
+                }
+            });
+        }
+
+        // Filter devices for player creation:
+        // - Exclude devices with hidden = true (manually hidden via wizard)
+        // - Exclude devices that are remap masters (auto-hidden)
+        const visibleDevices = devices.filter(device => {
+            // Filter out manually hidden devices
+            if (device.hidden) return false;
+            // Filter out remap master sinks
+            if (remapMasterSinks.has(device.id)) return false;
+            return true;
+        });
 
         // Update device selects
         const selects = document.querySelectorAll('#audioDevice, #editAudioDevice');
         selects.forEach(select => {
             const currentValue = select.value;
             select.innerHTML = '<option value="">Default Device</option>';
-            devices.forEach(device => {
+            visibleDevices.forEach(device => {
                 const option = document.createElement('option');
                 option.value = device.id;
-                option.textContent = `${device.alias || device.name}${device.isDefault ? ' (default)' : ''}`;
+                // Format display name based on device type
+                let displayName;
+                if (device.sinkType) {
+                    // Custom sink: show "name (description)" if description exists
+                    displayName = device.alias ? `${device.name} (${device.alias})` : device.name;
+                } else {
+                    // Hardware device: use card description, then alias if set
+                    const cardName = cardDescriptions.get(device.cardIndex) || device.name;
+                    displayName = device.alias ? `${cardName} (${device.alias})` : cardName;
+                }
+                if (device.isDefault) displayName += ' (default)';
+                option.textContent = displayName;
                 select.appendChild(option);
             });
             if (currentValue) select.value = currentValue;
@@ -1368,7 +1457,11 @@ function renderPlayers() {
                         <div class="status-container mb-3">
                             <span class="status-indicator ${stateClass}"></span>
                             <span class="badge bg-${stateBadgeClass}">${getStateDisplayName(player)}</span>
-                            <small class="text-muted ms-2">${escapeHtml(getDeviceDisplayName(player.device))}</small>
+                        </div>
+                        <div class="connection-info text-muted small mb-2"
+                             style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                             title="${escapeHtml(getConnectionInfo(player.device))}">
+                            ${escapeHtml(getConnectionInfo(player.device))}
                         </div>
 
                         <div class="volume-control mb-3 pt-2 border-top">
@@ -2249,22 +2342,25 @@ function openCombineSinkModal(editData = null) {
     nameInput.disabled = !!editData; // Disable name field when editing, enable for create
     document.getElementById('combineSinkDesc').value = editData?.description || '';
 
-    // Populate device list
+    // Populate device list (exclude hidden devices, but include current slaves even if hidden)
     const deviceList = document.getElementById('combineDeviceList');
-    if (devices.length === 0) {
+    const selectedSlaves = editData?.slaves || [];
+    const eligibleDevices = devices.filter(d => !d.hidden || selectedSlaves.includes(d.id));
+    if (eligibleDevices.length === 0) {
         deviceList.innerHTML = '<div class="text-center py-2 text-muted">No devices available</div>';
     } else {
-        const selectedSlaves = editData?.slaves || [];
-        deviceList.innerHTML = devices.map(d => `
+        deviceList.innerHTML = eligibleDevices.map(d => {
+            const hiddenNote = d.hidden ? ' <span class="badge bg-secondary ms-1">hidden</span>' : '';
+            return `
             <div class="form-check device-checkbox-item">
                 <input class="form-check-input" type="checkbox" value="${escapeHtml(d.id)}" id="combine-${escapeHtml(d.id)}"
                     ${selectedSlaves.includes(d.id) ? 'checked' : ''}>
                 <label class="form-check-label" for="combine-${escapeHtml(d.id)}">
                     ${escapeHtml(d.alias || d.name)}
-                    ${d.isDefault ? '<span class="badge bg-primary ms-1">default</span>' : ''}
+                    ${d.isDefault ? '<span class="badge bg-primary ms-1">default</span>' : ''}${hiddenNote}
                 </label>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     // Get or create modal instance (avoid creating duplicates)
@@ -2310,15 +2406,26 @@ function openRemapSinkModal(editData = null) {
     nameInput.disabled = !!editData; // Disable name field when editing, enable for create
     document.getElementById('remapSinkDesc').value = editData?.description || '';
 
-    // Populate master device dropdown (exclude remap sinks - they can't be masters of other remap sinks)
+    // Populate master device dropdown:
+    // - Exclude remap sinks (they can't be masters of other remap sinks)
+    // - Exclude hidden devices (manually hidden via wizard)
+    // - But when editing, include the current masterSink even if hidden (so edit always works)
     const masterSelect = document.getElementById('remapMasterDevice');
-    const eligibleDevices = devices.filter(d => d.sinkType !== 'Remap');
+    const currentMaster = editData?.masterSink;
+    const eligibleDevices = devices.filter(d => {
+        if (d.sinkType === 'Remap') return false;
+        if (d.hidden && d.id !== currentMaster) return false;
+        return true;
+    });
     masterSelect.innerHTML = '<option value="">Select a device...</option>' +
-        eligibleDevices.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)</option>`).join('');
+        eligibleDevices.map(d => {
+            const hiddenNote = d.hidden ? ' (hidden)' : '';
+            return `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)${hiddenNote}</option>`;
+        }).join('');
 
     // Set master device if editing
-    if (editData?.masterSink) {
-        masterSelect.value = editData.masterSink;
+    if (currentMaster) {
+        masterSelect.value = currentMaster;
     }
 
     // Determine output mode from channel mappings (mono if single 'mono' output channel)
@@ -2907,7 +3014,7 @@ async function loadSoundCards() {
             <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
             </div>
-            <p class="mt-2 text-muted">Loading sound cards...</p>
+            <p class="mt-2 text-muted">Loading audio devices...</p>
         </div>
     `;
 
@@ -2919,7 +3026,7 @@ async function loadSoundCards() {
         ]);
 
         if (!cardsResponse.ok) {
-            throw new Error('Failed to load sound cards');
+            throw new Error('Failed to load audio devices');
         }
         if (!devicesResponse.ok) {
             throw new Error('Failed to load devices');
@@ -2937,7 +3044,7 @@ async function loadSoundCards() {
         container.innerHTML = `
             <div class="alert alert-danger">
                 <i class="fas fa-exclamation-triangle me-2"></i>
-                Failed to load sound cards: ${escapeHtml(error.message)}
+                Failed to load audio devices: ${escapeHtml(error.message)}
             </div>
         `;
     }
@@ -2951,7 +3058,7 @@ function renderSoundCards() {
         container.innerHTML = `
             <div class="text-center py-4 text-muted">
                 <i class="fas fa-sd-card fa-3x mb-3 opacity-50"></i>
-                <p class="mb-0">No sound cards detected</p>
+                <p class="mb-0">No audio devices detected</p>
             </div>
         `;
         return;
@@ -3048,6 +3155,17 @@ function renderSoundCards() {
                                    onchange="setDeviceMaxVolume('${escapeHtml(card.name)}', this.value, ${card.index})">
                             <span class="text-muted" style="min-width: 45px;" id="settings-max-volume-value-${card.index}">${card.maxVolume || 100}%</span>
                         </div>
+                    </div>
+
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox"
+                               id="settings-device-hidden-${card.index}"
+                               ${device?.hidden ? 'checked' : ''}
+                               ${deviceId ? '' : 'disabled'}
+                               onchange="toggleDeviceHidden('${escapeHtml(deviceId)}', this.checked, ${card.index})">
+                        <label class="form-check-label small" for="settings-device-hidden-${card.index}">
+                            Hide from player and sink creation
+                        </label>
                     </div>
 
                     ${hasMultipleProfiles ? `
@@ -3225,6 +3343,42 @@ async function setDeviceMaxVolume(cardName, maxVolume, cardIndex) {
         }
     } finally {
         if (slider) slider.disabled = false;
+    }
+}
+
+// Toggle device hidden state (affects both player and sink creation)
+async function toggleDeviceHidden(deviceId, hidden, cardIndex) {
+    const checkbox = document.getElementById(`settings-device-hidden-${cardIndex}`);
+    if (!checkbox || !deviceId) return;
+
+    checkbox.disabled = true;
+
+    try {
+        const response = await fetch(`./api/devices/${encodeURIComponent(deviceId)}/hidden`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hidden })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to set hidden state');
+        }
+
+        // Update local device state
+        const device = soundCardDevices.find(d => d.id === deviceId);
+        if (device) {
+            device.hidden = hidden;
+        }
+
+        showAlert(hidden ? 'Device hidden' : 'Device visible', 'success', 2000);
+    } catch (error) {
+        console.error('Failed to set hidden state:', error);
+        showAlert(error.message, 'danger');
+        // Revert checkbox on error
+        checkbox.checked = !hidden;
+    } finally {
+        checkbox.disabled = false;
     }
 }
 

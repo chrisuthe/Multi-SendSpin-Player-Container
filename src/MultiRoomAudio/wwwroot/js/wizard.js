@@ -80,7 +80,7 @@ const Wizard = {
     // Note: 'cards' step is conditionally shown only if there are cards with multiple profiles
     STEPS: [
         { id: 'welcome', title: 'Welcome' },
-        { id: 'cards', title: 'Cards' },
+        { id: 'cards', title: 'Devices' },
         { id: 'identify', title: 'Identify' },
         { id: 'sinks', title: 'Sinks' },
         { id: 'players', title: 'Players' },
@@ -427,15 +427,15 @@ const Wizard = {
 
         return `
             <div>
-                <h4><i class="fas fa-sd-card me-2"></i>Sound Card Configuration</h4>
+                <h4><i class="fas fa-sd-card me-2"></i>Audio Device Configuration</h4>
                 <p class="text-muted">
-                    Some of your sound cards support multiple output modes. Choose the profile that matches
-                    how you want to use each card (e.g., stereo, surround, or multi-channel output).
+                    Some of your audio devices support multiple output modes. Choose the profile that matches
+                    how you want to use each device (e.g., stereo, surround, or multi-channel output).
                 </p>
 
                 <div class="alert alert-info mb-3">
                     <i class="fas fa-info-circle me-2"></i>
-                    <strong>Tip:</strong> Built-in sound cards often support 5.1 or 7.1 surround profiles that expose
+                    <strong>Tip:</strong> Built-in audio devices often support 5.1 or 7.1 surround profiles that expose
                     multiple outputs. Multi-channel USB interfaces can also use surround profiles to access individual
                     channel pairs as separate stereo outputs.
                 </div>
@@ -530,8 +530,17 @@ const Wizard = {
 
         const deviceHtml = this.devices.map(device => {
             const isHidden = this.deviceState[device.id]?.hidden || device.hidden || false;
-            const alias = this.deviceState[device.id]?.alias || '';
+            const alias = this.deviceState[device.id]?.alias || device.alias || '';
             const portHint = parseUsbPortHint(device.identifiers?.busPath);
+
+            // Get card description for hardware devices, use device name for sinks
+            let displayName = device.name;
+            if (device.cardIndex !== null && device.cardIndex !== undefined && this.cards.length > 0) {
+                const card = this.cards.find(c => c.index === device.cardIndex);
+                if (card) {
+                    displayName = card.description || card.name;
+                }
+            }
 
             return `
                 <div class="list-group-item position-relative ${isHidden ? 'device-hidden' : ''}" id="device-row-${escapeHtml(device.id)}">
@@ -539,7 +548,7 @@ const Wizard = {
                     <div class="d-flex justify-content-between align-items-start">
                         <div class="flex-grow-1 me-3">
                             <h6 class="mb-1">
-                                ${escapeHtml(device.alias || device.name)}
+                                ${escapeHtml(displayName)}
                                 ${device.isDefault ? '<span class="badge bg-primary ms-2">Default</span>' : ''}
                                 ${isHidden ? '<span class="badge bg-secondary ms-2">Hidden</span>' : ''}
                             </h6>

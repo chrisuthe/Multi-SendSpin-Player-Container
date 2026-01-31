@@ -323,16 +323,28 @@ public class DeviceMatchingService
     /// <summary>
     /// Get all output devices enriched with their aliases and hidden status.
     /// Includes both hardware devices and custom sinks.
+    /// Custom sinks take precedence over raw hardware devices with the same ID to avoid duplicates.
     /// </summary>
     public IEnumerable<AudioDevice> GetEnrichedDevices()
     {
-        // Get hardware devices
-        var hardwareDevices = _backend.GetOutputDevices().Select(EnrichWithConfig);
-
-        // Get custom sinks and convert to AudioDevice format
+        // Get custom sinks first to build exclusion set
         var customSinksResponse = _customSinks.GetAllSinks();
-        var customSinkDevices = customSinksResponse.Sinks
+        var loadedCustomSinks = customSinksResponse.Sinks
             .Where(sink => sink.State == CustomSinkState.Loaded && !string.IsNullOrEmpty(sink.PulseAudioSinkName))
+            .ToList();
+
+        // Build set of PulseAudio sink names that belong to custom sinks
+        var customSinkIds = loadedCustomSinks
+            .Select(sink => sink.PulseAudioSinkName!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Get hardware devices, excluding any that are custom sinks (to avoid duplicates)
+        var hardwareDevices = _backend.GetOutputDevices()
+            .Where(device => !customSinkIds.Contains(device.Id))
+            .Select(EnrichWithConfig);
+
+        // Convert custom sinks to AudioDevice format
+        var customSinkDevices = loadedCustomSinks
             .Select(sink => new AudioDevice(
                 Index: -1,  // Custom sinks don't have an index
                 Id: sink.PulseAudioSinkName!,
@@ -344,12 +356,12 @@ public class DeviceMatchingService
                 IsDefault: false,
                 Capabilities: null,
                 Identifiers: null,
-                Alias: sink.Description ?? sink.Name,  // Use description as alias, fallback to name
+                Alias: sink.Description,  // Use description as alias (null if not set)
                 Hidden: false,
                 SinkType: sink.Type.ToString()  // "Combine" or "Remap"
             ));
 
-        // Combine and return
+        // Combine and return: hardware devices first, then custom sinks
         return hardwareDevices.Concat(customSinkDevices);
     }
 }
