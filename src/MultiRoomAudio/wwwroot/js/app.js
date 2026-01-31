@@ -817,15 +817,15 @@ async function refreshDevices(currentDeviceId = null) {
             visibleDevices.forEach(device => {
                 const option = document.createElement('option');
                 option.value = device.id;
-                // Format display name based on device type
+                // Format display name based on device type with Sink:/Device: prefix
                 let displayName;
                 if (device.sinkType) {
-                    // Custom sink: show "name (description)" if description exists
-                    displayName = device.alias ? `${device.name} (${device.alias})` : device.name;
+                    // Custom sink: show "Sink: name (description)" if description exists
+                    displayName = device.alias ? `Sink: ${device.name} (${device.alias})` : `Sink: ${device.name}`;
                 } else {
-                    // Hardware device: use card description, then alias if set
+                    // Hardware device: show "Device: card_desc (alias)" if alias set
                     const cardName = cardDescriptions.get(device.cardIndex) || device.name;
-                    displayName = device.alias ? `${cardName} (${device.alias})` : cardName;
+                    displayName = device.alias ? `Device: ${cardName} (${device.alias})` : `Device: ${cardName}`;
                 }
                 if (device.isDefault) displayName += ' (default)';
                 // Mark hidden/remap devices when shown for edit
