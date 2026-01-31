@@ -887,10 +887,19 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 // adjustment, which works better on VMs with timing jitter.
                 if (UseAdaptiveResampling)
                 {
+                    // Provide drift rate from Kalman filter for stable correction.
+                    // The clockSync is captured from the outer scope.
+                    Func<(double, bool)> getDriftRate = () =>
+                    {
+                        var status = clockSync.GetStatus();
+                        return (status.DriftMicrosecondsPerSecond, status.IsDriftReliable);
+                    };
+
                     var source = new AdaptiveResampledAudioSource(
                         buffer,
                         timeFunc,
-                        _loggerFactory.CreateLogger<AdaptiveResampledAudioSource>());
+                        _loggerFactory.CreateLogger<AdaptiveResampledAudioSource>(),
+                        getDriftRate);
                     adaptiveSourceHolder.Source = source;  // Capture for stats access
                     return source;
                 }

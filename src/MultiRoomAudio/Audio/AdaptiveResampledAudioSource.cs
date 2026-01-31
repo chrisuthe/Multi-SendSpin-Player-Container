@@ -40,6 +40,7 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
 {
     private readonly ITimedAudioBuffer _buffer;
     private readonly Func<long> _getCurrentTimeMicroseconds;
+    private readonly Func<(double DriftPpm, bool IsReliable)>? _getDriftRate;
     private readonly ILogger<AdaptiveResampledAudioSource>? _logger;
     private readonly int _channels;
     private readonly int _sampleRate;
@@ -122,11 +123,13 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
     /// <param name="buffer">The timed audio buffer to read from.</param>
     /// <param name="getCurrentTimeMicroseconds">Function that returns current local time in microseconds.</param>
     /// <param name="logger">Optional logger for diagnostics.</param>
+    /// <param name="getDriftRate">Optional function to get drift rate from Kalman filter for stable correction.</param>
     /// <param name="resamplerQuality">libsamplerate quality setting (default: SINC_MEDIUM_QUALITY).</param>
     public AdaptiveResampledAudioSource(
         ITimedAudioBuffer buffer,
         Func<long> getCurrentTimeMicroseconds,
         ILogger<AdaptiveResampledAudioSource>? logger = null,
+        Func<(double DriftPpm, bool IsReliable)>? getDriftRate = null,
         int resamplerQuality = SampleRateInterop.ConverterType.SincMediumQuality)
     {
         ArgumentNullException.ThrowIfNull(buffer);
@@ -134,6 +137,7 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
 
         _buffer = buffer;
         _getCurrentTimeMicroseconds = getCurrentTimeMicroseconds;
+        _getDriftRate = getDriftRate;
         _logger = logger;
         _channels = buffer.Format.Channels;
         _sampleRate = buffer.Format.SampleRate;
@@ -151,8 +155,8 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
 
         _logger?.LogInformation(
             "AdaptiveResampledAudioSource initialized: channels={Channels}, sampleRate={SampleRate}, " +
-            "using libsamplerate adaptive resampling",
-            _channels, _sampleRate);
+            "driftRateAvailable={DriftRateAvailable}, using libsamplerate adaptive resampling",
+            _channels, _sampleRate, getDriftRate != null);
     }
 
     /// <inheritdoc/>
@@ -165,6 +169,13 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
         if (_firstReadTime == 0)
         {
             _firstReadTime = currentTime;
+        }
+
+        // Get drift rate from Kalman filter (if available) for stable correction
+        if (_getDriftRate != null)
+        {
+            var (driftPpm, isReliable) = _getDriftRate();
+            _resampler.UpdateDriftRate(driftPpm, isReliable);
         }
 
         // Get current sync error and update resampler ratio
@@ -270,10 +281,13 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
 
     /// <summary>
     /// Resets the source state. Call when starting a new audio stream.
+    /// Preserves drift rate from Kalman filter for faster re-lock after reanchoring.
     /// </summary>
     public void Reset()
     {
-        _resampler.Reset();
+        // Preserve drift knowledge so we don't have to wait for Kalman to reconverge
+        // This enables faster audio sync recovery after reanchoring
+        _resampler.Reset(preserveDrift: true);
         _totalReads = 0;
         _zeroReads = 0;
         _successfulReads = 0;
@@ -285,7 +299,7 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
         _hasLoggedOverrunStart = false;
         _leftoverCount = 0;
 
-        _logger?.LogDebug("AdaptiveResampledAudioSource reset");
+        _logger?.LogDebug("AdaptiveResampledAudioSource reset (drift preserved)");
     }
 
     private void EnsureInputBuffer(int minSize)
@@ -338,11 +352,13 @@ public sealed class AdaptiveResampledAudioSource : IAudioSampleSource, IDisposab
 
         var syncErrorMs = syncError / 1000.0;
         var ratioPpm = (_resampler.CurrentRatio - 1.0) * 1_000_000;
+        var driftPpm = _resampler.DriftRatePpm;
+        var driftReliable = _resampler.IsDriftReliable;
 
         _logger?.LogDebug(
-            "Adaptive resample: syncError={SyncError:F2}ms, ratio={Ratio:F6} ({RatioPpm:+0;-0}ppm), " +
-            "output={Output} samples",
-            syncErrorMs, _resampler.CurrentRatio, ratioPpm, outputSamples);
+            "Adaptive resample: syncError={SyncError:F2}ms, drift={DriftPpm:+0;-0}ppm (reliable={Reliable}), " +
+            "ratio={Ratio:F6} ({RatioPpm:+0;-0}ppm), output={Output} samples",
+            syncErrorMs, driftPpm, driftReliable, _resampler.CurrentRatio, ratioPpm, outputSamples);
     }
 
     private void CheckForOverruns()
