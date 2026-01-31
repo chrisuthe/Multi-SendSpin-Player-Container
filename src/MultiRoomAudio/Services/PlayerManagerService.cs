@@ -345,7 +345,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         CancellationTokenSource Cts,
         DeviceCapabilities? DeviceCapabilities = null,
         AudioDevice? CachedDevice = null,
-        AdaptiveResampledAudioSource? AdaptiveSource = null
+        AdaptiveSourceHolder? AdaptiveSourceHolder = null
     )
     {
         public Models.PlayerState State { get; set; } = Models.PlayerState.Created;
@@ -390,8 +390,18 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         SendspinConnection Connection,
         ISendspinClient Client,
         DeviceCapabilities? DeviceCapabilities,
-        AdaptiveResampledAudioSource? AdaptiveSource = null
+        AdaptiveSourceHolder? AdaptiveSourceHolder = null
     );
+
+    /// <summary>
+    /// Mutable holder for AdaptiveResampledAudioSource to capture from closure.
+    /// The sourceFactory closure runs lazily when the pipeline starts, so we need
+    /// a mutable container to capture the source reference for stats access.
+    /// </summary>
+    private class AdaptiveSourceHolder
+    {
+        public AdaptiveResampledAudioSource? Source { get; set; }
+    }
 
     public PlayerManagerService(
         ILogger<PlayerManagerService> logger,
@@ -768,7 +778,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 cts,
                 components.DeviceCapabilities,
                 cachedDevice,
-                components.AdaptiveSource)
+                components.AdaptiveSourceHolder)
             {
                 State = Models.PlayerState.Created,
                 InitialVolume = request.Volume
@@ -850,8 +860,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         // Create audio player using the appropriate backend
         var player = _backendFactory.CreatePlayer(request.Device, _loggerFactory);
 
-        // Capture adaptive source for stats access (closure variable)
-        AdaptiveResampledAudioSource? adaptiveSource = null;
+        // Use a holder to capture adaptive source from closure (closure runs later when pipeline starts)
+        var adaptiveSourceHolder = new AdaptiveSourceHolder();
 
         // Create audio pipeline with proper factories
         var decoderFactory = new AudioDecoderFactory();
@@ -877,11 +887,12 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 // adjustment, which works better on VMs with timing jitter.
                 if (UseAdaptiveResampling)
                 {
-                    adaptiveSource = new AdaptiveResampledAudioSource(
+                    var source = new AdaptiveResampledAudioSource(
                         buffer,
                         timeFunc,
                         _loggerFactory.CreateLogger<AdaptiveResampledAudioSource>());
-                    return adaptiveSource;
+                    adaptiveSourceHolder.Source = source;  // Capture for stats access
+                    return source;
                 }
 
                 return new BufferedAudioSampleSource(
@@ -915,7 +926,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             connection,
             client,
             deviceCapabilities,
-            adaptiveSource);
+            adaptiveSourceHolder);
     }
 
     /// <summary>
@@ -2244,7 +2255,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             return null;
 
         // Get resample ratio if using adaptive resampling
-        var resampleRatio = context.AdaptiveSource?.CurrentResampleRatio;
+        var resampleRatio = context.AdaptiveSourceHolder?.Source?.CurrentResampleRatio;
 
         // Use cached device info (captured at player creation)
         // This avoids running pactl every time stats are requested
