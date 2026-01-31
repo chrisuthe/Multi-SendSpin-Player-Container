@@ -24,6 +24,13 @@ public class CardProfileService
     private readonly ISerializer _serializer;
     private readonly ReaderWriterLockSlim _configLock = new(LockRecursionPolicy.NoRecursion);
 
+    // Card enumeration cache to avoid running pactl on every page load
+    // This prevents audio underflows when grouped players are active
+    private List<PulseAudioCard>? _cachedCards;
+    private DateTime _cardCacheExpiry = DateTime.MinValue;
+    private readonly object _cardCacheLock = new();
+    private static readonly TimeSpan CardCacheTtl = TimeSpan.FromSeconds(10);
+
     public CardProfileService(
         ILogger<CardProfileService> logger,
         EnvironmentService environment,
@@ -186,30 +193,63 @@ public class CardProfileService
 
     /// <summary>
     /// Gets all available sound cards with their profiles.
+    /// Results are cached for 10 seconds to avoid running pactl on every page load,
+    /// which can cause audio underflows when grouped players are active.
     /// </summary>
     public IEnumerable<PulseAudioCard> GetCards()
     {
-        var cards = _environment.IsMockHardware
-            ? MockCardEnumerator.GetCards().ToList()
-            : PulseAudioCardEnumerator.GetCards().ToList();
-        var savedProfiles = LoadConfigurations();
-
-        return cards.Select(card =>
+        lock (_cardCacheLock)
         {
-            var config = savedProfiles.GetValueOrDefault(card.Name);
-            var isMuted = GetCardMuteState(card);
-            var bootMuted = config?.BootMuted;
-            var bootMatches = bootMuted.HasValue && isMuted.HasValue && bootMuted.Value == isMuted.Value;
-            var maxVolume = GetCardMaxVolume(card);
-
-            return card with
+            var now = DateTime.UtcNow;
+            if (_cachedCards != null && now < _cardCacheExpiry)
             {
-                IsMuted = isMuted,
-                BootMuted = bootMuted,
-                BootMuteMatchesCurrent = bootMatches,
-                MaxVolume = maxVolume
-            };
-        });
+                _logger.LogDebug("Returning cached card list ({Count} cards)", _cachedCards.Count);
+                return _cachedCards;
+            }
+
+            // Cache miss - enumerate cards
+            _logger.LogDebug("Card cache miss, enumerating cards via pactl");
+
+            var cards = _environment.IsMockHardware
+                ? MockCardEnumerator.GetCards().ToList()
+                : PulseAudioCardEnumerator.GetCards().ToList();
+            var savedProfiles = LoadConfigurations();
+
+            _cachedCards = cards.Select(card =>
+            {
+                var config = savedProfiles.GetValueOrDefault(card.Name);
+                var isMuted = GetCardMuteState(card);
+                var bootMuted = config?.BootMuted;
+                var bootMatches = bootMuted.HasValue && isMuted.HasValue && bootMuted.Value == isMuted.Value;
+                var maxVolume = GetCardMaxVolume(card);
+
+                return card with
+                {
+                    IsMuted = isMuted,
+                    BootMuted = bootMuted,
+                    BootMuteMatchesCurrent = bootMatches,
+                    MaxVolume = maxVolume
+                };
+            }).ToList();
+
+            _cardCacheExpiry = now + CardCacheTtl;
+            return _cachedCards;
+        }
+    }
+
+    /// <summary>
+    /// Invalidates the card cache, forcing the next GetCards call
+    /// to re-enumerate cards via pactl.
+    /// Call this when cards might have changed (profile change, explicit refresh).
+    /// </summary>
+    public void InvalidateCardCache()
+    {
+        lock (_cardCacheLock)
+        {
+            _cachedCards = null;
+            _cardCacheExpiry = DateTime.MinValue;
+            _logger.LogDebug("Card cache invalidated");
+        }
     }
 
     /// <summary>
@@ -274,6 +314,9 @@ public class CardProfileService
 
         // Save to persistent config
         SaveProfile(card.Name, profileName);
+
+        // Invalidate card cache since profile changed
+        InvalidateCardCache();
 
         _logger.LogInformation(
             "Changed card '{Card}' profile from '{Previous}' to '{New}'",
