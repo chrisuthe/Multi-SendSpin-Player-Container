@@ -25,9 +25,9 @@ public sealed class AdaptiveSampleRateConverter : IDisposable
     /// <summary>
     /// Time constant for error correction in seconds.
     /// Higher values = smoother corrections but slower convergence.
-    /// 10.0 seconds provides stability on jittery systems like PulseAudio.
+    /// 20.0 seconds provides stability on very jittery systems like VMs.
     /// </summary>
-    private const double CorrectionTimeSeconds = 10.0;
+    private const double CorrectionTimeSeconds = 20.0;
 
     /// <summary>
     /// Maximum deviation from 1.0 ratio (±0.5% = 5,000 ppm).
@@ -46,9 +46,9 @@ public sealed class AdaptiveSampleRateConverter : IDisposable
     /// <summary>
     /// Deadband in microseconds - don't adjust ratio for very small errors.
     /// This prevents over-correction for measurement noise.
-    /// 5000us = 5ms deadband - ignores typical PulseAudio jitter (1-3ms).
+    /// 20000us = 20ms deadband - ignores VM/PulseAudio jitter (can be 10-30ms).
     /// </summary>
-    private const long DeadbandMicroseconds = 5000;
+    private const long DeadbandMicroseconds = 20000;
 
     // Current state
     private double _currentRatio = 1.0;
