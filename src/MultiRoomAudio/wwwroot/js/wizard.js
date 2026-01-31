@@ -533,14 +533,10 @@ const Wizard = {
             const alias = this.deviceState[device.id]?.alias || device.alias || '';
             const portHint = parseUsbPortHint(device.identifiers?.busPath);
 
-            // Get card description for hardware devices, use device name for sinks
-            let displayName = device.name;
-            if (device.cardIndex !== null && device.cardIndex !== undefined && this.cards.length > 0) {
-                const card = this.cards.find(c => c.index === device.cardIndex);
-                if (card) {
-                    displayName = card.description || card.name;
-                }
-            }
+            // Use device.name directly - it already contains the correct name from PulseAudio sink description
+            // (Previous code tried to look up card by cardIndex, but cardIndex is ALSA card number
+            // while card.index is PulseAudio card index - different numbering systems!)
+            const displayName = device.name;
 
             return `
                 <div class="list-group-item position-relative ${isHidden ? 'device-hidden' : ''}" id="device-row-${escapeHtml(device.id)}">

@@ -298,14 +298,10 @@ function getConnectionInfo(deviceId) {
         }
         return `Sink: ${device.name}`;
     } else {
-        // Hardware device: get card description if available
-        let cardName = device.name;
-        if (device.cardIndex !== null && device.cardIndex !== undefined && soundCards.length > 0) {
-            const card = soundCards.find(c => c.index === device.cardIndex);
-            if (card) {
-                cardName = card.description || card.name;
-            }
-        }
+        // Hardware device: use device.name directly (already correct from PulseAudio sink description)
+        // (Previous code tried to look up card by cardIndex, but cardIndex is ALSA card number
+        // while card.index is PulseAudio card index - different numbering systems!)
+        const cardName = device.name;
         // Show "Device: cardName (alias)" or just "Device: cardName"
         if (device.alias) {
             return `Device: ${cardName} (${device.alias})`;
@@ -823,8 +819,9 @@ async function refreshDevices(currentDeviceId = null) {
                     // Custom sink: show "Sink: name (description)" if description exists
                     displayName = device.alias ? `Sink: ${device.name} (${device.alias})` : `Sink: ${device.name}`;
                 } else {
-                    // Hardware device: show "Device: card_desc (alias)" if alias set
-                    const cardName = cardDescriptions.get(device.cardIndex) || device.name;
+                    // Hardware device: use device.name directly (already correct from PulseAudio)
+                    // (cardDescriptions map uses PulseAudio index but device.cardIndex is ALSA card number)
+                    const cardName = device.name;
                     displayName = device.alias ? `Device: ${cardName} (${device.alias})` : `Device: ${cardName}`;
                 }
                 if (device.isDefault) displayName += ' (default)';
@@ -3100,8 +3097,11 @@ function renderSoundCards() {
         const busIcon = getBusTypeIcon(busType);
         const busLabel = getBusTypeLabel(busType);
 
-        // Find the device associated with this card using cardIndex (1:1 relationship)
-        const device = soundCardDevices.find(d => d.cardIndex === card.index);
+        // Find the device associated with this card by matching name patterns
+        // Card name: alsa_card.pci-0000_01_00.0 -> Device id: alsa_output.pci-0000_01_00.0.analog-stereo
+        // (Previous code used cardIndex === card.index, but cardIndex is ALSA number and card.index is PulseAudio index)
+        const cardBase = card.name.replace('alsa_card.', '');
+        const device = soundCardDevices.find(d => d.id && d.id.includes(cardBase));
         const deviceAlias = device?.alias || '';
         const deviceId = device?.id || '';
 
