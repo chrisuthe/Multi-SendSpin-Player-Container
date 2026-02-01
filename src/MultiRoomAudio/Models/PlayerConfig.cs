@@ -8,12 +8,12 @@ namespace MultiRoomAudio.Models;
 public class PlayerCreateRequest
 {
     /// <summary>
-    /// The name of the player. Must be 1-100 characters and contain only
-    /// letters, numbers, spaces, hyphens, underscores, and apostrophes.
+    /// The name of the player. Must be 1-100 characters and not contain control characters.
+    /// Supports international characters, symbols, and special characters.
     /// </summary>
     [Required(ErrorMessage = "Player name is required.")]
     [StringLength(100, MinimumLength = 1, ErrorMessage = "Player name must be between 1 and 100 characters.")]
-    [RegularExpression(@"^[a-zA-Z0-9\s\-_']+$", ErrorMessage = "Player name can only contain letters, numbers, spaces, hyphens, underscores, and apostrophes.")]
+    [RegularExpression(@"^[^\x00-\x1F\x7F]+$", ErrorMessage = "Player name cannot contain control characters.")]
     public required string Name { get; set; }
 
     /// <summary>
@@ -114,7 +114,7 @@ public record OffsetRequest(
 public record RenameRequest(
     [property: Required(ErrorMessage = "New player name is required.")]
     [property: StringLength(100, MinimumLength = 1, ErrorMessage = "Player name must be between 1 and 100 characters.")]
-    [property: RegularExpression(@"^[a-zA-Z0-9\s\-_']+$", ErrorMessage = "Player name can only contain letters, numbers, spaces, hyphens, underscores, and apostrophes.")]
+    [property: RegularExpression(@"^[^\x00-\x1F\x7F]+$", ErrorMessage = "Player name cannot contain control characters.")]
     string NewName);
 
 /// <summary>
@@ -127,7 +127,7 @@ public class PlayerUpdateRequest
     /// New name for the player. If provided, the player will be renamed.
     /// </summary>
     [StringLength(100, MinimumLength = 1, ErrorMessage = "Player name must be between 1 and 100 characters.")]
-    [RegularExpression(@"^[a-zA-Z0-9\s\-_']+$", ErrorMessage = "Player name can only contain letters, numbers, spaces, hyphens, underscores, and apostrophes.")]
+    [RegularExpression(@"^[^\x00-\x1F\x7F]+$", ErrorMessage = "Player name cannot contain control characters.")]
     public string? Name { get; set; }
 
     /// <summary>

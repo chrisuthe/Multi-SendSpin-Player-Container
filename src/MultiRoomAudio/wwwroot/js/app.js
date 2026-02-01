@@ -317,6 +317,11 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Escape string for JavaScript single-quoted string literals in onclick handlers
+function escapeJsString(str) {
+    return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 // Extract simplified USB port identifier from full device path
 // e.g., "...AppleUSB20HubPort@02341200..." -> "Port 4.1.2"
 function extractUsbPort(usbPath) {
@@ -1377,17 +1382,17 @@ async function showPlayerStats(name) {
             The player will restart when you close this dialog to apply changes.
         </p>
         <div class="delay-control d-flex align-items-center gap-2 flex-wrap">
-            <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeHtml(name)}', -10)" title="Decrease by 10ms">
+            <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', -10)" title="Decrease by 10ms">
                 <i class="fas fa-minus"></i>
             </button>
             <div class="input-group input-group-sm" style="max-width: 140px;">
                 <input type="number" class="form-control text-center" id="delayInput"
                     value="${player.delayMs}" min="-5000" max="5000" step="10"
-                    onchange="setDelay('${escapeHtml(name)}', this.value)"
-                    onkeydown="if(event.key==='Enter'){setDelay('${escapeHtml(name)}', this.value); event.preventDefault();}">
+                    onchange="setDelay('${escapeJsString(name)}', this.value)"
+                    onkeydown="if(event.key==='Enter'){setDelay('${escapeJsString(name)}', this.value); event.preventDefault();}">
                 <span class="input-group-text">ms</span>
             </div>
-            <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeHtml(name)}', 10)" title="Increase by 10ms">
+            <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', 10)" title="Increase by 10ms">
                 <i class="fas fa-plus"></i>
             </button>
             <small class="text-muted">Range: -5000 to +5000ms</small>
@@ -1438,10 +1443,10 @@ function renderPlayers() {
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <h5 class="card-title mb-0">${escapeHtml(player.name)}</h5>
                             <div class="d-flex">
-                                <button class="btn btn-sm btn-outline-info me-1" onclick="showPlayerStats('${escapeHtml(name)}')" title="Player Details">
+                                <button class="btn btn-sm btn-outline-info me-1" onclick="showPlayerStats('${escapeJsString(name)}')" title="Player Details">
                                     <i class="fas fa-info-circle"></i>
                                 </button>
-                                <button class="btn btn-sm btn-outline-secondary me-1" onclick="openStatsForNerds('${escapeHtml(name)}')" title="Stats for Nerds">
+                                <button class="btn btn-sm btn-outline-secondary me-1" onclick="openStatsForNerds('${escapeJsString(name)}')" title="Stats for Nerds">
                                     <i class="fas fa-terminal"></i>
                                 </button>
                                 <div class="dropdown">
@@ -1449,11 +1454,11 @@ function renderPlayers() {
                                         <i class="fas fa-ellipsis-v"></i>
                                     </button>
                                     <ul class="dropdown-menu">
-                                        <li><a class="dropdown-item" href="#" onclick="openEditPlayerModal('${escapeHtml(name)}'); return false;"><i class="fas fa-edit me-2"></i>Edit</a></li>
-                                        <li><a class="dropdown-item" href="#" onclick="restartPlayer('${escapeHtml(name)}'); return false;"><i class="fas fa-sync me-2"></i>Restart</a></li>
-                                        <li><a class="dropdown-item" href="#" onclick="stopPlayer('${escapeHtml(name)}'); return false;"><i class="fas fa-stop me-2"></i>Stop</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="openEditPlayerModal('${escapeJsString(name)}'); return false;"><i class="fas fa-edit me-2"></i>Edit</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="restartPlayer('${escapeJsString(name)}'); return false;"><i class="fas fa-sync me-2"></i>Restart</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="stopPlayer('${escapeJsString(name)}'); return false;"><i class="fas fa-stop me-2"></i>Stop</a></li>
                                         <li><hr class="dropdown-divider"></li>
-                                        <li><a class="dropdown-item text-danger" href="#" onclick="deletePlayer('${escapeHtml(name)}'); return false;"><i class="fas fa-trash me-2"></i>Delete</a></li>
+                                        <li><a class="dropdown-item text-danger" href="#" onclick="deletePlayer('${escapeJsString(name)}'); return false;"><i class="fas fa-trash me-2"></i>Delete</a></li>
                                     </ul>
                                 </div>
                             </div>
@@ -1480,13 +1485,13 @@ function renderPlayers() {
                             </div>
                             <div class="d-flex align-items-center">
                                 <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100" value="${player.volume}"
-                                    onchange="setVolume('${escapeHtml(name)}', this.value)"
+                                    onchange="setVolume('${escapeJsString(name)}', this.value)"
                                     oninput="this.nextElementSibling.textContent = this.value + '%'">
                                 <span class="volume-display ms-2 small">${player.volume}%</span>
                                 <button class="btn card-mute-toggle ms-2"
                                         title="${getPlayerMuteDisplayState(player).label}"
                                         aria-label="${getPlayerMuteDisplayState(player).label}"
-                                        onclick="togglePlayerMute('${escapeHtml(name)}')">
+                                        onclick="togglePlayerMute('${escapeJsString(name)}')">
                                     <i class="fas ${getPlayerMuteDisplayState(player).icon} ${getPlayerMuteDisplayState(player).iconClass}"></i>
                                 </button>
                             </div>
@@ -2230,7 +2235,7 @@ function renderSinks() {
                             <div class="btn-group btn-group-sm">
                                 <button class="btn btn-outline-primary"
                                         id="sink-test-btn-${escapeHtml(name)}"
-                                        onclick="playTestToneForSink('${escapeHtml(name)}')"
+                                        onclick="playTestToneForSink('${escapeJsString(name)}')"
                                         title="Play test tone"
                                         ${!isLoaded ? 'disabled' : ''}>
                                     <i class="fas fa-volume-up"></i>
@@ -2240,12 +2245,12 @@ function renderSinks() {
                                         <i class="fas fa-ellipsis-v"></i>
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
-                                        <li><a class="dropdown-item" href="#" onclick="editSink('${escapeHtml(name)}'); return false;">
+                                        <li><a class="dropdown-item" href="#" onclick="editSink('${escapeJsString(name)}'); return false;">
                                             <i class="fas fa-edit me-2"></i>Edit</a></li>
-                                        <li><a class="dropdown-item" href="#" onclick="reloadSink('${escapeHtml(name)}'); return false;">
+                                        <li><a class="dropdown-item" href="#" onclick="reloadSink('${escapeJsString(name)}'); return false;">
                                             <i class="fas fa-sync me-2"></i>Reload</a></li>
                                         <li><hr class="dropdown-divider"></li>
-                                        <li><a class="dropdown-item text-danger" href="#" onclick="deleteSink('${escapeHtml(name)}'); return false;">
+                                        <li><a class="dropdown-item text-danger" href="#" onclick="deleteSink('${escapeJsString(name)}'); return false;">
                                             <i class="fas fa-trash me-2"></i>Delete</a></li>
                                     </ul>
                                 </div>
@@ -3135,7 +3140,7 @@ function renderSoundCards() {
                                 <button class="btn card-mute-toggle"
                                         title="${escapeHtml(muteState.label)}"
                                         aria-label="${escapeHtml(muteState.label)}"
-                                        onclick="toggleSoundCardMute('${escapeHtml(card.name)}', ${card.index})">
+                                        onclick="toggleSoundCardMute('${escapeJsString(card.name)}', ${card.index})">
                                     <i class="fas ${muteState.icon} ${muteState.iconClass}"></i>
                                 </button>
                             </div>
@@ -3144,7 +3149,7 @@ function renderSoundCards() {
                                 <select class="form-select form-select-sm"
                                         style="width: auto;"
                                         id="settings-boot-mute-select-${card.index}"
-                                        onchange="setSoundCardBootMute('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                        onchange="setSoundCardBootMute('${escapeJsString(card.name)}', this.value, ${card.index})">
                                     <option value="unset" ${bootPreference === 'unset' ? 'selected' : ''}>Not set</option>
                                     <option value="muted" ${bootPreference === 'muted' ? 'selected' : ''}>Muted</option>
                                     <option value="unmuted" ${bootPreference === 'unmuted' ? 'selected' : ''}>Unmuted</option>
@@ -3160,7 +3165,7 @@ function renderSoundCards() {
                                    value="${card.maxVolume || 100}"
                                    id="settings-max-volume-${card.index}"
                                    oninput="document.getElementById('settings-max-volume-value-${card.index}').textContent = this.value + '%'"
-                                   onchange="setDeviceMaxVolume('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                   onchange="setDeviceMaxVolume('${escapeJsString(card.name)}', this.value, ${card.index})">
                             <span class="text-muted" style="min-width: 45px;" id="settings-max-volume-value-${card.index}">${card.maxVolume || 100}%</span>
                         </div>
                     </div>
@@ -3170,7 +3175,7 @@ function renderSoundCards() {
                                id="settings-device-hidden-${card.index}"
                                ${device?.hidden ? 'checked' : ''}
                                ${deviceId ? '' : 'disabled'}
-                               onchange="toggleDeviceHidden('${escapeHtml(deviceId)}', this.checked, ${card.index})">
+                               onchange="toggleDeviceHidden('${escapeJsString(deviceId)}', this.checked, ${card.index})">
                         <label class="form-check-label small" for="settings-device-hidden-${card.index}">
                             Hide from player and sink creation
                         </label>
@@ -3181,7 +3186,7 @@ function renderSoundCards() {
                             <label class="form-label small text-muted mb-1">Audio Profile</label>
                             <select class="form-select"
                                     id="settings-profile-select-${card.index}"
-                                    onchange="setSoundCardProfile('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                    onchange="setSoundCardProfile('${escapeJsString(card.name)}', this.value, ${card.index})">
                                 ${profileOptions}
                             </select>
                         </div>
