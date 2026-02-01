@@ -1422,16 +1422,16 @@ async function showPlayerStats(name) {
     // Fetch receiving format if player is playing (one-time fetch, not in audio hot path)
     if (isPlaying) {
         try {
-            const response = await fetch(`/api/players/${encodeURIComponent(name)}/stats`);
+            const response = await fetch(`./api/players/${encodeURIComponent(name)}/stats`);
             if (response.ok) {
                 const stats = await response.json();
                 const receivingEl = document.getElementById('receivingFormat');
-                if (receivingEl && stats.inputFormat) {
-                    const fmt = stats.inputFormat;
+                if (receivingEl && stats.audioFormat) {
+                    const fmt = stats.audioFormat;
                     // Format: "FLAC 48kHz 1411kbps"
-                    const codec = fmt.codec || 'Unknown';
-                    const sampleRate = fmt.sampleRate ? formatSampleRate(fmt.sampleRate) : '';
-                    const bitrate = fmt.bitrate ? `${Math.round(fmt.bitrate / 1000)}kbps` : '';
+                    const codec = fmt.inputFormat || 'Unknown';
+                    const sampleRate = fmt.inputSampleRate ? formatSampleRate(fmt.inputSampleRate) : '';
+                    const bitrate = fmt.inputBitrate || '';
                     receivingEl.textContent = [codec, sampleRate, bitrate].filter(Boolean).join(' ');
                 } else if (receivingEl) {
                     receivingEl.textContent = '—';
