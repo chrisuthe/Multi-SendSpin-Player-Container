@@ -120,6 +120,15 @@ h1, h2, h3, h4, h5, h6 {
     color: #fff;
 }
 
+.header-gradient .btn-outline-light:focus,
+.header-gradient .btn-outline-light:active,
+.header-gradient .btn-outline-light.show {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #fff;
+    box-shadow: none;
+}
+
 .header-gradient .btn-light {
     background: #fff;
     color: #1e293b;
