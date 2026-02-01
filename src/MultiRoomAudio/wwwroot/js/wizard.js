@@ -5,13 +5,13 @@
 // It guides users through device discovery, identification, naming, and player creation.
 
 // Sanitize a string to be a valid player name
-// Player names can only contain: alphanumeric, spaces, hyphens, underscores, apostrophes
+// Player names can contain any printable characters except control characters
 // This matches the backend validation in PlayerManagerService.ValidatePlayerName()
 function sanitizePlayerName(name) {
     if (!name) return '';
 
-    // Remove any characters that aren't alphanumeric, space, hyphen, underscore, or apostrophe
-    let sanitized = name.replace(/[^a-zA-Z0-9\s\-_']/g, '');
+    // Remove only control characters (allow international characters, symbols, etc.)
+    let sanitized = name.replace(/[\x00-\x1F\x7F]/g, '');
 
     // Collapse multiple spaces into one
     sanitized = sanitized.replace(/\s+/g, ' ').trim();
@@ -414,7 +414,7 @@ const Wizard = {
                             <label class="form-label small text-muted mb-1">Audio Profile</label>
                             <select class="form-select"
                                     id="profile-select-${card.index}"
-                                    onchange="Wizard.setCardProfile('${escapeHtml(card.name)}', this.value, ${card.index})">
+                                    onchange="Wizard.setCardProfile('${escapeJsString(card.name)}', this.value, ${card.index})">
                                 ${profileOptions}
                             </select>
                         </div>
@@ -555,18 +555,18 @@ const Wizard = {
                                        id="alias-${escapeHtml(device.id)}"
                                        value="${escapeHtml(alias)}"
                                        ${isHidden ? 'disabled' : ''}
-                                       onchange="Wizard.setAlias('${escapeHtml(device.id)}', this.value)">
+                                       onchange="Wizard.setAlias('${escapeJsString(device.id)}', this.value)">
                             </div>
                         </div>
                         <div class="btn-group-vertical">
                             <button class="btn btn-outline-primary btn-sm"
-                                    onclick="Wizard.playTestTone('${escapeHtml(device.id)}')"
+                                    onclick="Wizard.playTestTone('${escapeJsString(device.id)}')"
                                     id="tone-btn-${escapeHtml(device.id)}"
                                     ${isHidden ? 'disabled' : ''}>
                                 <i class="fas fa-volume-up me-1"></i>Test
                             </button>
                             <button class="btn ${isHidden ? 'btn-secondary' : 'btn-outline-secondary'} btn-sm"
-                                    onclick="Wizard.toggleHidden('${escapeHtml(device.id)}')"
+                                    onclick="Wizard.toggleHidden('${escapeJsString(device.id)}')"
                                     id="hide-btn-${escapeHtml(device.id)}">
                                 <i class="fas fa-${isHidden ? 'eye' : 'eye-slash'} me-1"></i>${isHidden ? 'Show' : 'Hide'}
                             </button>
@@ -646,12 +646,12 @@ const Wizard = {
                     <div class="btn-group btn-group-sm">
                         <button class="btn btn-outline-primary"
                                 id="sink-tone-btn-${escapeHtml(sink.name)}"
-                                onclick="Wizard.playTestToneForSink('${escapeHtml(sink.name)}')"
+                                onclick="Wizard.playTestToneForSink('${escapeJsString(sink.name)}')"
                                 title="Play test tone">
                             <i class="fas fa-volume-up"></i>
                         </button>
                         <button class="btn btn-outline-danger"
-                                onclick="Wizard.removeCustomSink('${escapeHtml(sink.id)}')">
+                                onclick="Wizard.removeCustomSink('${escapeJsString(sink.id)}')">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -1063,7 +1063,7 @@ const Wizard = {
                     <small class="text-muted d-block">${escapeHtml(sink.description || '')}</small>
                 </div>
                 <button class="btn btn-outline-danger btn-sm"
-                        onclick="Wizard.removeCustomSink('${escapeHtml(sink.id)}')"
+                        onclick="Wizard.removeCustomSink('${escapeJsString(sink.id)}')"
                         title="Remove this sink">
                     <i class="fas fa-trash"></i>
                 </button>
