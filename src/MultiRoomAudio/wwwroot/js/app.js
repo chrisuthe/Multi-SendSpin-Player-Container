@@ -1341,9 +1341,26 @@ async function showPlayerStats(name) {
     modal.removeEventListener('hidden.bs.modal', handlePlayerStatsModalClose);
     modal.addEventListener('hidden.bs.modal', handlePlayerStatsModalClose);
 
-    // Determine Device vs Sink label
-    const isCustomSink = player.device?.startsWith('combined_') || player.device?.startsWith('remapped_');
+    // Determine Device vs Sink label based on sinkType
+    const device = devices.find(d => d.id === player.device);
+    const isCustomSink = device?.sinkType != null;
     const deviceLabel = isCustomSink ? 'Sink' : 'Device';
+
+    // Format device/sink display value - show ID with alias/description if available
+    let deviceDisplayValue;
+    if (!player.device) {
+        deviceDisplayValue = 'Default';
+    } else if (device) {
+        if (isCustomSink) {
+            // Custom sink: show "sinkName (description)" or just "sinkName"
+            deviceDisplayValue = device.alias ? `${device.name} (${device.alias})` : device.name;
+        } else {
+            // Hardware device: show "description (alias)" or just "description"
+            deviceDisplayValue = device.alias ? `${device.name} (${device.alias})` : device.name;
+        }
+    } else {
+        deviceDisplayValue = player.device;  // Fallback to raw ID
+    }
 
     // Server display - three fields
     const serverName = player.serverName || '—';
@@ -1356,8 +1373,7 @@ async function showPlayerStats(name) {
     const advertisedDisplay = isAllFormats ? 'All Formats' : advertised;
     const advertisedSubtitle = isAllFormats ? '<br><small class="text-muted">flac • pcm • opus, up to 192kHz</small>' : '';
 
-    // Output format - lookup device from global devices array
-    const device = devices.find(d => d.id === player.device);
+    // Output format - use device already looked up above
     const outputFormat = device
         ? `${formatSampleRate(device.defaultSampleRate)} ${device.bitDepth || 32}-bit float`
         : 'Unknown';
@@ -1371,7 +1387,7 @@ async function showPlayerStats(name) {
                 <h6 class="text-muted text-uppercase small">Configuration</h6>
                 <table class="table table-sm">
                     <tr><td><strong>Name</strong></td><td>${escapeHtml(player.name)}</td></tr>
-                    <tr><td><strong>${deviceLabel}</strong></td><td>${escapeHtml(getDeviceDisplayName(player.device))}</td></tr>
+                    <tr><td><strong>${deviceLabel}</strong></td><td>${escapeHtml(deviceDisplayValue)}</td></tr>
                     <tr><td><strong>Server</strong></td><td>${escapeHtml(serverName)}</td></tr>
                     <tr><td><strong>Address</strong></td><td>${escapeHtml(serverAddress)}</td></tr>
                     <tr><td><strong>Discovery</strong></td><td>${discoveryMethod}</td></tr>
