@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MultiRoomAudio.Models;
 
 // =============================================================================
@@ -14,6 +16,19 @@ namespace MultiRoomAudio.Models;
 // Audio format types: AudioOutputFormat
 // Generic response types: ErrorResponse, SuccessResponse, HealthResponse
 // =============================================================================
+
+/// <summary>
+/// Source of device capability information.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum CapabilitySource
+{
+    /// <summary>Hardware capabilities parsed from ALSA proc filesystem.</summary>
+    Alsa,
+
+    /// <summary>Maximum capabilities inferred from PulseAudio sink configuration.</summary>
+    PulseAudioMax
+}
 
 /// <summary>
 /// Stable device identifiers extracted from PulseAudio properties.
@@ -82,7 +97,8 @@ public record AudioDevice(
     string[]? ChannelMap = null,  // Channel names in device order, e.g., ["front-left", "front-right", "rear-left", ...]
     string? SampleFormat = null,  // PulseAudio sample format, e.g., "s16le", "s24le", "s32le", "float32le"
     int? CardIndex = null,        // ALSA card number this device belongs to (from alsa.card or device.card property, NOT PulseAudio card index)
-    string? SinkType = null       // null for hardware devices, "Combine" or "Remap" for custom sinks
+    string? SinkType = null,      // null for hardware devices, "Combine" or "Remap" for custom sinks
+    CapabilitySource? CapabilitySource = null  // Where capability data came from: Alsa (hardware) or PulseAudioMax (inferred)
 )
 {
     /// <summary>

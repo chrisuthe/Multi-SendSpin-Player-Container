@@ -361,6 +361,18 @@ function formatSampleRate(rate) {
     return rate + 'Hz';
 }
 
+// Format date/time for compact display (e.g., "2/1/26 11:05")
+function formatShortDateTime(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const year = String(d.getFullYear()).slice(-2);
+    const hours = d.getHours();
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    return `${month}/${day}/${year} ${hours}:${mins}`;
+}
+
 /**
  * Format a channel name for display (e.g., "front-left" → "Front L")
  * @param {string} channel - The channel name from PulseAudio
@@ -1329,57 +1341,91 @@ async function showPlayerStats(name) {
     modal.removeEventListener('hidden.bs.modal', handlePlayerStatsModalClose);
     modal.addEventListener('hidden.bs.modal', handlePlayerStatsModalClose);
 
+    // Determine Device vs Sink label based on sinkType
+    const device = devices.find(d => d.id === player.device);
+    const isCustomSink = device?.sinkType != null;
+    const deviceLabel = isCustomSink ? 'Sink' : 'Device';
+
+    // Format device/sink display value - show ID with alias/description if available
+    let deviceDisplayValue;
+    if (!player.device) {
+        deviceDisplayValue = 'Default';
+    } else if (device) {
+        if (isCustomSink) {
+            // Custom sink: show "sinkName (description)" or just "sinkName"
+            deviceDisplayValue = device.alias ? `${device.name} (${device.alias})` : device.name;
+        } else {
+            // Hardware device: show "description (alias)" or just "description"
+            deviceDisplayValue = device.alias ? `${device.name} (${device.alias})` : device.name;
+        }
+    } else {
+        deviceDisplayValue = player.device;  // Fallback to raw ID
+    }
+
+    // Server display - three fields
+    const serverName = player.serverName || '—';
+    const serverAddress = player.connectedAddress || '—';
+    const discoveryMethod = player.serverUrl ? 'Manual' : 'Auto-discovered';
+
+    // Advertised format display
+    const advertised = player.advertisedFormat || 'flac-48000';
+    const isAllFormats = advertised === 'all';
+    const advertisedDisplay = isAllFormats ? 'All Formats' : advertised;
+    const advertisedSubtitle = isAllFormats ? '<br><small class="text-muted">flac • pcm • opus, up to 192kHz</small>' : '';
+
+    // Output format - use device already looked up above
+    const outputFormat = device
+        ? `${formatSampleRate(device.defaultSampleRate)} ${device.bitDepth || 32}-bit float`
+        : 'Unknown';
+
+    // Check if player is playing to show receiving format
+    const isPlaying = player.state === 'Playing' || player.state === 'Buffering';
+
     body.innerHTML = `
         <div class="row">
             <div class="col-md-6">
                 <h6 class="text-muted text-uppercase small">Configuration</h6>
                 <table class="table table-sm">
                     <tr><td><strong>Name</strong></td><td>${escapeHtml(player.name)}</td></tr>
-                    <tr><td><strong>Device</strong></td><td>${escapeHtml(getDeviceDisplayName(player.device))}</td></tr>
-                    <tr><td><strong>Client ID</strong></td><td><code>${escapeHtml(player.clientId)}</code></td></tr>
-                    <tr><td><strong>Server</strong></td><td>${escapeHtml(player.serverUrl || 'Auto-discovered')}</td></tr>
-                    <tr><td><strong>Volume</strong></td><td>${player.volume}%</td></tr>
+                    <tr><td><strong>${deviceLabel}</strong></td><td>${escapeHtml(deviceDisplayValue)}</td></tr>
+                    <tr><td><strong>Server</strong></td><td>${escapeHtml(serverName)}</td></tr>
+                    <tr><td><strong>Address</strong></td><td>${escapeHtml(serverAddress)}</td></tr>
+                    <tr><td><strong>Discovery</strong></td><td>${discoveryMethod}</td></tr>
+                    <tr><td><strong>Advertised</strong></td><td>${escapeHtml(advertisedDisplay)}${advertisedSubtitle}</td></tr>
+                    ${isPlaying ? `<tr><td><strong>Receiving</strong></td><td id="receivingFormat"><span class="text-muted">Loading...</span></td></tr>` : ''}
+                    <tr><td><strong>Output</strong></td><td>${escapeHtml(outputFormat)}</td></tr>
                 </table>
             </div>
             <div class="col-md-6">
                 <h6 class="text-muted text-uppercase small">Status</h6>
                 <table class="table table-sm">
                     <tr><td><strong>State</strong></td><td><span class="badge bg-${getStateBadgeClass(player.state)}">${getStateDisplayName(player)}</span></td></tr>
-                    <tr><td><strong>Clock Synced</strong></td><td>${player.isClockSynced ? '<i class="fas fa-check text-success"></i> Yes' : '<i class="fas fa-times text-danger"></i> No'}</td></tr>
+                    <tr><td><strong>Clock Synced</strong></td><td>${player.isClockSynced ? '<i class="fas fa-check text-success"></i> Yes' : '— No'}</td></tr>
                     <tr><td><strong>Muted</strong></td><td>${player.isMuted ? 'Yes' : 'No'}</td></tr>
-                    <tr><td><strong>Output Latency</strong></td><td>${player.outputLatencyMs}ms</td></tr>
-                    <tr><td><strong>Created</strong></td><td>${new Date(player.createdAt).toLocaleString()}</td></tr>
-                    ${player.connectedAt ? `<tr><td><strong>Connected</strong></td><td>${new Date(player.connectedAt).toLocaleString()}</td></tr>` : ''}
+                    <tr><td><strong>Latency</strong></td><td>${player.outputLatencyMs}ms</td></tr>
+                    <tr><td><strong>Created</strong></td><td>${formatShortDateTime(player.createdAt)}</td></tr>
+                    ${player.connectedAt ? `<tr><td><strong>Connected</strong></td><td>${formatShortDateTime(player.connectedAt)}</td></tr>` : ''}
                     ${player.errorMessage ? `<tr><td><strong>Error</strong></td><td class="text-danger">${escapeHtml(player.errorMessage)}</td></tr>` : ''}
                 </table>
             </div>
         </div>
-        <div class="row mt-3">
-            <div class="col-md-6">
-                <h6 class="text-muted text-uppercase small">Audio Output</h6>
-                <table class="table table-sm">
-                    <tr><td><strong>Format</strong></td><td>FLOAT32 (32-bit)</td></tr>
-                    <tr><td><strong>Conversion</strong></td><td>PulseAudio (native)</td></tr>
-                    <tr><td><strong>Latency</strong></td><td>${player.outputLatencyMs}ms</td></tr>
-                </table>
-            </div>
-            <div class="col-md-6">
-                <h6 class="text-muted text-uppercase small">Device Capabilities</h6>
-                ${player.deviceCapabilities ? `
-                <table class="table table-sm">
-                    <tr><td><strong>Sample Rates</strong></td><td>${player.deviceCapabilities.supportedSampleRates.map(r => formatSampleRate(r)).join(', ')}</td></tr>
-                    <tr><td><strong>Bit Depths</strong></td><td>${player.deviceCapabilities.supportedBitDepths.map(b => b + '-bit').join(', ')}</td></tr>
-                    <tr><td><strong>Max Channels</strong></td><td>${player.deviceCapabilities.maxChannels}</td></tr>
-                </table>
-                ` : '<p class="text-muted small">Capability probing not available</p>'}
+        ${player.currentTrack?.title ? `
+        <div class="now-playing-section mt-3 p-3 bg-dark rounded">
+            <h6 class="text-muted text-uppercase small mb-2"><i class="fas fa-music me-1"></i>Now Playing</h6>
+            <div class="d-flex align-items-center">
+                ${player.currentTrack.artworkUrl ? `<img src="${escapeHtml(player.currentTrack.artworkUrl)}" class="rounded me-3" style="width: 60px; height: 60px; object-fit: cover;" alt="Album art">` : ''}
+                <div>
+                    <div class="fw-semibold">${escapeHtml(player.currentTrack.title)}</div>
+                    ${player.currentTrack.artist ? `<div class="text-muted small">${escapeHtml(player.currentTrack.artist)}</div>` : ''}
+                    ${player.currentTrack.album ? `<div class="text-muted small">${escapeHtml(player.currentTrack.album)}</div>` : ''}
+                </div>
             </div>
         </div>
+        ` : ''}
         <h6 class="text-muted text-uppercase small mt-3">Delay Offset</h6>
         <p class="text-muted small mb-2">
             <i class="fas fa-info-circle me-1"></i>
-            Adjust timing to sync this player with others. Use <strong>positive</strong> values to delay playback
-            (if this speaker plays too early), or <strong>negative</strong> values to advance it (if too late).
-            The player will restart when you close this dialog to apply changes.
+            Adjust timing to sync with others. Changes apply immediately.
         </p>
         <div class="delay-control d-flex align-items-center gap-2 flex-wrap">
             <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', -10)" title="Decrease by 10ms">
@@ -1395,21 +1441,36 @@ async function showPlayerStats(name) {
             <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', 10)" title="Increase by 10ms">
                 <i class="fas fa-plus"></i>
             </button>
-            <small class="text-muted">Range: -5000 to +5000ms</small>
+            <small class="text-muted">Range: ±5000ms</small>
             <span id="delaySavedIndicator" class="text-success small" style="opacity: 0; transition: opacity 0.3s;"><i class="fas fa-check"></i> Saved</span>
         </div>
-        ${player.metrics ? `
-        <h6 class="text-muted text-uppercase small mt-3">Metrics</h6>
-        <div class="d-flex flex-wrap">
-            <span class="metric-badge bg-body-secondary border"><i class="fas fa-database"></i> Buffer: ${player.metrics.bufferLevel}/${player.metrics.bufferCapacity}ms</span>
-            <span class="metric-badge bg-body-secondary border"><i class="fas fa-music"></i> Samples: ${player.metrics.samplesPlayed.toLocaleString()}</span>
-            <span class="metric-badge ${player.metrics.underruns > 0 ? 'bg-warning' : 'bg-body-secondary border'}"><i class="fas fa-exclamation-triangle"></i> Underruns: ${player.metrics.underruns}</span>
-            <span class="metric-badge ${player.metrics.overruns > 0 ? 'bg-warning' : 'bg-body-secondary border'}"><i class="fas fa-level-up-alt"></i> Overruns: ${player.metrics.overruns}</span>
-        </div>
-        ` : ''}
     `;
 
     bootstrap.Modal.getOrCreateInstance(modal).show();
+
+    // Fetch receiving format if player is playing (one-time fetch, not in audio hot path)
+    if (isPlaying) {
+        try {
+            const response = await fetch(`./api/players/${encodeURIComponent(name)}/stats`);
+            if (response.ok) {
+                const stats = await response.json();
+                const receivingEl = document.getElementById('receivingFormat');
+                if (receivingEl && stats.audioFormat) {
+                    const fmt = stats.audioFormat;
+                    // Format: "FLAC 48kHz 1411kbps"
+                    const codec = fmt.inputFormat || 'Unknown';
+                    const sampleRate = fmt.inputSampleRate ? formatSampleRate(fmt.inputSampleRate) : '';
+                    const bitrate = fmt.inputBitrate || '';
+                    receivingEl.textContent = [codec, sampleRate, bitrate].filter(Boolean).join(' ');
+                } else if (receivingEl) {
+                    receivingEl.textContent = '—';
+                }
+            }
+        } catch (e) {
+            const receivingEl = document.getElementById('receivingFormat');
+            if (receivingEl) receivingEl.textContent = '—';
+        }
+    }
 }
 
 // Render players
@@ -1847,6 +1908,15 @@ function renderStatsPanel(stats) {
     // First render: create the full structure with IDs
     if (!statsPanelInitialized) {
         body.innerHTML = `
+            <!-- Identity Section (debug info moved from Player Details) -->
+            <div class="stats-section">
+                <div class="stats-section-header">Identity</div>
+                <div class="stats-row">
+                    <span class="stats-label">Client ID</span>
+                    <span id="stats-client-id" class="stats-value"><code></code></span>
+                </div>
+            </div>
+
             <!-- Audio Format Section -->
             <div class="stats-section">
                 <div class="stats-section-header">Audio Format</div>
@@ -2013,6 +2083,16 @@ function renderStatsPanel(stats) {
     }
 
     // Update values only (no DOM structure changes)
+
+    // Client ID from player object (not from stats API)
+    const player = players[currentStatsPlayer];
+    if (player) {
+        const clientIdEl = document.getElementById('stats-client-id');
+        if (clientIdEl) {
+            clientIdEl.innerHTML = `<code>${escapeHtml(player.clientId)}</code>`;
+        }
+    }
+
     updateStatsValue('stats-input-format', stats.audioFormat.inputFormat);
 
     // Bitrate row - show/hide and update
@@ -3197,6 +3277,40 @@ function renderSoundCards() {
                             Single profile available: ${escapeHtml(activeDesc)}
                         </div>
                     `}
+
+                    ${device?.capabilities ? `
+                        <hr class="my-2" style="border-style: dotted; opacity: 0.3;">
+                        <div class="small">
+                            <div class="text-muted mb-1" style="font-weight: 500;">
+                                Device Capabilities${device.capabilitySource === 'PulseAudioMax' ? ' <span class="badge bg-secondary ms-1" style="font-size: 0.7em;">Max</span>' : ''}
+                            </div>
+                            ${device.capabilitySource === 'PulseAudioMax' ? `
+                                <div class="text-muted mb-2" style="font-size: 0.85em; opacity: 0.8;">
+                                    <i class="fas fa-info-circle me-1"></i>Hardware capabilities inferred from current sink config
+                                </div>
+                            ` : ''}
+                            <div class="d-flex flex-column gap-1">
+                                <div class="d-flex">
+                                    <span class="text-muted" style="min-width: 100px;">Sample Rates</span>
+                                    <span>${device.capabilities.supportedSampleRates?.length > 0
+                                        ? device.capabilities.supportedSampleRates.map(r => formatSampleRate(r)).join(' • ')
+                                        : 'Unknown'}</span>
+                                </div>
+                                <div class="d-flex">
+                                    <span class="text-muted" style="min-width: 100px;">Bit Depths</span>
+                                    <span>${device.capabilities.supportedBitDepths?.length > 0
+                                        ? device.capabilities.supportedBitDepths.map(b => b + '-bit').join(' • ')
+                                        : 'Unknown'}</span>
+                                </div>
+                                <div class="d-flex">
+                                    <span class="text-muted" style="min-width: 100px;">Channels</span>
+                                    <span>${device.capabilities.maxChannels
+                                        ? device.capabilities.maxChannels + (device.capabilities.maxChannels === 2 ? ' (stereo)' : 'ch')
+                                        : 'Unknown'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
                 </div>
             </div>
         `;

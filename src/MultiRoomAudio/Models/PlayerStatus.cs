@@ -27,6 +27,8 @@ public record PlayerResponse(
     string? Device,
     string ClientId,
     string? ServerUrl,
+    string? ServerName,        // Friendly name from MA (e.g., "Music Assistant")
+    string? ConnectedAddress,  // IP:port we connected to (e.g., "192.168.1.50:8095")
     int Volume,
     int StartupVolume,
     bool IsMuted,
@@ -41,7 +43,8 @@ public record PlayerResponse(
     bool IsPendingReconnection = false,
     int? ReconnectionAttempts = null,
     DateTime? NextReconnectionAttempt = null,
-    string? AdvertisedFormat = null
+    string? AdvertisedFormat = null,
+    TrackInfo? CurrentTrack = null
 );
 
 /// <summary>
@@ -53,6 +56,18 @@ public record PlayerMetrics(
     long SamplesPlayed,
     long Underruns,
     long Overruns
+);
+
+/// <summary>
+/// Current track information from Music Assistant.
+/// </summary>
+public record TrackInfo(
+    string? Title,
+    string? Artist,
+    string? Album,
+    string? ArtworkUrl,
+    double? DurationSeconds,
+    double? PositionSeconds
 );
 
 /// <summary>

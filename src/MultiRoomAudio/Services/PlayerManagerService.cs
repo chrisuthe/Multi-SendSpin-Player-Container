@@ -345,6 +345,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         public long SamplesPlayed { get; set; }
         public bool? LastConfirmedMuted { get; set; } // Track last mute state echoed to server
 
+        // Server info captured during connection/handshake
+        public string? ServerName { get; set; }       // Friendly name from MA handshake (server/hello)
+        public string? ConnectedAddress { get; set; } // IP:port we connected to
+
         // Event handler references for proper cleanup (prevents memory leaks)
         public EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateHandler { get; set; }
         public EventHandler<AudioPipelineState>? PipelineStateHandler { get; set; }
@@ -1108,6 +1112,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     Device: config.Device,
                     ClientId: ClientIdGenerator.Generate(name),
                     ServerUrl: config.Server,
+                    ServerName: null,        // Not connected, no server name yet
+                    ConnectedAddress: null,  // Not connected, no address yet
                     Volume: volume,
                     StartupVolume: volume, // For non-running players, startup volume = config volume
                     IsMuted: false,
@@ -1121,7 +1127,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     DeviceCapabilities: null,
                     IsPendingReconnection: isPendingReconnection,
                     ReconnectionAttempts: isPendingReconnection ? reconnectState!.RetryCount : null,
-                    NextReconnectionAttempt: isPendingReconnection ? reconnectState!.NextRetryTime : null
+                    NextReconnectionAttempt: isPendingReconnection ? reconnectState!.NextRetryTime : null,
+                    AdvertisedFormat: config.AdvertisedFormat,
+                    CurrentTrack: null
                 ));
             }
         }
@@ -1703,9 +1711,15 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
             context.State = Models.PlayerState.Connected;
             context.ConnectedAt = DateTime.UtcNow;
+
+            // Capture server info (one-time, not in audio hot path)
+            context.ConnectedAddress = $"{serverUri!.Host}:{serverUri.Port}";
+            context.ServerName = context.Client.ServerName;
+
             _ = BroadcastStatusAsync();
 
-            _logger.LogInformation("Player '{Name}' connected to server", name);
+            _logger.LogInformation("Player '{Name}' connected to server '{ServerName}' at {Address}",
+                name, context.ServerName ?? "unknown", context.ConnectedAddress);
 
             // Push our configured volume to the server (overrides SDK's default volume:100)
             await PushVolumeToServerAsync(name, context);
@@ -2164,6 +2178,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             Device: context.Config.DeviceId,
             ClientId: context.Capabilities.ClientId,
             ServerUrl: context.Config.ServerUrl,
+            ServerName: context.ServerName,
+            ConnectedAddress: context.ConnectedAddress,
             Volume: context.Config.Volume, // Runtime volume (synced with MA)
             StartupVolume: startupVolume,   // Startup volume (from persisted config)
             IsMuted: context.Player.IsMuted,
@@ -2185,7 +2201,26 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             IsPendingReconnection: isPendingReconnection,
             ReconnectionAttempts: isPendingReconnection ? reconnectState!.RetryCount : null,
             NextReconnectionAttempt: isPendingReconnection ? reconnectState!.NextRetryTime : null,
-            AdvertisedFormat: context.Config.AdvertisedFormat
+            AdvertisedFormat: context.Config.AdvertisedFormat,
+            CurrentTrack: GetTrackInfo(context.Client.CurrentGroup?.Metadata)
+        );
+    }
+
+    /// <summary>
+    /// Converts SDK TrackMetadata to our TrackInfo model.
+    /// </summary>
+    private static TrackInfo? GetTrackInfo(Sendspin.SDK.Models.TrackMetadata? metadata)
+    {
+        if (metadata == null || string.IsNullOrEmpty(metadata.Title))
+            return null;
+
+        return new TrackInfo(
+            Title: metadata.Title,
+            Artist: metadata.Artist,
+            Album: metadata.Album,
+            ArtworkUrl: metadata.ArtworkUrl,
+            DurationSeconds: metadata.Duration,
+            PositionSeconds: metadata.Position
         );
     }
 

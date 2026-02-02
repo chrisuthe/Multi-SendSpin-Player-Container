@@ -104,6 +104,7 @@ builder.Services.AddSingleton<LoggingService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<VolumeCommandRunner>();
 builder.Services.AddSingleton<BackendFactory>();
+builder.Services.AddSingleton<AlsaCapabilityService>();
 builder.Services.AddSingleton<DeviceMatchingService>();
 
 // Onboarding services
