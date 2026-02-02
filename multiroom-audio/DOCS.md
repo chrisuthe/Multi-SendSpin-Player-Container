@@ -7,7 +7,7 @@
 
 ### Highlights
 - **aarch64 (ARM64) Support** - Now works on Home Assistant Green, Raspberry Pi 4/5, and other ARM64 devices
-- **SendSpin.SDK 5.2.0** - Major SDK upgrade with improved protocol handling
+- **SendSpin.SDK 6.1.1** - Major SDK upgrade with improved protocol handling
 - **Dual-Volume System** - Separate startup and runtime volume controls for better multi-room sync
 - **Volume Preservation** - Volume now persists across track changes
 - **Boot Mute Control** - Configure sound cards to start muted or unmuted

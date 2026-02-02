@@ -345,6 +345,8 @@ Settings persist across restarts and are applied automatically at startup.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `log_level` | string | `info` | Verbosity: debug, info, warning, error |
+| `relay_serial_port` | device | null | Serial port for Modbus/CH340 relay board |
+| `relay_devices` | list | `[]` | Device paths for HID/FTDI relay boards |
 
 ---
 

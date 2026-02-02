@@ -2,7 +2,7 @@
 
 **One server. Multiple audio outputs. Whole-home audio with Music Assistant.**
 
-> **Version 4.0 is here!** Guided setup wizard, custom sinks for multi-channel DACs, sound card profiles, and more. [See what's new](WHATS_NEW_4.0).
+> **Version 5.0 is here!** 12V trigger relay control, player mute buttons, enhanced reconnection, and more. [See what's new](WHATS_NEW_5.0).
 
 ---
 
@@ -58,7 +58,8 @@ Players appear automatically in Music Assistant via the Sendspin protocol.
 
 | I want to... | Go here |
 |--------------|---------|
-| See what's new in 4.0 | [What's New](WHATS_NEW_4.0) |
+| See what's new in 5.0 | [What's New](WHATS_NEW_5.0) |
+| Control amplifier power | [12V Triggers](12V-TRIGGERS) |
 | Get running in 5 minutes | [Getting Started](GETTING_STARTED) |
 | Use with Home Assistant | [HAOS Add-on Guide](HAOS_ADDON_GUIDE) |
 | Split a multi-channel DAC | [Custom Sinks Guide](CUSTOM_SINKS) |

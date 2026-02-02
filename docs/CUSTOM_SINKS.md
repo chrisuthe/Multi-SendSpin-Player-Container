@@ -131,12 +131,28 @@ Channel Mappings:
   - Output: front-right → Master: rear-right
 ```
 
+### Example: Mono Output
+
+For PA systems, single-speaker zones, or summing stereo to mono:
+
+```
+Name: pa_mono
+Description: PA System (Mono)
+Master Sink: alsa_output.usb-PA_DAC
+Channels: 1
+Channel Mappings:
+  - Output: mono → Master: front-left
+```
+
+This creates a mono sink that takes the left channel from the source. To mix both channels to mono, enable the **Remix** option.
+
 ### Channel Names Reference
 
 Standard PulseAudio channel names:
 
 | Channels | Names |
 |----------|-------|
+| Mono | `mono` |
 | Stereo | `front-left`, `front-right` |
 | Quad | `front-left`, `front-right`, `rear-left`, `rear-right` |
 | 5.1 | `front-left`, `front-right`, `front-center`, `lfe`, `rear-left`, `rear-right` |

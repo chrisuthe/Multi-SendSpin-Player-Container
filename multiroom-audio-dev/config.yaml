@@ -40,8 +40,10 @@ panel_title: Multi-Room Audio (Dev)
 # User-configurable options
 options:
   log_level: info
+  relay_serial_port: null
   relay_devices: []
   mock_hardware: false
+  enable_advanced_formats: false
 
 schema:
   log_level: list(debug|info|warning|error)
@@ -49,6 +51,7 @@ schema:
   relay_devices:
     - str?
   mock_hardware: bool?
+  enable_advanced_formats: bool?
 
 # Watchdog - auto-restart if health check fails
 watchdog: http://[HOST]:[PORT:8096]/api/health

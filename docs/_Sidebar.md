@@ -1,5 +1,6 @@
 **Getting Started**
 * [Home](Home)
+* [What's New in 5.0](WHATS_NEW_5.0)
 * [What's New in 4.0](WHATS_NEW_4.0)
 * [Getting Started](GETTING_STARTED)
 
@@ -7,6 +8,7 @@
 * [HAOS Add-on Guide](HAOS_ADDON_GUIDE)
 
 **Configuration**
+* [12V Triggers](12V-TRIGGERS)
 * [Custom Sinks](CUSTOM_SINKS)
 * [Sound Card Setup](SOUND_CARD_SETUP)
 
