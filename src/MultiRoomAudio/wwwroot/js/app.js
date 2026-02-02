@@ -3265,7 +3265,14 @@ function renderSoundCards() {
                     ${device?.capabilities ? `
                         <hr class="my-2" style="border-style: dotted; opacity: 0.3;">
                         <div class="small">
-                            <div class="text-muted mb-1" style="font-weight: 500;">Device Capabilities</div>
+                            <div class="text-muted mb-1" style="font-weight: 500;">
+                                Device Capabilities${device.capabilitySource === 'PulseAudioMax' ? ' <span class="badge bg-secondary ms-1" style="font-size: 0.7em;">Max</span>' : ''}
+                            </div>
+                            ${device.capabilitySource === 'PulseAudioMax' ? `
+                                <div class="text-muted mb-2" style="font-size: 0.85em; opacity: 0.8;">
+                                    <i class="fas fa-info-circle me-1"></i>Hardware capabilities inferred from current sink config
+                                </div>
+                            ` : ''}
                             <div class="d-flex flex-column gap-1">
                                 <div class="d-flex">
                                     <span class="text-muted" style="min-width: 100px;">Sample Rates</span>
