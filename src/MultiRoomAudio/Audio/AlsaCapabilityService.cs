@@ -75,8 +75,9 @@ public partial class AlsaCapabilityService
         }
 
         // Determine card type and parse accordingly
-        var capabilities = TryParseHdaCodec(cardPath, alsaCardNumber)
-                       ?? TryParseUsbStream(cardPath, alsaCardNumber);
+        // Pass sinkChannels so we use actual channel count from PulseAudio sink
+        var capabilities = TryParseHdaCodec(cardPath, alsaCardNumber, sinkChannels)
+                       ?? TryParseUsbStream(cardPath, alsaCardNumber, sinkChannels);
 
         if (capabilities != null)
         {
@@ -92,7 +93,7 @@ public partial class AlsaCapabilityService
     /// <summary>
     /// Parses HDA codec file for supported rates and bit depths.
     /// </summary>
-    private DeviceCapabilities? TryParseHdaCodec(string cardPath, int cardNumber)
+    private DeviceCapabilities? TryParseHdaCodec(string cardPath, int cardNumber, int sinkChannels)
     {
         var codecPath = Path.Combine(cardPath, "codec#0");
         if (!File.Exists(codecPath))
@@ -143,7 +144,7 @@ public partial class AlsaCapabilityService
             return new DeviceCapabilities(
                 SupportedSampleRates: sortedRates.Length > 0 ? sortedRates : [48000],
                 SupportedBitDepths: sortedBits.Length > 0 ? sortedBits : [16],
-                MaxChannels: 2, // HDA is typically stereo
+                MaxChannels: sinkChannels,  // Use actual channel count from PulseAudio sink
                 PreferredSampleRate: sortedRates.Length > 0 ? sortedRates[^1] : 48000,
                 PreferredBitDepth: sortedBits.Length > 0 ? sortedBits[^1] : 16
             );
@@ -158,7 +159,7 @@ public partial class AlsaCapabilityService
     /// <summary>
     /// Parses USB stream file for supported rates and formats.
     /// </summary>
-    private DeviceCapabilities? TryParseUsbStream(string cardPath, int cardNumber)
+    private DeviceCapabilities? TryParseUsbStream(string cardPath, int cardNumber, int sinkChannels)
     {
         var streamPath = Path.Combine(cardPath, "stream0");
         if (!File.Exists(streamPath))
@@ -207,7 +208,7 @@ public partial class AlsaCapabilityService
             return new DeviceCapabilities(
                 SupportedSampleRates: sortedRates.Length > 0 ? sortedRates : [48000],
                 SupportedBitDepths: sortedBits.Length > 0 ? sortedBits : [16],
-                MaxChannels: 2, // USB DACs are typically stereo
+                MaxChannels: sinkChannels,  // Use actual channel count from PulseAudio sink
                 PreferredSampleRate: sortedRates.Length > 0 ? sortedRates[^1] : 48000,
                 PreferredBitDepth: sortedBits.Length > 0 ? sortedBits[^1] : 16
             );
