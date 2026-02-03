@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-60fb34e
+## Development Build: sha-443ce9b
 
 **Current Dev Build Changes** (recent)
 
+- Fix audio clock to return Unix epoch microseconds
 - Fix audio clock crash when called from PulseAudio callback thread
 - segfault crash fix woops
 - Add audio hardware clock support for VM-resilient sync timing
@@ -14,7 +15,6 @@
 - docs: Add Docker dev builds guide and improve compose files
 - Add /proc/asound mount for device capability detection
 - docs: Add 5.0 release documentation and fix config options
-- Merge pull request #139 from scyto/upstream-player-details-refactor
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
