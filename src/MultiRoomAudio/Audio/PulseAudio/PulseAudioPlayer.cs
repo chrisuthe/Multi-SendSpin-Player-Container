@@ -103,14 +103,14 @@ public class PulseAudioPlayer : IAudioPlayer
     private DateTime _playbackStartTime;
     private bool _hasLoggedFirstAudio;
 
-    // Audio clock: Unix epoch microseconds when playback started.
+    // Audio clock: Unix epoch microseconds when playback started (captured at uncork time).
     // Used to convert pa_stream_get_time() (relative) to absolute Unix time.
     private long _playbackStartUnixMicroseconds;
 
-    // Stream time offset: accumulated time while stream was corked (paused).
-    // pa_stream_get_time() counts from stream creation, not from uncork.
-    // We capture this at Play() time and subtract it to get actual playback time.
-    private long _streamTimeOffsetMicroseconds;
+    // Stream time captured immediately after uncork.
+    // Subtracted from subsequent readings to get time since actual playback start.
+    // This handles any non-zero stream time that exists right after uncork.
+    private long _streamTimeAtUncorkMicroseconds;
 
     public AudioPlayerState State { get; private set; } = AudioPlayerState.Uninitialized;
 
@@ -170,7 +170,7 @@ public class PulseAudioPlayer : IAudioPlayer
         IntPtr mainloop;
         IntPtr stream;
         long startTimeUs;
-        long streamTimeOffset;
+        long streamTimeAtUncork;
 
         lock (_lock)
         {
@@ -184,7 +184,7 @@ public class PulseAudioPlayer : IAudioPlayer
             mainloop = _mainloop;
             stream = _stream;
             startTimeUs = _playbackStartUnixMicroseconds;
-            streamTimeOffset = _streamTimeOffsetMicroseconds;
+            streamTimeAtUncork = _streamTimeAtUncorkMicroseconds;
         }
 
         // Check if we're already on the PulseAudio mainloop thread (i.e., called from a callback).
@@ -201,13 +201,11 @@ public class PulseAudioPlayer : IAudioPlayer
         {
             // StreamGetTime returns 0 on success, negative on error.
             // The returned value is μs since stream started (relative time).
-            // We add the Unix epoch start time and subtract the offset to convert to absolute time.
             if (StreamGetTime(stream, out var streamTimeUs) == 0)
             {
-                // Return Unix epoch microseconds: start_time + (stream_position - offset)
-                // The offset is the "dead time" accumulated while the stream was corked.
-                // Subtracting it gives us time since actual playback started.
-                return startTimeUs + (long)streamTimeUs - streamTimeOffset;
+                // Return Unix epoch microseconds: baseline + (current_stream_time - stream_time_at_uncork)
+                // This gives us elapsed time since playback actually started, converted to absolute time.
+                return startTimeUs + (long)streamTimeUs - streamTimeAtUncork;
             }
 
             // Timing info not available (PA_ERR_NODATA)
@@ -490,34 +488,38 @@ public class PulseAudioPlayer : IAudioPlayer
             _hasLoggedFirstAudio = false;
             _playbackStartTime = DateTime.UtcNow;
 
-            // Capture Unix epoch time for audio clock conversion.
-            // pa_stream_get_time() returns μs since stream start; we add this base
-            // to convert to Unix epoch μs (what the SDK expects).
-            _playbackStartUnixMicroseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
-
-            // Capture stream time offset and uncork the stream.
-            // pa_stream_get_time() counts from stream creation, not from uncork.
-            // By capturing the current stream time before uncorking, we can subtract
-            // this "dead time" to get actual playback time since audio started flowing.
+            // Uncork the stream and capture timing baseline IMMEDIATELY after.
+            // CRITICAL: Both Unix time and stream time must be captured right after uncork
+            // to establish an accurate baseline for audio clock synchronization.
             ThreadedMainloopLock(_mainloop);
             try
             {
-                // Capture stream time offset (time accumulated while corked)
-                if (StreamGetTime(_stream, out var initialStreamTime) == 0)
+                // Uncork the stream to start/resume playback.
+                // Stream is connected with StartCorked flag, so we must uncork to begin.
+                StreamCork(_stream, 0, IntPtr.Zero, IntPtr.Zero);
+
+                // Capture Unix epoch time immediately after uncork.
+                // This is our baseline for converting stream time to absolute time.
+                _playbackStartUnixMicroseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
+
+                // Capture stream time immediately after uncork.
+                // pa_stream_get_time() may or may not reset on uncork depending on PulseAudio version.
+                // By capturing this value now and subtracting it from future readings,
+                // we measure time elapsed since playback actually started.
+                if (StreamGetTime(_stream, out var streamTimeAtUncork) == 0)
                 {
-                    _streamTimeOffsetMicroseconds = (long)initialStreamTime;
-                    _logger.LogDebug("Stream time offset at Play(): {Offset}μs ({OffsetMs:F1}ms)",
-                        _streamTimeOffsetMicroseconds, _streamTimeOffsetMicroseconds / 1000.0);
+                    _streamTimeAtUncorkMicroseconds = (long)streamTimeAtUncork;
+                    _logger.LogDebug("Audio clock baseline captured: Unix={UnixMs}ms, StreamTime={StreamTimeUs}μs ({StreamTimeMs:F1}ms)",
+                        _playbackStartUnixMicroseconds / 1000,
+                        _streamTimeAtUncorkMicroseconds,
+                        _streamTimeAtUncorkMicroseconds / 1000.0);
                 }
                 else
                 {
-                    _streamTimeOffsetMicroseconds = 0;
+                    _streamTimeAtUncorkMicroseconds = 0;
+                    _logger.LogDebug("Audio clock baseline captured: Unix={UnixMs}ms, StreamTime=unavailable",
+                        _playbackStartUnixMicroseconds / 1000);
                 }
-
-                // Uncork the stream to start/resume playback.
-                // Stream is connected with StartCorked flag, so we must uncork to begin.
-                // This also handles resume from pause (re-uncorking is safe).
-                StreamCork(_stream, 0, IntPtr.Zero, IntPtr.Zero);
             }
             finally
             {
