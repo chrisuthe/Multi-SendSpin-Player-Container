@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-1b29aa8
+## Development Build: sha-5c15fcf
 
 **Current Dev Build Changes** (recent)
 
+- Add audio hardware clock support for VM-resilient sync timing
 - Merge pull request #140 from scyto/bug/docs-revisions
 - Remove async from importSink (nothing is async) add logging via SDK 6.2.0-preview2
 - Bump SDK to Attempt Monotonic Timer Fix
@@ -14,7 +15,6 @@
 - Merge pull request #139 from scyto/upstream-player-details-refactor
 - Fix ALSA capability service to use actual channel count
 - Fix Player Details to show Sink vs Device label correctly
-- Add ALSA capability service for hardware capabilities
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
