@@ -16,6 +16,7 @@ public static class LogsEndpoint
     /// <list type="bullet">
     /// <item>GET /api/logs - Query logs with filtering (level, category, search, date range)</item>
     /// <item>GET /api/logs/stats - Get log statistics by level and category</item>
+    /// <item>GET /api/logs/download - Download all logs as a text file</item>
     /// <item>DELETE /api/logs - Clear all logs from memory and files</item>
     /// </list>
     /// </remarks>
@@ -100,6 +101,71 @@ public static class LogsEndpoint
         })
         .WithName("GetLogStats")
         .WithDescription("Get log statistics by level and category");
+
+        // GET /api/logs/download - Download all logs as text file
+        group.MapGet("/download", (
+            string? level,
+            string? category,
+            string? search,
+            DateTime? start,
+            DateTime? end,
+            LoggingService loggingService,
+            HttpContext context) =>
+        {
+            // Parse level filter
+            LogLevel? minLevel = null;
+            if (!string.IsNullOrEmpty(level))
+            {
+                if (Enum.TryParse<LogLevel>(level, ignoreCase: true, out var parsedLevel))
+                {
+                    minLevel = parsedLevel;
+                }
+            }
+
+            // Parse category filter
+            LogCategory? logCategory = null;
+            if (!string.IsNullOrEmpty(category))
+            {
+                if (Enum.TryParse<LogCategory>(category, ignoreCase: true, out var parsedCategory))
+                {
+                    logCategory = parsedCategory;
+                }
+            }
+
+            // Get all matching entries (no pagination limit)
+            var options = new LogQueryOptions(
+                MinLevel: minLevel,
+                Category: logCategory,
+                SearchText: search,
+                StartTime: start,
+                EndTime: end,
+                Skip: 0,
+                Take: int.MaxValue,
+                NewestFirst: false // Oldest first for log file
+            );
+
+            var entries = loggingService.GetEntries(options);
+
+            // Build text content in same format as frontend: timestamp|level|category|message[|exception]
+            var content = string.Join("\n", entries.Select(e =>
+            {
+                var dto = e.ToDto();
+                var line = $"{dto.Timestamp}|{dto.Level}|{dto.Category}|{dto.Message}";
+                if (!string.IsNullOrEmpty(dto.Exception))
+                {
+                    line += $"|{dto.Exception}";
+                }
+                return line;
+            }));
+
+            // Set response headers for file download
+            var filename = $"multiroom-audio-logs-{DateTime.UtcNow:yyyy-MM-dd}.txt";
+            context.Response.Headers.ContentDisposition = $"attachment; filename=\"{filename}\"";
+
+            return Results.Text(content, "text/plain");
+        })
+        .WithName("DownloadLogs")
+        .WithDescription("Download all logs as a text file with optional filtering");
 
         // DELETE /api/logs - Clear all logs
         group.MapDelete("/", (LoggingService loggingService) =>

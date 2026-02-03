@@ -3829,17 +3829,18 @@ async function clearLogs() {
 
 // Download logs as text file
 function downloadLogs() {
-    const content = logsData.map(e =>
-        `${e.timestamp}|${e.level}|${e.category}|${e.message}${e.exception ? '|' + e.exception : ''}`
-    ).join('\n');
+    // Build query string with current filters
+    const level = document.getElementById('logLevelFilter').value;
+    const category = document.getElementById('logCategoryFilter').value;
+    const search = document.getElementById('logSearchInput').value;
 
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `multiroom-audio-logs-${new Date().toISOString().slice(0,10)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const params = new URLSearchParams();
+    if (level) params.append('level', level);
+    if (category) params.append('category', category);
+    if (search) params.append('search', search);
+
+    // Trigger download via browser (server handles file generation)
+    window.location.href = `./api/logs/download?${params}`;
 }
 
 // ============================================
