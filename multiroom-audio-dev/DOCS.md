@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-20825c0
+## Development Build: sha-b32b2c0
 
 **Current Dev Build Changes** (recent)
 
+- Bump SendSpin.SDK to 6.3.5 to fix timer jump warnings
 - Add SDK version and server time to Stats for Nerds
 - Woops, SDK Fix.
 - Use smoothed sync error in Stats for Nerds display
@@ -14,7 +15,6 @@
 - Bump Sendspin.SDK to 6.3.2 for timing source visibility
 - Add server-side log download endpoint to export all logs
 - Bump Sendspin.SDK to 6.3.1 for sync correction logging
-- Fix audio clock to return Unix epoch microseconds
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
