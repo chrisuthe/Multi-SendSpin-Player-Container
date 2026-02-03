@@ -2185,8 +2185,9 @@ function renderStatsPanel(stats) {
         hardwareRow.style.display = 'none';
     }
 
-    // Sync Status
-    updateStatsValueWithClass('stats-sync-error', formatMs(stats.sync.syncErrorMs), getSyncErrorClass(stats.sync.syncErrorMs));
+    // Sync Status - use smoothed error (what actually drives corrections)
+    const smoothedSyncErrorMs = stats.diagnostics.smoothedSyncErrorUs / 1000;
+    updateStatsValueWithClass('stats-sync-error', formatMs(smoothedSyncErrorMs), getSyncErrorClass(smoothedSyncErrorMs));
     updateStatsValueWithClass('stats-sync-status',
         stats.sync.isWithinTolerance ? 'Within tolerance' : 'Correcting',
         stats.sync.isWithinTolerance ? 'good' : 'warning');
@@ -2341,7 +2342,9 @@ function updateHeroSection(stats) {
     if (!indicator || !label) return;
 
     // Determine overall health based on key metrics
-    const syncError = Math.abs(stats.sync.syncErrorMs);
+    // Use smoothed sync error (what actually drives corrections)
+    const smoothedSyncMs = stats.diagnostics.smoothedSyncErrorUs / 1000;
+    const syncError = Math.abs(smoothedSyncMs);
     const isPlaying = stats.sync.isPlaybackActive;
     const isSynced = stats.clockSync.isSynchronized;
     const hasUnderruns = stats.buffer.underruns > 0;
@@ -2364,7 +2367,7 @@ function updateHeroSection(stats) {
     } else if (syncError > 50) {
         health = 'bad';
         healthLabel = 'Out of Sync';
-        healthDetail = `Sync error: ${formatMs(stats.sync.syncErrorMs)}`;
+        healthDetail = `Sync error: ${formatMs(smoothedSyncMs)}`;
     } else if (hasOverflow) {
         health = 'bad';
         healthLabel = 'Overflow';
@@ -2380,7 +2383,7 @@ function updateHeroSection(stats) {
     } else if (syncError > 15) {
         health = 'warning';
         healthLabel = 'Drifting';
-        healthDetail = `Sync error: ${formatMs(stats.sync.syncErrorMs)}`;
+        healthDetail = `Sync error: ${formatMs(smoothedSyncMs)}`;
     } else if (timingSource === 'wall-clock') {
         health = 'warning';
         healthLabel = 'Degraded';
@@ -2395,8 +2398,8 @@ function updateHeroSection(stats) {
 
     // Update quick metrics
     if (heroSync) {
-        heroSync.textContent = formatMs(stats.sync.syncErrorMs);
-        heroSync.className = 'stats-hero-metric-value ' + getSyncErrorClass(stats.sync.syncErrorMs);
+        heroSync.textContent = formatMs(smoothedSyncMs);
+        heroSync.className = 'stats-hero-metric-value ' + getSyncErrorClass(smoothedSyncMs);
     }
     if (heroBuffer) {
         heroBuffer.textContent = `${stats.buffer.bufferedMs}ms`;
