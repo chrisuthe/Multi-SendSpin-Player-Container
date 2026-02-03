@@ -385,13 +385,11 @@ h1, h2, h3, h4, h5, h6 {
 .status-running, .status-playing, .status-connected {
     background-color: var(--accent-success);
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
-    animation: pulse-success 2s infinite;
 }
 
 .status-buffering {
     background-color: var(--accent-warning);
     box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
-    animation: pulse-warning 1s infinite;
 }
 
 .status-stopped, .status-error {
@@ -402,22 +400,6 @@ h1, h2, h3, h4, h5, h6 {
 .status-starting, .status-connecting {
     background-color: var(--accent-primary);
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-    animation: pulse-primary 1s infinite;
-}
-
-@keyframes pulse-success {
-    0%, 100% { box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2); }
-    50% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.1); }
-}
-
-@keyframes pulse-warning {
-    0%, 100% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2); }
-    50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.1); }
-}
-
-@keyframes pulse-primary {
-    0%, 100% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
-    50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.1); }
 }
 
 .status-container {
@@ -693,23 +675,16 @@ h1, h2, h3, h4, h5, h6 {
 .stats-hero-indicator.warning {
     background: var(--accent-warning);
     box-shadow: 0 0 8px rgba(255, 193, 7, 0.4);
-    animation: pulse-hero 2s infinite;
 }
 
 .stats-hero-indicator.bad {
     background: var(--accent-danger);
     box-shadow: 0 0 8px rgba(220, 53, 69, 0.5);
-    animation: pulse-hero 1s infinite;
 }
 
 .stats-hero-indicator.idle {
     background: var(--bs-secondary-color);
     box-shadow: none;
-}
-
-@keyframes pulse-hero {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
 }
 
 .stats-hero-text {
@@ -804,16 +779,10 @@ h1, h2, h3, h4, h5, h6 {
 
 .sync-dot.syncing {
     background: var(--accent-warning);
-    animation: pulse-sync 1s infinite;
 }
 
 .sync-dot.not-synced {
     background: var(--accent-danger);
-}
-
-@keyframes pulse-sync {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
 }
 
 /* ============================================

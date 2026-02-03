@@ -485,6 +485,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Set up SignalR connection immediately (available before startup completes)
     setupSignalR();
 
+    // Stop all polling when tab is hidden to reduce VM scheduling pressure
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            // Stop stats polling
+            if (statsInterval) {
+                clearTimeout(statsInterval);
+                statsInterval = null;
+            }
+            // Stop home page polling
+            if (pollTimer) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+            }
+        } else {
+            // Resume appropriate polling when tab becomes visible
+            const statsModal = document.getElementById('statsForNerdsModal');
+            if (statsModal && statsModal.classList.contains('show') && currentStatsPlayer) {
+                // Stats modal is open - resume stats polling
+                fetchAndRenderStats().then(() => {
+                    if (currentStatsPlayer) {
+                        statsInterval = setTimeout(function pollStats() {
+                            fetchAndRenderStats().then(() => {
+                                if (currentStatsPlayer) {
+                                    statsInterval = setTimeout(pollStats, 2000);
+                                }
+                            });
+                        }, 2000);
+                    }
+                });
+            } else {
+                // No modal open - resume home page polling
+                schedulePoll();
+            }
+        }
+    });
+
     // Check startup progress first — show overlay if backend is still initializing
     try {
         const startupResponse = await fetch('./api/startup');
@@ -1846,7 +1882,7 @@ function openStatsForNerds(playerName) {
         if (!currentStatsPlayer) return;
         await fetchAndRenderStats();
         if (currentStatsPlayer) {
-            statsInterval = setTimeout(pollStats, 500);
+            statsInterval = setTimeout(pollStats, 2000);
         }
     }
     pollStats();
