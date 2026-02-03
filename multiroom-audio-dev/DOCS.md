@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-5e07e5e
+## Development Build: sha-440fced
 
 **Current Dev Build Changes** (recent)
 
+- Woops, SDK Fix.
+- Use smoothed sync error in Stats for Nerds display
+- Reduce UI polling frequency to minimize VM scheduling impact
+- Add hero section and timing source to Stats for Nerds
+- Add sync architecture documentation
+- Bump Sendspin.SDK to 6.3.2 for timing source visibility
 - Add server-side log download endpoint to export all logs
 - Bump Sendspin.SDK to 6.3.1 for sync correction logging
 - Fix audio clock to return Unix epoch microseconds
 - Fix audio clock crash when called from PulseAudio callback thread
-- segfault crash fix woops
-- Add audio hardware clock support for VM-resilient sync timing
-- Merge pull request #140 from scyto/bug/docs-revisions
-- Remove async from importSink (nothing is async) add logging via SDK 6.2.0-preview2
-- Bump SDK to Attempt Monotonic Timer Fix
-- docs: Add Docker dev builds guide and improve compose files
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
