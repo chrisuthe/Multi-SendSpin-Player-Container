@@ -174,9 +174,16 @@ public class PulseAudioPlayer : IAudioPlayer
             stream = _stream;
         }
 
-        // Now safe to use the captured handles - they were valid when we checked
-        // and CleanupResources() acquires _lock before clearing them.
-        ThreadedMainloopLock(mainloop);
+        // Check if we're already on the PulseAudio mainloop thread (i.e., called from a callback).
+        // If so, we must NOT call ThreadedMainloopLock() - the callback already holds the lock
+        // implicitly, and trying to lock again causes PulseAudio to abort with an assertion.
+        var inCallbackThread = ThreadedMainloopInThread(mainloop) != 0;
+
+        if (!inCallbackThread)
+        {
+            ThreadedMainloopLock(mainloop);
+        }
+
         try
         {
             // StreamGetTime returns 0 on success, negative on error
@@ -190,7 +197,10 @@ public class PulseAudioPlayer : IAudioPlayer
         }
         finally
         {
-            ThreadedMainloopUnlock(mainloop);
+            if (!inCallbackThread)
+            {
+                ThreadedMainloopUnlock(mainloop);
+            }
         }
     }
 

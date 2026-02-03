@@ -345,6 +345,17 @@ internal static class PulseAudioNative
     [DllImport(LibPulse, EntryPoint = "pa_threaded_mainloop_get_api")]
     public static extern IntPtr ThreadedMainloopGetApi(IntPtr m);
 
+    /// <summary>
+    /// Check if the current thread is the mainloop thread.
+    /// </summary>
+    /// <returns>Non-zero if called from within the mainloop thread, zero otherwise.</returns>
+    /// <remarks>
+    /// Use this to avoid calling pa_threaded_mainloop_lock() from within callbacks,
+    /// which would cause an assertion failure (deadlock prevention).
+    /// </remarks>
+    [DllImport(LibPulse, EntryPoint = "pa_threaded_mainloop_in_thread")]
+    public static extern int ThreadedMainloopInThread(IntPtr m);
+
     #endregion
 
     #region Async API - Context
