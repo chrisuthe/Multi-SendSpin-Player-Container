@@ -699,9 +699,31 @@ function setupSignalR() {
     });
 
     connection.start()
-        .then(() => {
+        .then(async () => {
             statusBadge.textContent = 'Connected';
             statusBadge.className = 'badge bg-success me-2';
+
+            // Re-fetch startup status in case we missed SignalR broadcasts during connection
+            // (startup phases may have completed before SignalR was connected)
+            if (!startupComplete) {
+                try {
+                    const response = await fetch('./api/startup');
+                    if (response.ok) {
+                        const progress = await response.json();
+                        renderStartupProgress(progress);
+                        if (progress.complete) {
+                            startupComplete = true;
+                            refreshStatus(true);
+                            refreshDevices();
+                            if (typeof Wizard !== 'undefined') {
+                                Wizard.shouldShow().then(shouldShow => {
+                                    if (shouldShow) Wizard.show();
+                                });
+                            }
+                        }
+                    }
+                } catch { /* ignore - will retry via polling */ }
+            }
         })
         .catch(err => {
             console.log('SignalR connection failed, using polling:', err);
