@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-9c41cf1
+## Development Build: sha-35b17e8
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #147 from scyto/bug/usb-unplug-deadlock-upstream
+- Fix deadlock when USB audio device is unplugged
 - Merge pull request #143 from scyto/feature/sync-thresholds
 - Merge pull request #146 from scyto/bug/onboarding-lock-recursion-upstream
 - Fix lock recursion error when skipping/completing onboarding
@@ -13,8 +15,6 @@
 - Increase sync correction threshold from 15ms to 30ms
 - Increase PA write buffer to 128ms for VM compatibility
 - Fix audio clock baseline capture timing
-- Fix audio clock offset causing players to be ahead of other players
-- Bump SendSpin.SDK to 6.3.5 to fix timer jump warnings
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
