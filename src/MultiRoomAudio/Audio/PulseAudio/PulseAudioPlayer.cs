@@ -66,9 +66,11 @@ public class PulseAudioPlayer : IAudioPlayer
     private const int InitialLatencyEstimateMs = 70;
 
     /// <summary>
-    /// Frames to request per write. At 48kHz, 1024 frames = ~21ms.
+    /// Frames to request per write. At 48kHz, 6144 frames = ~128ms.
+    /// This accommodates large PA requests in VM environments where
+    /// callbacks may be delayed and PA compensates by requesting more data.
     /// </summary>
-    private const int FramesPerWrite = 1024;
+    private const int FramesPerWrite = 6144;
 
     /// <summary>
     /// Connection timeout in milliseconds.
@@ -786,9 +788,12 @@ public class PulseAudioPlayer : IAudioPlayer
         var bytesPerSample = sizeof(float);
         var samplesRequested = bytesRequested / bytesPerSample;
 
-        // Cap request to our pre-allocated buffer size
+        // Warn if PA requests more than our buffer (shouldn't happen with larger buffer)
         if (samplesRequested > sampleBuffer.Length)
         {
+            _logger.LogWarning(
+                "PA requested {Requested} samples but buffer is {BufferSize}. Capping request.",
+                samplesRequested, sampleBuffer.Length);
             samplesRequested = sampleBuffer.Length;
         }
 
