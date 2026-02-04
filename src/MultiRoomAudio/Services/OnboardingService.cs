@@ -87,13 +87,13 @@ public class OnboardingService : YamlFileService<OnboardingState>
             Logger.LogInformation(
                 "Onboarding completed: {DeviceCount} devices configured, {PlayerCount} players created",
                 devicesConfigured, playersCreated);
-
-            Save();
         }
         finally
         {
             Lock.ExitWriteLock();
         }
+
+        Save();
     }
 
     /// <summary>
@@ -112,12 +112,13 @@ public class OnboardingService : YamlFileService<OnboardingState>
             Data.AppVersion = null;
 
             Logger.LogInformation("Onboarding state reset");
-            Save();
         }
         finally
         {
             Lock.ExitWriteLock();
         }
+
+        Save();
     }
 
     /// <summary>
@@ -136,12 +137,13 @@ public class OnboardingService : YamlFileService<OnboardingState>
             Data.AppVersion = GetAppVersion();
 
             Logger.LogInformation("Onboarding skipped");
-            Save();
         }
         finally
         {
             Lock.ExitWriteLock();
         }
+
+        Save();
     }
 
     /// <summary>
