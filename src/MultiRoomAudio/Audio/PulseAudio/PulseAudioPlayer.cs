@@ -682,8 +682,19 @@ public class PulseAudioPlayer : IAudioPlayer
                 _logger.LogDebug("PulseAudio stream disconnected (expected): {State}. Sink: {Sink}",
                     state, _sinkName ?? "default");
             else
+            {
                 _logger.LogWarning("PulseAudio stream disconnected: {State}. Error: {Error}. Sink: {Sink}",
                     state, errorMsg, _sinkName ?? "default");
+
+                // Fire error event so PlayerManagerService can auto-stop the player.
+                // This handles device removal (USB unplug) - with DontMove flag, PA fails the
+                // stream instead of moving it to a fallback sink.
+                // IMPORTANT: Must dispatch off the PA thread - this callback runs with the
+                // mainloop lock held, and the error handler will try to stop the player
+                // which needs to acquire the same lock, causing a deadlock.
+                var error = $"Audio device lost: {errorMsg}";
+                ThreadPool.QueueUserWorkItem(_ => OnError(error));
+            }
         }
     }
 
