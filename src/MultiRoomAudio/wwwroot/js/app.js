@@ -3473,6 +3473,17 @@ function renderSoundCards() {
                         </label>
                     </div>
 
+                    <div class="form-check mb-2" id="settings-hid-buttons-container-${card.index}">
+                        <input class="form-check-input" type="checkbox"
+                               id="settings-hid-buttons-${card.index}"
+                               disabled
+                               onchange="toggleHidButtons('${escapeJsString(deviceId)}', this.checked, ${card.index})">
+                        <label class="form-check-label small" for="settings-hid-buttons-${card.index}">
+                            Enable hardware volume/mute buttons (may not work with all devices)
+                        </label>
+                        <span id="settings-hid-buttons-status-${card.index}" class="text-muted small ms-1"></span>
+                    </div>
+
                     ${hasMultipleProfiles ? `
                         <div class="mb-2">
                             <label class="form-label small text-muted mb-1">Audio Profile</label>
@@ -3529,6 +3540,22 @@ function renderSoundCards() {
     }).join('');
 
     container.innerHTML = cardsHtml;
+
+    // Check HID button availability for each card
+    soundCards.forEach(card => {
+        const cardBase = card.name.replace('alsa_card.', '');
+        const device = soundCardDevices.find(d => d.id && d.id.includes(cardBase));
+        const hidContainer = document.getElementById(`settings-hid-buttons-container-${card.index}`);
+
+        if (device?.id) {
+            checkHidButtonStatus(device.id, card.index);
+        } else {
+            // No matching device found (e.g., card profile is "off") - hide HID option
+            if (hidContainer) {
+                hidContainer.style.display = 'none';
+            }
+        }
+    });
 }
 
 function getCardMuteDisplayState(card) {
@@ -3719,6 +3746,100 @@ async function toggleDeviceHidden(deviceId, hidden, cardIndex) {
         showAlert(error.message, 'danger');
         // Revert checkbox on error
         checkbox.checked = !hidden;
+    } finally {
+        checkbox.disabled = false;
+    }
+}
+
+// Check HID button status for a device
+async function checkHidButtonStatus(deviceId, cardIndex) {
+    const checkbox = document.getElementById(`settings-hid-buttons-${cardIndex}`);
+    const statusSpan = document.getElementById(`settings-hid-buttons-status-${cardIndex}`);
+    const container = document.getElementById(`settings-hid-buttons-container-${cardIndex}`);
+
+    if (!deviceId || !checkbox) {
+        if (container) container.style.display = 'none';
+        return;
+    }
+
+    try {
+        const response = await fetch(`./api/devices/${encodeURIComponent(deviceId)}/hid-status`);
+        if (!response.ok) {
+            if (container) container.style.display = 'none';
+            return;
+        }
+
+        const status = await response.json();
+
+        if (!status.hidButtonsAvailable) {
+            // No HID buttons available - hide the option
+            if (container) container.style.display = 'none';
+            return;
+        }
+
+        // HID buttons are available
+        if (container) container.style.display = '';
+        checkbox.disabled = false;
+        checkbox.checked = status.hidButtonsEnabled;
+
+        if (statusSpan) {
+            if (status.hidButtonsEnabled && status.inputDevicePath) {
+                statusSpan.textContent = '(active)';
+                statusSpan.className = 'text-success small ms-1';
+            } else {
+                statusSpan.textContent = '';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to check HID button status:', error);
+        if (container) container.style.display = 'none';
+    }
+}
+
+// Toggle HID button support for a device
+async function toggleHidButtons(deviceId, enabled, cardIndex) {
+    const checkbox = document.getElementById(`settings-hid-buttons-${cardIndex}`);
+    const statusSpan = document.getElementById(`settings-hid-buttons-status-${cardIndex}`);
+
+    if (!checkbox || !deviceId) return;
+
+    checkbox.disabled = true;
+    if (statusSpan) {
+        statusSpan.textContent = enabled ? '(enabling...)' : '(disabling...)';
+        statusSpan.className = 'text-muted small ms-1';
+    }
+
+    try {
+        const response = await fetch(`./api/devices/${encodeURIComponent(deviceId)}/hid-buttons`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to toggle HID buttons');
+        }
+
+        checkbox.checked = result.hidButtonsEnabled;
+
+        if (statusSpan) {
+            if (result.hidButtonsEnabled) {
+                statusSpan.textContent = '(active)';
+                statusSpan.className = 'text-success small ms-1';
+            } else {
+                statusSpan.textContent = '';
+            }
+        }
+
+        showAlert(result.message, result.success ? 'success' : 'warning', 3000);
+    } catch (error) {
+        console.error('Failed to toggle HID buttons:', error);
+        showAlert(error.message, 'danger');
+        // Revert checkbox on error
+        checkbox.checked = !enabled;
+        if (statusSpan) statusSpan.textContent = '';
     } finally {
         checkbox.disabled = false;
     }

@@ -165,6 +165,13 @@ builder.Services.AddSingleton<CustomSinksService>();
 builder.Services.AddSingleton<PlayerManagerService>();
 builder.Services.AddSingleton<TriggerService>();
 
+// HID button support for hardware volume/mute controls
+builder.Services.AddSingleton<HidInputDeviceDetector>();
+builder.Services.AddSingleton<PaSinkEventService>();
+builder.Services.AddSingleton<HidButtonService>();
+// PaSinkEventService runs as a background service (pactl subscribe)
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PaSinkEventService>());
+
 // Startup progress tracking (broadcasts phase changes to web clients via SignalR)
 builder.Services.AddSingleton<StartupProgressService>();
 

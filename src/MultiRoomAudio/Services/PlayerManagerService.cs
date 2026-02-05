@@ -33,6 +33,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private readonly VolumeCommandRunner _volumeRunner;
     private readonly BackendFactory _backendFactory;
     private readonly TriggerService _triggerService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ConcurrentDictionary<string, PlayerContext> _players = new();
     private readonly MdnsServerDiscovery _serverDiscovery;
     private bool _disposed;
@@ -344,6 +345,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         public int InitialVolume { get; init; } // Store initial volume to detect resets
         public long SamplesPlayed { get; set; }
         public bool? LastConfirmedMuted { get; set; } // Track last mute state echoed to server
+        public DateTime? LastMuteChangeAt { get; set; } // Track when we last changed mute (for grace period)
 
         // Server info captured during connection/handshake
         public string? ServerName { get; set; }       // Friendly name from MA handshake (server/hello)
@@ -394,7 +396,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         IHubContext<PlayerStatusHub> hubContext,
         VolumeCommandRunner volumeRunner,
         BackendFactory backendFactory,
-        TriggerService triggerService)
+        TriggerService triggerService,
+        IServiceProvider serviceProvider)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -404,6 +407,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _volumeRunner = volumeRunner;
         _backendFactory = backendFactory;
         _triggerService = triggerService;
+        _serviceProvider = serviceProvider;
         _serverDiscovery = new MdnsServerDiscovery(
             loggerFactory.CreateLogger<MdnsServerDiscovery>());
     }
@@ -958,6 +962,14 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             _logger.LogInformation("Delay offset for '{Name}': {DelayMs}ms", name, delayMs);
         }
 
+        // Start HID button reader if enabled for this device
+        var deviceId = context.Config.DeviceId;
+        if (!string.IsNullOrEmpty(deviceId))
+        {
+            var hidService = _serviceProvider.GetService<HidButtonService>();
+            hidService?.StartHidReaderForPlayer(deviceId, name);
+        }
+
         // Start connection in background with proper error handling
         FireAndForget(
             ConnectPlayerWithErrorHandlingAsync(name, context, context.Cts.Token),
@@ -1261,6 +1273,14 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
         context.Pipeline.SetMuted(muted);
         context.Player.IsMuted = muted;
+        context.LastMuteChangeAt = DateTime.UtcNow; // Track for grace period
+
+        // Broadcast to UI immediately via SignalR
+        FireAndForget(async () =>
+        {
+            var players = GetAllPlayers();
+            await _hubContext.BroadcastStatusUpdateAsync(players);
+        }, $"Mute broadcast for '{name}'", _logger);
 
         // Sync mute state to Music Assistant server (bidirectional sync)
         FireAndForget(async () =>
@@ -1283,6 +1303,107 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 context.IsUpdatingFromServer = false;
             }
         }, $"Mute state sync for '{name}'", _logger);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Apply a hardware-initiated volume change (from HID buttons).
+    /// Unlike SetVolumeAsync, this does NOT set the hardware volume (already changed by button press).
+    /// It syncs the new volume to local state, Music Assistant, and broadcasts to clients.
+    /// </summary>
+    /// <param name="name">Player name.</param>
+    /// <param name="volume">New volume percentage (0-100).</param>
+    /// <returns>True if successful, false if player not found.</returns>
+    public Task<bool> ApplyHardwareVolumeChangeAsync(string name, int volume)
+    {
+        if (!_players.TryGetValue(name, out var context))
+            return Task.FromResult(false);
+
+        volume = Math.Clamp(volume, 0, 100);
+        _logger.LogInformation("VOLUME [Hardware] Player '{Name}': {Volume}% (from HID button)", name, volume);
+
+        // 1. Update local config
+        context.Config.Volume = volume;
+
+        // 2. Apply volume locally - player is authoritative for its own volume
+        context.Player.Volume = volume / 100.0f;
+
+        // 3. Inform MA of our volume
+        if (IsPlayerInActiveState(context.State))
+        {
+            FireAndForget(async () =>
+            {
+                try
+                {
+                    context.IsUpdatingFromServer = true;
+                    await context.Client.SetVolumeAsync(volume);
+                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
+                    _logger.LogInformation("VOLUME [Hardware->MA] Player '{Name}': synced {Volume}% to MA",
+                        name, volume);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to sync hardware volume for '{Name}'", name);
+                }
+                finally
+                {
+                    context.IsUpdatingFromServer = false;
+                }
+            }, $"Hardware volume sync for '{name}'", _logger);
+        }
+
+        // 4. Broadcast status update
+        _ = BroadcastStatusAsync();
+
+        // 5. Persist to config
+        _config.UpdatePlayerField(name, cfg => cfg.Volume = volume, save: true);
+
+        return Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// Apply a hardware-initiated mute change (from HID buttons).
+    /// Unlike SetMuted, this is called when hardware mute button is pressed.
+    /// Syncs to local state, Music Assistant, and broadcasts to clients.
+    /// </summary>
+    /// <param name="name">Player name.</param>
+    /// <param name="muted">New mute state.</param>
+    /// <returns>True if successful, false if player not found.</returns>
+    public bool ApplyHardwareMuteChange(string name, bool muted)
+    {
+        if (!_players.TryGetValue(name, out var context))
+            return false;
+
+        _logger.LogInformation("MUTE [Hardware] Player '{Name}': {State} (from HID button)",
+            name, muted ? "muted" : "unmuted");
+
+        context.Pipeline.SetMuted(muted);
+        context.Player.IsMuted = muted;
+
+        // Sync mute state to Music Assistant server
+        FireAndForget(async () =>
+        {
+            try
+            {
+                context.IsUpdatingFromServer = true;
+                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted);
+                context.LastConfirmedMuted = muted;
+                _logger.LogInformation("MUTE [Hardware->MA] Player '{Name}': synced {State} to server",
+                    name, muted ? "muted" : "unmuted");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync hardware mute for '{Name}'", name);
+            }
+            finally
+            {
+                context.IsUpdatingFromServer = false;
+            }
+        }, $"Hardware mute sync for '{name}'", _logger);
+
+        // Broadcast status update
+        _ = BroadcastStatusAsync();
 
         return true;
     }
@@ -1368,6 +1489,14 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
         _logger.LogInformation("Stopping player '{Name}' (user-initiated)", name);
 
+        // Stop HID button reader for this player
+        var deviceId = context.Config.DeviceId;
+        if (!string.IsNullOrEmpty(deviceId))
+        {
+            var hidService = _serviceProvider.GetService<HidButtonService>();
+            hidService?.StopHidReaderForPlayer(deviceId, name);
+        }
+
         try
         {
             context.Cts.Cancel();
@@ -1423,6 +1552,14 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             return false;
 
         _logger.LogInformation("Removing and disposing player '{Name}'", name);
+
+        // Stop HID button reader for this player
+        var deviceId = context.Config.DeviceId;
+        if (!string.IsNullOrEmpty(deviceId))
+        {
+            var hidService = _serviceProvider.GetService<HidButtonService>();
+            hidService?.StopHidReaderForPlayer(deviceId, name);
+        }
 
         try
         {
@@ -2108,6 +2245,21 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             // Handle mute state from server
             if (playerState.Muted != context.Player.IsMuted)
             {
+                // Check if within mute change grace period (500ms)
+                // This prevents MA's stale response from overriding our recent mute change
+                var muteGracePeriod = TimeSpan.FromMilliseconds(500);
+                var isWithinMuteGrace = context.LastMuteChangeAt.HasValue &&
+                    (DateTime.UtcNow - context.LastMuteChangeAt.Value) < muteGracePeriod;
+
+                if (isWithinMuteGrace && playerState.Muted != context.LastConfirmedMuted)
+                {
+                    _logger.LogDebug(
+                        "MUTE [ServerSync] Player '{Name}': ignoring server mute={ServerMuted} " +
+                        "(within grace period, last confirmed={LastConfirmed})",
+                        name, playerState.Muted, context.LastConfirmedMuted);
+                    return;
+                }
+
                 _logger.LogInformation("MUTE [ServerSync] Player '{Name}': {OldState} -> {NewState}",
                     name,
                     context.Player.IsMuted ? "muted" : "unmuted",
