@@ -83,6 +83,12 @@ public class CardProfileService
                     availableProfiles,
                     card.ActiveProfile);
             }
+
+            // Track all cards for persistence (saves new cards with current profile)
+            foreach (var card in cards)
+            {
+                EnsureCardTracked(card);
+            }
         }
 
         var savedProfiles = LoadConfigurations();
@@ -186,12 +192,20 @@ public class CardProfileService
 
     /// <summary>
     /// Gets all available sound cards with their profiles.
+    /// Also tracks any new cards for persistence (handles hot-plug).
     /// </summary>
     public IEnumerable<PulseAudioCard> GetCards()
     {
         var cards = _environment.IsMockHardware
             ? MockCardEnumerator.GetCards().ToList()
             : PulseAudioCardEnumerator.GetCards().ToList();
+
+        // Track any new cards (handles hot-plug scenarios)
+        foreach (var card in cards)
+        {
+            EnsureCardTracked(card);
+        }
+
         var savedProfiles = LoadConfigurations();
 
         return cards.Select(card =>
@@ -317,6 +331,28 @@ public class CardProfileService
     public IReadOnlyDictionary<string, CardProfileConfiguration> GetSavedProfiles()
     {
         return LoadConfigurations();
+    }
+
+    /// <summary>
+    /// Ensures a card is tracked in the configuration.
+    /// Returns true if a NEW card entry was created (not already tracked).
+    /// Tracks the card with its current active profile.
+    /// </summary>
+    public bool EnsureCardTracked(PulseAudioCard card)
+    {
+        var stableKey = ConfigurationService.GenerateCardKey(card);
+        var existingConfigs = LoadConfigurations();
+
+        if (existingConfigs.ContainsKey(stableKey))
+        {
+            // Already tracked
+            return false;
+        }
+
+        // New card - save with current profile
+        _logger.LogInformation("New sound card discovered: {Key} ({CardName})", stableKey, card.Name);
+        SaveProfile(card, card.ActiveProfile);
+        return true;
     }
 
     /// <summary>

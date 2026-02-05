@@ -346,6 +346,7 @@ public class DeviceMatchingService
     /// Get all output devices enriched with their aliases and hidden status.
     /// Includes both hardware devices and custom sinks.
     /// Custom sinks take precedence over raw hardware devices with the same ID to avoid duplicates.
+    /// Also tracks all discovered hardware devices for persistence.
     /// </summary>
     public IEnumerable<AudioDevice> GetEnrichedDevices()
     {
@@ -361,9 +362,33 @@ public class DeviceMatchingService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Get hardware devices, excluding any that are custom sinks (to avoid duplicates)
-        var hardwareDevices = _backend.GetOutputDevices()
+        var rawHardwareDevices = _backend.GetOutputDevices()
             .Where(device => !customSinkIds.Contains(device.Id))
-            .Select(EnrichWithConfig);
+            .ToList();
+
+        // Track all hardware devices with identifiers for persistence
+        // Only save if new devices were discovered (not on every API call)
+        var newDevicesFound = false;
+        foreach (var device in rawHardwareDevices)
+        {
+            if (device.Identifiers != null)
+            {
+                var deviceKey = ConfigurationService.GenerateDeviceKey(device);
+                if (_config.EnsureDeviceTracked(deviceKey, device))
+                {
+                    newDevicesFound = true;
+                }
+            }
+        }
+
+        // Save only when new devices are discovered
+        if (newDevicesFound)
+        {
+            _config.SaveDevices();
+        }
+
+        // Enrich hardware devices with config
+        var hardwareDevices = rawHardwareDevices.Select(EnrichWithConfig);
 
         // Convert custom sinks to AudioDevice format
         var customSinkDevices = loadedCustomSinks

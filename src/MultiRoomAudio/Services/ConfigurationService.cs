@@ -925,6 +925,41 @@ public class ConfigurationService
     }
 
     /// <summary>
+    /// Ensure a device is tracked in the configuration.
+    /// Returns true if a NEW device entry was created (not already tracked).
+    /// </summary>
+    public bool EnsureDeviceTracked(string deviceKey, AudioDevice device)
+    {
+        _lock.EnterWriteLock();
+        try
+        {
+            if (_devices.TryGetValue(deviceKey, out var config))
+            {
+                // Already tracked - just update LastSeen and identifiers
+                config.LastKnownSinkName = device.Id;
+                config.LastSeen = DateTime.UtcNow;
+                config.Identifiers = DeviceIdentifiersConfig.FromModel(device.Identifiers);
+                return false;
+            }
+
+            // New device - create entry
+            _devices[deviceKey] = new DeviceConfiguration
+            {
+                FirstSeen = DateTime.UtcNow,
+                LastSeen = DateTime.UtcNow,
+                LastKnownSinkName = device.Id,
+                Identifiers = DeviceIdentifiersConfig.FromModel(device.Identifiers)
+            };
+            _logger.LogInformation("New device discovered: {DeviceKey} ({SinkName})", deviceKey, device.Id);
+            return true;
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
     /// Get all device aliases as a dictionary of sink name to alias.
     /// </summary>
     public Dictionary<string, string> GetAllDeviceAliases()

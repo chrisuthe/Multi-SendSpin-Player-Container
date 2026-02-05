@@ -429,6 +429,26 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
             _logger.LogInformation("Found {Count} audio output device(s)", devices.Count);
 
+            // Track all devices with identifiers for persistence
+            var newDevicesFound = false;
+            foreach (var device in devices)
+            {
+                if (device.Identifiers != null)
+                {
+                    var deviceKey = ConfigurationService.GenerateDeviceKey(device);
+                    if (_config.EnsureDeviceTracked(deviceKey, device))
+                    {
+                        newDevicesFound = true;
+                    }
+                }
+            }
+
+            // Save once if any new devices were discovered
+            if (newDevicesFound)
+            {
+                _config.SaveDevices();
+            }
+
             // Get device configurations to check for volume limits
             var deviceConfigs = _config.GetAllDeviceConfigurations();
 
