@@ -2242,6 +2242,19 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             {
                 _logger.LogDebug("Grace period cancelled for '{Name}'", name);
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Grace period handler failed for '{Name}', falling back to reconnection queue", name);
+                // Don't leave the player stuck - queue for reconnection as fallback
+                try
+                {
+                    await QueueForDeviceReconnectionAsync(name, context);
+                }
+                catch (Exception innerEx)
+                {
+                    _logger.LogError(innerEx, "Failed to queue '{Name}' for reconnection after grace period failure", name);
+                }
+            }
             finally
             {
                 _deviceLossGracePeriods.TryRemove(name, out _);
