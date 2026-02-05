@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-e61f8ae
+## Development Build: sha-decbe61
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #150 from scyto/feature/remove-default-device-option
+- Remove 'Default Device' option from player device dropdown
 - Merge pull request #149 from scyto/dev
 - Use bus path as primary key for device/card config persistence
 - Merge pull request #148 from scyto/bug/usb-unplug-wrong-device
@@ -13,8 +15,6 @@
 - Fix deadlock when USB audio device is unplugged
 - Merge pull request #143 from scyto/feature/sync-thresholds
 - Merge pull request #146 from scyto/bug/onboarding-lock-recursion-upstream
-- Fix lock recursion error when skipping/completing onboarding
-- Merge pull request #144 from scyto/bug/startup-overlay-race
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
