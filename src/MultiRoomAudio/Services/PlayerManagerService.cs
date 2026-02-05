@@ -1288,6 +1288,107 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Apply a hardware-initiated volume change (from HID buttons).
+    /// Unlike SetVolumeAsync, this does NOT set the hardware volume (already changed by button press).
+    /// It syncs the new volume to local state, Music Assistant, and broadcasts to clients.
+    /// </summary>
+    /// <param name="name">Player name.</param>
+    /// <param name="volume">New volume percentage (0-100).</param>
+    /// <returns>True if successful, false if player not found.</returns>
+    public Task<bool> ApplyHardwareVolumeChangeAsync(string name, int volume)
+    {
+        if (!_players.TryGetValue(name, out var context))
+            return Task.FromResult(false);
+
+        volume = Math.Clamp(volume, 0, 100);
+        _logger.LogInformation("VOLUME [Hardware] Player '{Name}': {Volume}% (from HID button)", name, volume);
+
+        // 1. Update local config
+        context.Config.Volume = volume;
+
+        // 2. Apply volume locally - player is authoritative for its own volume
+        context.Player.Volume = volume / 100.0f;
+
+        // 3. Inform MA of our volume
+        if (IsPlayerInActiveState(context.State))
+        {
+            FireAndForget(async () =>
+            {
+                try
+                {
+                    context.IsUpdatingFromServer = true;
+                    await context.Client.SetVolumeAsync(volume);
+                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
+                    _logger.LogInformation("VOLUME [Hardware->MA] Player '{Name}': synced {Volume}% to MA",
+                        name, volume);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to sync hardware volume for '{Name}'", name);
+                }
+                finally
+                {
+                    context.IsUpdatingFromServer = false;
+                }
+            }, $"Hardware volume sync for '{name}'", _logger);
+        }
+
+        // 4. Broadcast status update
+        _ = BroadcastStatusAsync();
+
+        // 5. Persist to config
+        _config.UpdatePlayerField(name, cfg => cfg.Volume = volume, save: true);
+
+        return Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// Apply a hardware-initiated mute change (from HID buttons).
+    /// Unlike SetMuted, this is called when hardware mute button is pressed.
+    /// Syncs to local state, Music Assistant, and broadcasts to clients.
+    /// </summary>
+    /// <param name="name">Player name.</param>
+    /// <param name="muted">New mute state.</param>
+    /// <returns>True if successful, false if player not found.</returns>
+    public bool ApplyHardwareMuteChange(string name, bool muted)
+    {
+        if (!_players.TryGetValue(name, out var context))
+            return false;
+
+        _logger.LogInformation("MUTE [Hardware] Player '{Name}': {State} (from HID button)",
+            name, muted ? "muted" : "unmuted");
+
+        context.Pipeline.SetMuted(muted);
+        context.Player.IsMuted = muted;
+
+        // Sync mute state to Music Assistant server
+        FireAndForget(async () =>
+        {
+            try
+            {
+                context.IsUpdatingFromServer = true;
+                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted);
+                context.LastConfirmedMuted = muted;
+                _logger.LogInformation("MUTE [Hardware->MA] Player '{Name}': synced {State} to server",
+                    name, muted ? "muted" : "unmuted");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync hardware mute for '{Name}'", name);
+            }
+            finally
+            {
+                context.IsUpdatingFromServer = false;
+            }
+        }, $"Hardware mute sync for '{name}'", _logger);
+
+        // Broadcast status update
+        _ = BroadcastStatusAsync();
+
+        return true;
+    }
+
+    /// <summary>
     /// Sets the delay offset for a player.
     /// This adjusts the playback timing to synchronize with other players.
     /// Positive values delay playback (play later), negative values advance it (play earlier).

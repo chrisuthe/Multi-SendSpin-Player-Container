@@ -343,6 +343,70 @@ public partial class PaModuleRunner : IPaModuleRunner
     }
 
     /// <summary>
+    /// Load module-mmkbd-evdev to capture HID volume/mute button events from an input device.
+    /// This module listens to /dev/input/eventX devices and translates volume/mute key events
+    /// to PulseAudio sink volume/mute changes.
+    /// </summary>
+    /// <param name="inputDevice">Path to input device (e.g., /dev/input/by-id/usb-...-event-if03).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Module index on success, null on failure.</returns>
+    public async Task<int?> LoadMmkbdEvdevAsync(
+        string inputDevice,
+        CancellationToken cancellationToken = default)
+    {
+        // Validate input device path - must be a device path
+        if (string.IsNullOrWhiteSpace(inputDevice))
+        {
+            _logger.LogWarning("Input device path cannot be empty");
+            return null;
+        }
+
+        // Basic validation - must start with /dev/input
+        if (!inputDevice.StartsWith("/dev/input/", StringComparison.Ordinal))
+        {
+            _logger.LogWarning("Invalid input device path: {Path} (must start with /dev/input/)", inputDevice);
+            return null;
+        }
+
+        // Check for dangerous characters
+        if (inputDevice.IndexOfAny(DangerousChars) >= 0)
+        {
+            _logger.LogWarning("Input device path contains invalid characters: {Path}", inputDevice);
+            return null;
+        }
+
+        // Build module arguments
+        var args = new List<string>
+        {
+            "load-module",
+            "module-mmkbd-evdev",
+            $"device={inputDevice}"
+        };
+
+        _logger.LogInformation("Loading module-mmkbd-evdev for input device '{Device}'", inputDevice);
+
+        var result = await RunPactlAsync(args.ToArray(), cancellationToken);
+
+        if (result.ExitCode != 0)
+        {
+            _logger.LogError("Failed to load module-mmkbd-evdev for '{Device}': {Error}", inputDevice, result.Error);
+            return null;
+        }
+
+        // Parse module index from output
+        if (int.TryParse(result.Output.Trim(), out var moduleIndex))
+        {
+            _logger.LogInformation("Successfully loaded module-mmkbd-evdev for '{Device}' with module index {Index}",
+                inputDevice, moduleIndex);
+            return moduleIndex;
+        }
+
+        _logger.LogWarning("Loaded module-mmkbd-evdev for '{Device}' but could not parse module index from: {Output}",
+            inputDevice, result.Output);
+        return null;
+    }
+
+    /// <summary>
     /// Check if a sink with the given name exists in PulseAudio.
     /// </summary>
     /// <param name="sinkName">The sink name to check.</param>

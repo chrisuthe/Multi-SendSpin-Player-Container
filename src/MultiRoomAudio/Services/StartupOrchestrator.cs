@@ -24,6 +24,7 @@ public class StartupOrchestrator : BackgroundService
     private CustomSinksService _customSinks = null!;
     private PlayerManagerService _playerManager = null!;
     private TriggerService _triggers = null!;
+    private HidButtonService _hidButtons = null!;
 
     public StartupOrchestrator(
         ILogger<StartupOrchestrator> logger,
@@ -50,6 +51,7 @@ public class StartupOrchestrator : BackgroundService
         _customSinks = _services.GetRequiredService<CustomSinksService>();
         _playerManager = _services.GetRequiredService<PlayerManagerService>();
         _triggers = _services.GetRequiredService<TriggerService>();
+        _hidButtons = _services.GetRequiredService<HidButtonService>();
 
         _logger.LogInformation("StartupOrchestrator: beginning background initialization...");
 
@@ -69,6 +71,9 @@ public class StartupOrchestrator : BackgroundService
 
             // Phase 5: Initialize 12V trigger relay boards
             await RunPhaseAsync("triggers", () => _triggers.InitializeAsync(stoppingToken), stoppingToken);
+
+            // Phase 6: Initialize HID button support for hardware volume/mute controls
+            await RunPhaseAsync("hidbuttons", () => _hidButtons.InitializeAsync(stoppingToken), stoppingToken);
 
             _logger.LogInformation("StartupOrchestrator: all phases complete");
         }
@@ -107,6 +112,7 @@ public class StartupOrchestrator : BackgroundService
         _logger.LogInformation("StartupOrchestrator: shutting down services...");
 
         // Services may not have been resolved yet if shutdown occurs during early startup
+        if (_hidButtons != null) await _hidButtons.DisposeAsync();
         if (_triggers != null) await _triggers.ShutdownAsync(cancellationToken);
         if (_playerManager != null) await _playerManager.ShutdownAsync(cancellationToken);
         if (_customSinks != null) await _customSinks.ShutdownAsync(cancellationToken);

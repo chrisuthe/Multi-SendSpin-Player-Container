@@ -137,4 +137,24 @@ public class MockPaModuleRunner : IPaModuleRunner
         return Task.FromResult(devices.Any(d =>
             d.Id.Equals(sinkName, StringComparison.OrdinalIgnoreCase)));
     }
+
+    public Task<int?> LoadMmkbdEvdevAsync(
+        string inputDevice,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(inputDevice))
+        {
+            _logger.LogWarning("Mock: Input device path cannot be empty");
+            return Task.FromResult<int?>(null);
+        }
+
+        var moduleIndex = _nextModuleIndex++;
+        var module = new MockModule(moduleIndex, "module-mmkbd-evdev", inputDevice, null);
+        _modules[moduleIndex] = module;
+
+        _logger.LogInformation("Mock: Loaded module-mmkbd-evdev for '{Device}' with module index {Index}",
+            inputDevice, moduleIndex);
+
+        return Task.FromResult<int?>(moduleIndex);
+    }
 }

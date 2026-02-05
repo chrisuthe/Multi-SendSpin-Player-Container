@@ -349,6 +349,69 @@ public static class DevicesEndpoint
         })
         .WithName("SetDeviceMaxVolume")
         .WithDescription("Set the maximum volume limit for a device (applied to PulseAudio sink)");
+
+        // GET /api/devices/{id}/hid-status - Get HID button status for a device
+        group.MapGet("/{id}/hid-status", (
+            string id,
+            BackendFactory backendFactory,
+            HidButtonService hidService,
+            ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("DevicesEndpoint");
+            logger.LogDebug("API: GET /api/devices/{DeviceId}/hid-status", id);
+            return ApiExceptionHandler.Execute(() =>
+            {
+                // Find the device
+                var device = backendFactory.GetDevice(id);
+                if (device == null)
+                    return Results.NotFound(new ErrorResponse(false, $"Device '{id}' not found"));
+
+                var status = hidService.GetHidStatus(device);
+
+                return Results.Ok(status);
+            }, logger, "get HID button status", id);
+        })
+        .WithName("GetHidButtonStatus")
+        .WithDescription("Get HID button status for a device (available, enabled, input device path)");
+
+        // PUT /api/devices/{id}/hid-buttons - Enable/disable HID button support
+        group.MapPut("/{id}/hid-buttons", async (
+            string id,
+            HidButtonEnableRequest request,
+            BackendFactory backendFactory,
+            HidButtonService hidService,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var logger = loggerFactory.CreateLogger("DevicesEndpoint");
+            logger.LogDebug("API: PUT /api/devices/{DeviceId}/hid-buttons enabled={Enabled}", id, request.Enabled);
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
+            {
+                // Find the device
+                var device = backendFactory.GetDevice(id);
+                if (device == null)
+                    return Results.NotFound(new ErrorResponse(false, $"Device '{id}' not found"));
+
+                HidButtonEnableResponse result;
+                if (request.Enabled)
+                {
+                    result = await hidService.EnableHidButtonsAsync(device, ct);
+                }
+                else
+                {
+                    result = await hidService.DisableHidButtonsAsync(device, ct);
+                }
+
+                logger.LogInformation("HID buttons for device {DeviceId}: {State} - {Message}",
+                    id, result.HidButtonsEnabled ? "enabled" : "disabled", result.Message);
+
+                return result.Success
+                    ? Results.Ok(result)
+                    : Results.BadRequest(result);
+            }, logger, "set HID button state", id);
+        })
+        .WithName("SetHidButtonState")
+        .WithDescription("Enable or disable HID button support for a device (hardware volume/mute buttons)");
     }
 }
 
