@@ -344,6 +344,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         public int InitialVolume { get; init; } // Store initial volume to detect resets
         public long SamplesPlayed { get; set; }
         public bool? LastConfirmedMuted { get; set; } // Track last mute state echoed to server
+        public DateTime? LastMuteChangeAt { get; set; } // Track when we last changed mute (for grace period)
 
         // Server info captured during connection/handshake
         public string? ServerName { get; set; }       // Friendly name from MA handshake (server/hello)
@@ -1261,6 +1262,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
         context.Pipeline.SetMuted(muted);
         context.Player.IsMuted = muted;
+        context.LastMuteChangeAt = DateTime.UtcNow; // Track for grace period
 
         // Sync mute state to Music Assistant server (bidirectional sync)
         FireAndForget(async () =>
@@ -2209,6 +2211,21 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             // Handle mute state from server
             if (playerState.Muted != context.Player.IsMuted)
             {
+                // Check if within mute change grace period (500ms)
+                // This prevents MA's stale response from overriding our recent mute change
+                var muteGracePeriod = TimeSpan.FromMilliseconds(500);
+                var isWithinMuteGrace = context.LastMuteChangeAt.HasValue &&
+                    (DateTime.UtcNow - context.LastMuteChangeAt.Value) < muteGracePeriod;
+
+                if (isWithinMuteGrace && playerState.Muted != context.LastConfirmedMuted)
+                {
+                    _logger.LogDebug(
+                        "MUTE [ServerSync] Player '{Name}': ignoring server mute={ServerMuted} " +
+                        "(within grace period, last confirmed={LastConfirmed})",
+                        name, playerState.Muted, context.LastConfirmedMuted);
+                    return;
+                }
+
                 _logger.LogInformation("MUTE [ServerSync] Player '{Name}': {OldState} -> {NewState}",
                     name,
                     context.Player.IsMuted ? "muted" : "unmuted",
