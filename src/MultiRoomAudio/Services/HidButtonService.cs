@@ -104,7 +104,8 @@ public class HidButtonService : IAsyncDisposable
                 var inputDevice = config.HidButtons.LastKnownInputPath;
                 if (string.IsNullOrEmpty(inputDevice))
                 {
-                    inputDevice = _hidDetector.FindInputDevice(busPath, vendorId, productId);
+                    var serial = config.Identifiers?.Serial;
+                    inputDevice = _hidDetector.FindInputDevice(busPath, vendorId, productId, serial);
                 }
 
                 if (!string.IsNullOrEmpty(inputDevice))
@@ -158,7 +159,8 @@ public class HidButtonService : IAsyncDisposable
         var inputDevice = state?.InputDevicePath;
         if (string.IsNullOrEmpty(inputDevice))
         {
-            inputDevice = _hidDetector.FindInputDevice(busPath, vendorId, productId);
+            var serial = device.Identifiers?.Serial;
+            inputDevice = _hidDetector.FindInputDevice(busPath, vendorId, productId, serial);
         }
 
         return new HidButtonStatusResponse(
@@ -186,7 +188,8 @@ public class HidButtonService : IAsyncDisposable
         _logger.LogInformation("Enabling HID buttons for device {SinkName}", sinkName);
 
         // Find HID input device
-        var inputDevice = _hidDetector.FindInputDevice(busPath, vendorId, productId);
+        var serial = device.Identifiers?.Serial;
+        var inputDevice = _hidDetector.FindInputDevice(busPath, vendorId, productId, serial);
         if (string.IsNullOrEmpty(inputDevice))
         {
             _logger.LogWarning("No HID input device found for {SinkName}", sinkName);

@@ -3545,8 +3545,15 @@ function renderSoundCards() {
     soundCards.forEach(card => {
         const cardBase = card.name.replace('alsa_card.', '');
         const device = soundCardDevices.find(d => d.id && d.id.includes(cardBase));
+        const hidContainer = document.getElementById(`settings-hid-buttons-container-${card.index}`);
+
         if (device?.id) {
             checkHidButtonStatus(device.id, card.index);
+        } else {
+            // No matching device found (e.g., card profile is "off") - hide HID option
+            if (hidContainer) {
+                hidContainer.style.display = 'none';
+            }
         }
     });
 }

@@ -53,36 +53,72 @@ public partial class HidInputDeviceDetector
     /// <param name="busPath">The audio device's bus_path from PulseAudio (e.g., pci-0000:07:1b.0-usb-0:2:1.0).</param>
     /// <param name="vendorId">The USB vendor ID (e.g., "0d8c").</param>
     /// <param name="productId">The USB product ID (e.g., "0102").</param>
+    /// <param name="serial">The USB serial number (optional, for fallback matching).</param>
     /// <returns>Path to the input device (e.g., /dev/input/by-id/usb-...-event-if03), or null if not found.</returns>
-    public string? FindInputDevice(string? busPath, string? vendorId, string? productId)
+    public string? FindInputDevice(string? busPath, string? vendorId, string? productId, string? serial = null)
     {
-        if (string.IsNullOrEmpty(busPath))
+        // Must be a USB device (bus_path contains "usb-")
+        if (string.IsNullOrEmpty(busPath) || !busPath.Contains("usb-", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogDebug("No bus_path provided, cannot find HID input device");
+            _logger.LogDebug("Not a USB device or no bus_path provided: {BusPath}", busPath ?? "(null)");
             return null;
         }
 
-        // Extract USB port from audio device bus_path
-        var audioUsbPort = ExtractUsbPortFromBusPath(busPath);
-        if (string.IsNullOrEmpty(audioUsbPort))
+        if (!Directory.Exists(InputByIdPath))
         {
-            _logger.LogDebug("Could not extract USB port from bus_path: {BusPath}", busPath);
+            _logger.LogDebug("Input by-id directory does not exist: {Path}", InputByIdPath);
             return null;
         }
 
-        _logger.LogDebug("Looking for HID input device matching USB port: {UsbPort} (from bus_path: {BusPath})",
-            audioUsbPort, busPath);
+        _logger.LogDebug("Looking for HID input device for USB audio: vendorId={VendorId}, productId={ProductId}, serial={Serial}",
+            vendorId, productId, serial);
 
-        // Method 1: Scan /dev/input/by-id/ for matching devices
-        var inputDevice = FindInputDeviceByIdDirectory(audioUsbPort, vendorId, productId);
-        if (inputDevice != null)
+        try
         {
-            _logger.LogInformation("Found HID input device: {InputDevice} for USB port {UsbPort}",
-                inputDevice, audioUsbPort);
-            return inputDevice;
+            var entries = Directory.GetFiles(InputByIdPath);
+
+            foreach (var entry in entries)
+            {
+                var fileName = Path.GetFileName(entry);
+
+                // Only consider USB event interfaces
+                if (!InputByIdPattern().IsMatch(fileName))
+                    continue;
+
+                var fileNameLower = fileName.ToLowerInvariant();
+
+                // Method 1: Match by vendor ID in filename (most reliable)
+                // e.g., "usb-0d8c_USB_Sound_Device-event-if03" contains "0d8c"
+                if (!string.IsNullOrEmpty(vendorId) &&
+                    fileNameLower.Contains(vendorId.ToLowerInvariant()))
+                {
+                    _logger.LogInformation("Found HID input device by vendor ID: {InputDevice} (vendorId={VendorId})",
+                        entry, vendorId);
+                    return entry;
+                }
+
+                // Method 2: Match by serial in filename
+                // e.g., "usb-Generic_USB2.0_Device_20121120222012-event-if02" contains serial
+                if (!string.IsNullOrEmpty(serial))
+                {
+                    // The serial might be embedded in the filename with underscores replacing special chars
+                    var serialNormalized = serial.Replace(" ", "_").Replace("-", "_");
+                    if (fileNameLower.Contains(serial.ToLowerInvariant()) ||
+                        fileNameLower.Contains(serialNormalized.ToLowerInvariant()))
+                    {
+                        _logger.LogInformation("Found HID input device by serial: {InputDevice} (serial={Serial})",
+                            entry, serial);
+                        return entry;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error scanning {Path}", InputByIdPath);
         }
 
-        _logger.LogDebug("No HID input device found for USB port: {UsbPort}", audioUsbPort);
+        _logger.LogDebug("No HID input device found for vendor={VendorId}, serial={Serial}", vendorId, serial);
         return null;
     }
 
@@ -92,12 +128,14 @@ public partial class HidInputDeviceDetector
     /// <param name="busPath">The audio device's bus_path from PulseAudio.</param>
     /// <param name="vendorId">The USB vendor ID.</param>
     /// <param name="productId">The USB product ID.</param>
+    /// <param name="serial">The USB serial number (optional).</param>
     /// <returns>True if the device has a HID input interface available.</returns>
-    public bool HasHidInterface(string? busPath, string? vendorId, string? productId)
+    public bool HasHidInterface(string? busPath, string? vendorId, string? productId, string? serial = null)
     {
-        return FindInputDevice(busPath, vendorId, productId) != null;
+        return FindInputDevice(busPath, vendorId, productId, serial) != null;
     }
 
+    // Keep for potential future use - extracts USB port from bus_path
     private string? ExtractUsbPortFromBusPath(string busPath)
     {
         // Audio bus_path format: pci-0000:07:1b.0-usb-0:2:1.0
@@ -194,18 +232,40 @@ public partial class HidInputDeviceDetector
                 return false;
             }
 
-            // Read the uevent file or follow device symlink to get USB path
-            var deviceLink = new DirectoryInfo(sysfsDevicePath);
-            var physicalPath = deviceLink.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
-
-            if (physicalPath == null)
+            // Resolve the device symlink to get the physical path
+            // Use Directory.ResolveLinkTarget since 'device' is a symlink to a directory
+            string? physicalPath = null;
+            try
             {
-                // Try reading from the symlink directly
-                physicalPath = sysfsDevicePath;
+                var linkTarget = Directory.ResolveLinkTarget(sysfsDevicePath, returnFinalTarget: true);
+                physicalPath = linkTarget?.FullName;
+            }
+            catch
+            {
+                // Fallback: try to read the symlink manually using readlink
+            }
+
+            if (string.IsNullOrEmpty(physicalPath))
+            {
+                // Last resort: use File.ReadLink or just read the sysfs path itself
+                try
+                {
+                    var linkInfo = new FileInfo(sysfsDevicePath);
+                    if (linkInfo.LinkTarget != null)
+                    {
+                        // LinkTarget might be relative, resolve it
+                        var parentDir = Path.GetDirectoryName(sysfsDevicePath);
+                        physicalPath = Path.GetFullPath(Path.Combine(parentDir ?? "", linkInfo.LinkTarget));
+                    }
+                }
+                catch
+                {
+                    physicalPath = sysfsDevicePath;
+                }
             }
 
             _logger.LogDebug("Checking input device {Input} -> physical path: {PhysicalPath}",
-                inputByIdPath, physicalPath);
+                inputByIdPath, physicalPath ?? "(null)");
 
             // Extract USB port from sysfs path
             var sysfsMatch = SysfsUsbPortPattern().Match(physicalPath);
