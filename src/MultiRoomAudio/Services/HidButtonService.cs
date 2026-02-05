@@ -308,8 +308,9 @@ public class HidButtonService : IAsyncDisposable
 
                 var evt = ParseInputEvent(buffer);
 
-                // Log all key events for debugging (including release)
-                if (evt.Type == LinuxInputConstants.EV_KEY)
+                // Log ALL events for debugging (to diagnose devices with non-standard key codes)
+                // EV_SYN(0) events are too noisy, skip those
+                if (evt.Type != LinuxInputConstants.EV_SYN)
                 {
                     _logger.LogDebug("HID event: type={Type} code={Code} value={Value} (device: {Device})",
                         evt.Type, evt.Code, evt.Value, inputDevice);

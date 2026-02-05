@@ -1275,6 +1275,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.Player.IsMuted = muted;
         context.LastMuteChangeAt = DateTime.UtcNow; // Track for grace period
 
+        // Broadcast to UI immediately via SignalR
+        FireAndForget(async () =>
+        {
+            var players = GetAllPlayers();
+            await _hubContext.BroadcastStatusUpdateAsync(players);
+        }, $"Mute broadcast for '{name}'", _logger);
+
         // Sync mute state to Music Assistant server (bidirectional sync)
         FireAndForget(async () =>
         {
