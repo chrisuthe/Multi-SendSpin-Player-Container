@@ -491,6 +491,55 @@ public class ConfigurationService
     // =========================================================================
 
     /// <summary>
+    /// Migrates old-format device keys (serial-based) to new-format keys (bus path-based).
+    /// Returns true if any keys were migrated.
+    /// </summary>
+    /// <remarks>
+    /// Old format: serial_xxx (based on device serial number)
+    /// New format: path_xxx (based on USB bus path - stable per USB port)
+    /// Bus path is preferred because it handles identical devices (same serial) in different ports.
+    /// </remarks>
+    private bool MigrateDeviceKeys(Dictionary<string, DeviceConfiguration> devices)
+    {
+        var needsMigration = new List<(string oldKey, string newKey, DeviceConfiguration config)>();
+
+        foreach (var (key, config) in devices)
+        {
+            // Check if this is an old-format key (serial-based) that should be migrated
+            if (key.StartsWith("serial_", StringComparison.OrdinalIgnoreCase))
+            {
+                // Check if we have a bus path to migrate to
+                if (!string.IsNullOrEmpty(config.Identifiers?.BusPath))
+                {
+                    var newKey = $"path_{SanitizeKey(config.Identifiers.BusPath)}";
+                    // Only migrate if the new key doesn't already exist
+                    if (!devices.ContainsKey(newKey))
+                    {
+                        needsMigration.Add((key, newKey, config));
+                    }
+                }
+            }
+        }
+
+        if (needsMigration.Count == 0)
+        {
+            return false;
+        }
+
+        // Apply migrations
+        foreach (var (oldKey, newKey, config) in needsMigration)
+        {
+            devices.Remove(oldKey);
+            devices[newKey] = config;
+            _logger.LogInformation("Migrated device key '{OldKey}' to '{NewKey}'", oldKey, newKey);
+        }
+
+        // Save the migrated configuration (outside lock since we're already in LoadDevices which holds the lock)
+        // We'll save after releasing the lock by setting a flag
+        return true;
+    }
+
+    /// <summary>
     /// Load device configurations from YAML file.
     /// </summary>
     public void LoadDevices()
@@ -525,6 +574,7 @@ public class ConfigurationService
         }
 
         // Process the data under write lock
+        var needsSave = false;
         _lock.EnterWriteLock();
         try
         {
@@ -545,6 +595,13 @@ public class ConfigurationService
             var raw = _deserializer.Deserialize<Dictionary<string, DeviceConfiguration>>(yaml);
             _devices = raw ?? new Dictionary<string, DeviceConfiguration>();
 
+            // Migrate old-format keys (serial-based) to new-format keys (bus path-based)
+            needsSave = MigrateDeviceKeys(_devices);
+            if (needsSave)
+            {
+                _logger.LogInformation("Migrated device keys to bus path format");
+            }
+
             _logger.LogInformation("Loaded {DeviceCount} device configurations", _devices.Count);
         }
         catch (Exception ex)
@@ -555,6 +612,12 @@ public class ConfigurationService
         finally
         {
             _lock.ExitWriteLock();
+        }
+
+        // Save migrated configuration outside the lock
+        if (needsSave)
+        {
+            SaveDevices();
         }
     }
 
@@ -760,22 +823,24 @@ public class ConfigurationService
 
     /// <summary>
     /// Generate a stable device key from device identifiers.
-    /// Priority: Serial > BusPath > VendorId+ProductId
+    /// Priority: BusPath > Serial > VendorId+ProductId > SinkName
+    /// Bus path is preferred because it's stable per USB port and avoids collisions
+    /// when multiple identical devices (with same/no serial) are connected.
     /// </summary>
     public static string GenerateDeviceKey(AudioDevice device)
     {
         var id = device.Identifiers;
 
-        // Use serial number if available (most stable)
-        if (!string.IsNullOrEmpty(id?.Serial))
-        {
-            return $"serial_{SanitizeKey(id.Serial)}";
-        }
-
-        // Use bus path if available (stable per USB port)
+        // Use bus path if available (stable per USB port, handles identical devices)
         if (!string.IsNullOrEmpty(id?.BusPath))
         {
             return $"path_{SanitizeKey(id.BusPath)}";
+        }
+
+        // Use serial number if available (may not be unique across identical devices)
+        if (!string.IsNullOrEmpty(id?.Serial))
+        {
+            return $"serial_{SanitizeKey(id.Serial)}";
         }
 
         // Use vendor+product ID combination
@@ -786,6 +851,37 @@ public class ConfigurationService
 
         // Fallback to sink name (least stable)
         return $"sink_{SanitizeKey(device.Id)}";
+    }
+
+    /// <summary>
+    /// Generate a stable card key from card identifiers.
+    /// Priority: BusPath > Serial > VendorId+ProductId > CardName
+    /// Uses same logic as GenerateDeviceKey for consistency between devices.yaml and card-profiles.yaml.
+    /// </summary>
+    public static string GenerateCardKey(PulseAudioCard card)
+    {
+        var id = card.Identifiers;
+
+        // Use bus path if available (stable per USB port, handles identical devices)
+        if (!string.IsNullOrEmpty(id?.BusPath))
+        {
+            return $"path_{SanitizeKey(id.BusPath)}";
+        }
+
+        // Use serial number if available (may not be unique across identical devices)
+        if (!string.IsNullOrEmpty(id?.Serial))
+        {
+            return $"serial_{SanitizeKey(id.Serial)}";
+        }
+
+        // Use vendor+product ID combination
+        if (!string.IsNullOrEmpty(id?.VendorId) && !string.IsNullOrEmpty(id?.ProductId))
+        {
+            return $"usb_{id.VendorId}_{id.ProductId}";
+        }
+
+        // Fallback to card name (least stable, includes enumeration suffix)
+        return $"card_{SanitizeKey(card.Name)}";
     }
 
     /// <summary>

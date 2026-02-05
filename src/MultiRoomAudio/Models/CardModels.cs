@@ -64,6 +64,8 @@ public record PulseAudioCard(
     List<CardProfile> Profiles,
     /// <summary>Currently active profile name.</summary>
     string ActiveProfile,
+    /// <summary>Stable device identifiers (serial, bus path, etc.) for persistent matching.</summary>
+    DeviceIdentifiers? Identifiers = null,
     /// <summary>Whether the card is currently muted (based on sinks).</summary>
     bool? IsMuted = null,
     /// <summary>Boot mute preference if configured.</summary>

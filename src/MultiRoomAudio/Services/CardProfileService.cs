@@ -92,32 +92,32 @@ public class CardProfileService
             _logger.LogInformation("No saved card profiles to restore");
             return;
         }
+
+        // Migrate old-format keys and build lookup by new key format
+        var migratedProfiles = MigrateAndBuildLookup(savedProfiles, cards);
+
         var restoredCount = 0;
         var failedCount = 0;
 
-        foreach (var (cardName, config) in savedProfiles)
+        // Now restore profiles for each current card
+        foreach (var card in cards)
         {
+            var stableKey = ConfigurationService.GenerateCardKey(card);
+
+            if (!migratedProfiles.TryGetValue(stableKey, out var config))
+            {
+                // No saved config for this card
+                continue;
+            }
+
             try
             {
-                // Find the card
-                var card = cards.FirstOrDefault(c =>
-                    c.Name.Equals(cardName, StringComparison.OrdinalIgnoreCase));
-
-                if (card == null)
-                {
-                    _logger.LogWarning(
-                        "Saved profile for card '{CardName}' could not be restored: card not found",
-                        cardName);
-                    failedCount++;
-                    continue;
-                }
-
                 // Check if already at the desired profile
                 if (card.ActiveProfile.Equals(config.ProfileName, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogDebug(
                         "Card '{CardName}' already at profile '{Profile}'",
-                        cardName, config.ProfileName);
+                        card.Name, config.ProfileName);
                     restoredCount++;
                     await ApplyBootMutePreferenceAsync(card, defaultUnmute: false, logBootAction: true);
                     continue;
@@ -131,7 +131,7 @@ public class CardProfileService
                 {
                     _logger.LogWarning(
                         "Saved profile '{Profile}' for card '{CardName}' not found",
-                        config.ProfileName, cardName);
+                        config.ProfileName, card.Name);
                     failedCount++;
                     continue;
                 }
@@ -140,7 +140,7 @@ public class CardProfileService
                 {
                     _logger.LogWarning(
                         "Saved profile '{Profile}' for card '{CardName}' is not available",
-                        config.ProfileName, cardName);
+                        config.ProfileName, card.Name);
                     failedCount++;
                     continue;
                 }
@@ -154,7 +154,7 @@ public class CardProfileService
                 {
                     _logger.LogInformation(
                         "Restored card '{CardName}' to profile '{Profile}'",
-                        cardName, config.ProfileName);
+                        card.Name, config.ProfileName);
                     restoredCount++;
                     await ApplyBootMutePreferenceAsync(card, defaultUnmute: false, logBootAction: true);
                 }
@@ -162,14 +162,14 @@ public class CardProfileService
                 {
                     _logger.LogWarning(
                         "Failed to restore profile '{Profile}' for card '{CardName}': {Error}",
-                        config.ProfileName, cardName, error);
+                        config.ProfileName, card.Name, error);
                     failedCount++;
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Exception restoring profile for card '{CardName}'", cardName);
+                    "Exception restoring profile for card '{CardName}'", card.Name);
                 failedCount++;
             }
         }
@@ -196,7 +196,11 @@ public class CardProfileService
 
         return cards.Select(card =>
         {
-            var config = savedProfiles.GetValueOrDefault(card.Name);
+            // Try new key format first, then fall back to old format for backwards compatibility
+            var stableKey = ConfigurationService.GenerateCardKey(card);
+            var config = savedProfiles.GetValueOrDefault(stableKey)
+                ?? savedProfiles.GetValueOrDefault(card.Name);
+
             var isMuted = GetCardMuteState(card);
             var bootMuted = config?.BootMuted;
             var bootMatches = bootMuted.HasValue && isMuted.HasValue && bootMuted.Value == isMuted.Value;
@@ -223,7 +227,12 @@ public class CardProfileService
             return null;
         }
 
-        var config = LoadConfigurations().GetValueOrDefault(card.Name);
+        var savedProfiles = LoadConfigurations();
+        // Try new key format first, then fall back to old format
+        var stableKey = ConfigurationService.GenerateCardKey(card);
+        var config = savedProfiles.GetValueOrDefault(stableKey)
+            ?? savedProfiles.GetValueOrDefault(card.Name);
+
         var isMuted = GetCardMuteState(card);
         var bootMuted = config?.BootMuted;
         var bootMatches = bootMuted.HasValue && isMuted.HasValue && bootMuted.Value == isMuted.Value;
@@ -272,8 +281,8 @@ public class CardProfileService
             );
         }
 
-        // Save to persistent config
-        SaveProfile(card.Name, profileName);
+        // Save to persistent config using stable key
+        SaveProfile(card, profileName);
 
         _logger.LogInformation(
             "Changed card '{Card}' profile from '{Previous}' to '{New}'",
@@ -418,7 +427,7 @@ public class CardProfileService
             ? existing.BootMuted
             : null;
 
-        SaveBootMute(card.Name, card.ActiveProfile, muted);
+        SaveBootMute(card, muted);
 
         var displayName = GetCardDisplayName(card);
         var mutedLabel = muted ? "muted" : "unmuted";
@@ -576,8 +585,91 @@ public class CardProfileService
         }
     }
 
-    private void SaveProfile(string cardName, string profileName)
+    /// <summary>
+    /// Migrates old-format keys (card names) to new-format keys (bus path based) and builds a lookup dictionary.
+    /// Old-format keys start with "alsa_card." while new-format keys start with "path_", "serial_", or "usb_".
+    /// </summary>
+    private Dictionary<string, CardProfileConfiguration> MigrateAndBuildLookup(
+        Dictionary<string, CardProfileConfiguration> savedProfiles,
+        List<PulseAudioCard> currentCards)
     {
+        var result = new Dictionary<string, CardProfileConfiguration>(StringComparer.OrdinalIgnoreCase);
+        var needsSave = false;
+
+        foreach (var (key, config) in savedProfiles)
+        {
+            // Check if this is an old-format key (card name)
+            if (key.StartsWith("alsa_card.", StringComparison.OrdinalIgnoreCase))
+            {
+                // Old format - find matching card by name and generate new key
+                var card = currentCards.FirstOrDefault(c =>
+                    c.Name.Equals(key, StringComparison.OrdinalIgnoreCase) ||
+                    c.Name.Equals(config.CardName, StringComparison.OrdinalIgnoreCase));
+
+                if (card != null)
+                {
+                    var newKey = ConfigurationService.GenerateCardKey(card);
+                    result[newKey] = config;
+                    config.CardName = card.Name; // Update to current name
+                    needsSave = true;
+                    _logger.LogInformation(
+                        "Migrated card profile key '{OldKey}' to '{NewKey}'", key, newKey);
+                }
+                else
+                {
+                    // Card not currently connected - keep old entry for now
+                    result[key] = config;
+                    _logger.LogDebug(
+                        "Kept old-format key '{OldKey}' (card not connected)", key);
+                }
+            }
+            else
+            {
+                // Already new format
+                result[key] = config;
+            }
+        }
+
+        // Save migrated config if any keys were changed
+        if (needsSave)
+        {
+            SaveAllConfigurations(result);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Saves all configurations to the config file (used for migration).
+    /// </summary>
+    private void SaveAllConfigurations(Dictionary<string, CardProfileConfiguration> configs)
+    {
+        _configLock.EnterWriteLock();
+        try
+        {
+            var yaml = _serializer.Serialize(configs);
+            var dir = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            File.WriteAllText(_configPath, yaml);
+            _logger.LogInformation("Saved migrated card profiles configuration");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save migrated card profiles configuration");
+        }
+        finally
+        {
+            _configLock.ExitWriteLock();
+        }
+    }
+
+    private void SaveProfile(PulseAudioCard card, string profileName)
+    {
+        var stableKey = ConfigurationService.GenerateCardKey(card);
+
         // Read existing config file outside the lock
         string? existingYaml = null;
         try
@@ -612,17 +704,24 @@ public class CardProfileService
                 }
             }
 
-            // Add or update
-            if (configs.TryGetValue(cardName, out var existing))
+            // Remove old-format key if it exists (migration)
+            if (configs.ContainsKey(card.Name))
             {
-                existing.CardName = cardName;
+                configs.Remove(card.Name);
+                _logger.LogDebug("Removed old-format key '{OldKey}' during save", card.Name);
+            }
+
+            // Add or update using stable key
+            if (configs.TryGetValue(stableKey, out var existing))
+            {
+                existing.CardName = card.Name;
                 existing.ProfileName = profileName;
             }
             else
             {
-                configs[cardName] = new CardProfileConfiguration
+                configs[stableKey] = new CardProfileConfiguration
                 {
-                    CardName = cardName,
+                    CardName = card.Name,
                     ProfileName = profileName
                 };
             }
@@ -644,7 +743,7 @@ public class CardProfileService
             }
 
             File.WriteAllText(_configPath, yamlToWrite);
-            _logger.LogDebug("Saved card profile configuration for '{CardName}'", cardName);
+            _logger.LogDebug("Saved card profile configuration for '{CardName}' (key: {Key})", card.Name, stableKey);
         }
         catch (Exception ex)
         {
@@ -717,8 +816,10 @@ public class CardProfileService
         return removed;
     }
 
-    private void SaveBootMute(string cardName, string profileName, bool muted)
+    private void SaveBootMute(PulseAudioCard card, bool muted)
     {
+        var stableKey = ConfigurationService.GenerateCardKey(card);
+
         // Read existing config file outside the lock
         string? existingYaml = null;
         try
@@ -753,18 +854,26 @@ public class CardProfileService
                 }
             }
 
-            if (configs.TryGetValue(cardName, out var existing))
+            // Remove old-format key if it exists (migration)
+            if (configs.ContainsKey(card.Name))
             {
-                existing.CardName = cardName;
+                configs.Remove(card.Name);
+                _logger.LogDebug("Removed old-format key '{OldKey}' during boot mute save", card.Name);
+            }
+
+            // Add or update using stable key
+            if (configs.TryGetValue(stableKey, out var existing))
+            {
+                existing.CardName = card.Name;
                 existing.BootMuted = muted;
-                existing.ProfileName = profileName;
+                existing.ProfileName = card.ActiveProfile;
             }
             else
             {
-                configs[cardName] = new CardProfileConfiguration
+                configs[stableKey] = new CardProfileConfiguration
                 {
-                    CardName = cardName,
-                    ProfileName = profileName,
+                    CardName = card.Name,
+                    ProfileName = card.ActiveProfile,
                     BootMuted = muted
                 };
             }
@@ -786,7 +895,7 @@ public class CardProfileService
             }
 
             File.WriteAllText(_configPath, yamlToWrite);
-            _logger.LogDebug("Saved boot mute configuration for '{CardName}'", cardName);
+            _logger.LogDebug("Saved boot mute configuration for '{CardName}' (key: {Key})", card.Name, stableKey);
         }
         catch (Exception ex)
         {

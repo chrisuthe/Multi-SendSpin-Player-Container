@@ -64,6 +64,15 @@ public static class MockCardEnumerator
             var isMuted = _muteStates.GetValueOrDefault(config.Index, false);
             var maxVolume = _maxVolumes.TryGetValue(config.Index, out var vol) ? vol : (int?)null;
 
+            // Generate fake device identifiers based on card index (simulates stable USB bus path)
+            var identifiers = new DeviceIdentifiers(
+                Serial: $"mock_serial_{config.Index:D4}",
+                BusPath: $"pci-mock-usb-0:{config.Index}:1.0",
+                VendorId: "mock",
+                ProductId: $"{config.Index:D4}",
+                AlsaLongCardName: $"Mock Card {config.Index} at usb-mock-{config.Index}"
+            );
+
             return new PulseAudioCard(
                 Index: config.Index,
                 Name: config.Name,
@@ -71,6 +80,7 @@ public static class MockCardEnumerator
                 Description: config.Description,
                 Profiles: profiles,
                 ActiveProfile: activeProfile,
+                Identifiers: identifiers,
                 IsMuted: isMuted,
                 BootMuted: null,
                 BootMuteMatchesCurrent: false,
