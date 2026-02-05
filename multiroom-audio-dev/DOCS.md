@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-decbe61
+## Development Build: sha-39f463d
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #151 from scyto/bug/sync-threshold
+- Revert sync correction threshold from 30ms back to 15ms
 - Merge pull request #150 from scyto/feature/remove-default-device-option
 - Remove 'Default Device' option from player device dropdown
 - Merge pull request #149 from scyto/dev
@@ -13,8 +15,6 @@
 - Fix audio playing on wrong device when USB is unplugged
 - Merge pull request #147 from scyto/bug/usb-unplug-deadlock-upstream
 - Fix deadlock when USB audio device is unplugged
-- Merge pull request #143 from scyto/feature/sync-thresholds
-- Merge pull request #146 from scyto/bug/onboarding-lock-recursion-upstream
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
