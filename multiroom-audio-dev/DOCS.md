@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-6e2da72
+## Development Build: sha-e61f8ae
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #149 from scyto/dev
+- Use bus path as primary key for device/card config persistence
 - Merge pull request #148 from scyto/bug/usb-unplug-wrong-device
 - Fix audio playing on wrong device when USB is unplugged
 - Merge pull request #147 from scyto/bug/usb-unplug-deadlock-upstream
@@ -13,8 +15,6 @@
 - Merge pull request #146 from scyto/bug/onboarding-lock-recursion-upstream
 - Fix lock recursion error when skipping/completing onboarding
 - Merge pull request #144 from scyto/bug/startup-overlay-race
-- Fix startup overlay stuck when SignalR connects after phases complete
-- Increase sync correction threshold from 15ms to 30ms
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
