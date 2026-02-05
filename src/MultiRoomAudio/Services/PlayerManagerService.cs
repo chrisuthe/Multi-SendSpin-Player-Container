@@ -33,6 +33,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private readonly VolumeCommandRunner _volumeRunner;
     private readonly BackendFactory _backendFactory;
     private readonly TriggerService _triggerService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ConcurrentDictionary<string, PlayerContext> _players = new();
     private readonly MdnsServerDiscovery _serverDiscovery;
     private bool _disposed;
@@ -395,7 +396,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         IHubContext<PlayerStatusHub> hubContext,
         VolumeCommandRunner volumeRunner,
         BackendFactory backendFactory,
-        TriggerService triggerService)
+        TriggerService triggerService,
+        IServiceProvider serviceProvider)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -405,6 +407,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _volumeRunner = volumeRunner;
         _backendFactory = backendFactory;
         _triggerService = triggerService;
+        _serviceProvider = serviceProvider;
         _serverDiscovery = new MdnsServerDiscovery(
             loggerFactory.CreateLogger<MdnsServerDiscovery>());
     }
@@ -959,6 +962,14 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             _logger.LogInformation("Delay offset for '{Name}': {DelayMs}ms", name, delayMs);
         }
 
+        // Start HID button reader if enabled for this device
+        var deviceId = context.Config.DeviceId;
+        if (!string.IsNullOrEmpty(deviceId))
+        {
+            var hidService = _serviceProvider.GetService<HidButtonService>();
+            hidService?.StartHidReaderForPlayer(deviceId, name);
+        }
+
         // Start connection in background with proper error handling
         FireAndForget(
             ConnectPlayerWithErrorHandlingAsync(name, context, context.Cts.Token),
@@ -1471,6 +1482,14 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
         _logger.LogInformation("Stopping player '{Name}' (user-initiated)", name);
 
+        // Stop HID button reader for this player
+        var deviceId = context.Config.DeviceId;
+        if (!string.IsNullOrEmpty(deviceId))
+        {
+            var hidService = _serviceProvider.GetService<HidButtonService>();
+            hidService?.StopHidReaderForPlayer(deviceId, name);
+        }
+
         try
         {
             context.Cts.Cancel();
@@ -1526,6 +1545,14 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             return false;
 
         _logger.LogInformation("Removing and disposing player '{Name}'", name);
+
+        // Stop HID button reader for this player
+        var deviceId = context.Config.DeviceId;
+        if (!string.IsNullOrEmpty(deviceId))
+        {
+            var hidService = _serviceProvider.GetService<HidButtonService>();
+            hidService?.StopHidReaderForPlayer(deviceId, name);
+        }
 
         try
         {

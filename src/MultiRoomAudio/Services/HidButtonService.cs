@@ -1,20 +1,17 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using MultiRoomAudio.Models;
-using MultiRoomAudio.Utilities;
 
 namespace MultiRoomAudio.Services;
 
 /// <summary>
 /// Manages HID button support for USB audio devices.
-/// Handles enabling/disabling HID buttons per device, loading PulseAudio modules,
-/// and routing hardware volume/mute changes to players.
+/// Reads HID events directly from /dev/input/eventX and applies volume/mute changes to players.
 /// </summary>
 public class HidButtonService : IAsyncDisposable
 {
     private readonly ILogger<HidButtonService> _logger;
-    private readonly PaSinkEventService _sinkEventService;
     private readonly HidInputDeviceDetector _hidDetector;
-    private readonly IPaModuleRunner _moduleRunner;
     private readonly ConfigurationService _configService;
     private readonly IServiceProvider _serviceProvider;
 
@@ -24,122 +21,43 @@ public class HidButtonService : IAsyncDisposable
     private bool _disposed;
 
     /// <summary>
-    /// Debounce interval for rapid volume/mute changes (hardware buttons can repeat quickly).
+    /// Volume step for volume up/down buttons (percentage).
     /// </summary>
-    private static readonly TimeSpan DebounceInterval = TimeSpan.FromMilliseconds(100);
-
-    /// <summary>
-    /// Grace period after processing a change before accepting new changes (prevents feedback loops).
-    /// </summary>
-    private static readonly TimeSpan ProcessingGracePeriod = TimeSpan.FromMilliseconds(200);
+    private const int VolumeStep = 5;
 
     public HidButtonService(
         ILogger<HidButtonService> logger,
-        PaSinkEventService sinkEventService,
         HidInputDeviceDetector hidDetector,
-        IPaModuleRunner moduleRunner,
         ConfigurationService configService,
         IServiceProvider serviceProvider)
     {
         _logger = logger;
-        _sinkEventService = sinkEventService;
         _hidDetector = hidDetector;
-        _moduleRunner = moduleRunner;
         _configService = configService;
         _serviceProvider = serviceProvider;
     }
 
     /// <summary>
     /// Initialize the HID button service.
-    /// Loads saved configurations and enables HID buttons for previously-enabled devices.
+    /// Note: Actual HID event reading starts when a player is created for a device with HID enabled.
     /// </summary>
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        await _initLock.WaitAsync(cancellationToken);
+        _initLock.Wait(cancellationToken);
         try
         {
             if (_initialized)
-                return;
+                return Task.CompletedTask;
 
-            _logger.LogInformation("Initializing HID button service");
-
-            // Subscribe to sink change events
-            _sinkEventService.SinkChanged += OnSinkChanged;
-
-            // Load saved HID button configurations
-            await LoadSavedConfigurationsAsync(cancellationToken);
-
+            _logger.LogInformation("HID button service initialized (direct event reading mode)");
             _initialized = true;
-            _logger.LogInformation("HID button service initialized with {DeviceCount} enabled device(s)",
-                _deviceStates.Count(d => d.Value.Enabled));
         }
         finally
         {
             _initLock.Release();
         }
-    }
 
-    private async Task LoadSavedConfigurationsAsync(CancellationToken cancellationToken)
-    {
-        var devices = _configService.GetAllDeviceConfigurations();
-
-        foreach (var (deviceKey, config) in devices)
-        {
-            if (config.HidButtons?.Enabled == true)
-            {
-                // Try to find the current sink name for this device
-                var sinkName = config.LastKnownSinkName;
-                if (string.IsNullOrEmpty(sinkName))
-                {
-                    _logger.LogDebug("Device {DeviceKey} has HID buttons enabled but no sink name, skipping",
-                        deviceKey);
-                    continue;
-                }
-
-                var busPath = config.Identifiers?.BusPath;
-                var vendorId = config.Identifiers?.VendorId;
-                var productId = config.Identifiers?.ProductId;
-
-                // Try to find and enable HID buttons
-                var inputDevice = config.HidButtons.LastKnownInputPath;
-                if (string.IsNullOrEmpty(inputDevice))
-                {
-                    var serial = config.Identifiers?.Serial;
-                    inputDevice = _hidDetector.FindInputDevice(busPath, vendorId, productId, serial);
-                }
-
-                if (!string.IsNullOrEmpty(inputDevice))
-                {
-                    try
-                    {
-                        var moduleIndex = await _moduleRunner.LoadMmkbdEvdevAsync(inputDevice, sinkName, cancellationToken);
-                        if (moduleIndex.HasValue)
-                        {
-                            var state = new HidButtonDeviceState
-                            {
-                                SinkName = sinkName,
-                                Enabled = true,
-                                ModuleIndex = moduleIndex.Value,
-                                InputDevicePath = inputDevice
-                            };
-                            _deviceStates[sinkName] = state;
-
-                            _logger.LogInformation("Enabled HID buttons for device {SinkName} (input: {InputDevice}, module: {ModuleIndex})",
-                                sinkName, inputDevice, moduleIndex.Value);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to enable HID buttons for device {DeviceKey} on startup", deviceKey);
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning("Device {DeviceKey} has HID buttons enabled but input device not found",
-                        deviceKey);
-                }
-            }
-        }
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -168,15 +86,17 @@ public class HidButtonService : IAsyncDisposable
             HidButtonsAvailable: !string.IsNullOrEmpty(inputDevice),
             HidButtonsEnabled: state?.Enabled ?? false,
             InputDevicePath: inputDevice,
-            ModuleIndex: state?.ModuleIndex,
+            ModuleIndex: null, // No longer using PA modules
             ErrorMessage: null
         );
     }
 
     /// <summary>
     /// Enable HID button support for a device.
+    /// This finds the input device and saves the configuration.
+    /// Actual event reading starts when StartHidReaderForPlayer is called.
     /// </summary>
-    public async Task<HidButtonEnableResponse> EnableHidButtonsAsync(
+    public Task<HidButtonEnableResponse> EnableHidButtonsAsync(
         AudioDevice device,
         CancellationToken cancellationToken = default)
     {
@@ -193,76 +113,42 @@ public class HidButtonService : IAsyncDisposable
         if (string.IsNullOrEmpty(inputDevice))
         {
             _logger.LogWarning("No HID input device found for {SinkName}", sinkName);
-            return new HidButtonEnableResponse(
+            return Task.FromResult(new HidButtonEnableResponse(
                 Success: false,
                 DeviceId: sinkName,
                 HidButtonsEnabled: false,
                 InputDevicePath: null,
                 ModuleIndex: null,
                 Message: "No HID input device found. This device may not have hardware volume/mute buttons."
-            );
+            ));
         }
 
-        // Load the module
-        try
-        {
-            var moduleIndex = await _moduleRunner.LoadMmkbdEvdevAsync(inputDevice, sinkName, cancellationToken);
-            if (!moduleIndex.HasValue)
-            {
-                return new HidButtonEnableResponse(
-                    Success: false,
-                    DeviceId: sinkName,
-                    HidButtonsEnabled: false,
-                    InputDevicePath: inputDevice,
-                    ModuleIndex: null,
-                    Message: "Failed to load PulseAudio module for HID button support."
-                );
-            }
+        // Create/update state (reader will be started when player is associated)
+        var state = _deviceStates.GetOrAdd(sinkName, _ => new HidButtonDeviceState());
+        state.SinkName = sinkName;
+        state.Enabled = true;
+        state.InputDevicePath = inputDevice;
 
-            // Create/update state
-            var state = new HidButtonDeviceState
-            {
-                SinkName = sinkName,
-                Enabled = true,
-                ModuleIndex = moduleIndex.Value,
-                InputDevicePath = inputDevice
-            };
-            _deviceStates[sinkName] = state;
+        // Save configuration
+        var deviceKey = ConfigurationService.GenerateDeviceKey(device);
+        SaveHidButtonConfig(deviceKey, true, inputDevice, device);
 
-            // Save configuration
-            var deviceKey = ConfigurationService.GenerateDeviceKey(device);
-            SaveHidButtonConfig(deviceKey, true, inputDevice, device);
+        _logger.LogInformation("HID buttons enabled for {SinkName} (input: {InputDevice})", sinkName, inputDevice);
 
-            _logger.LogInformation("HID buttons enabled for {SinkName} (input: {InputDevice}, module: {ModuleIndex})",
-                sinkName, inputDevice, moduleIndex.Value);
-
-            return new HidButtonEnableResponse(
-                Success: true,
-                DeviceId: sinkName,
-                HidButtonsEnabled: true,
-                InputDevicePath: inputDevice,
-                ModuleIndex: moduleIndex.Value,
-                Message: "HID button support enabled. Hardware volume/mute buttons will now control this device."
-            );
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to enable HID buttons for {SinkName}", sinkName);
-            return new HidButtonEnableResponse(
-                Success: false,
-                DeviceId: sinkName,
-                HidButtonsEnabled: false,
-                InputDevicePath: inputDevice,
-                ModuleIndex: null,
-                Message: $"Error enabling HID buttons: {ex.Message}"
-            );
-        }
+        return Task.FromResult(new HidButtonEnableResponse(
+            Success: true,
+            DeviceId: sinkName,
+            HidButtonsEnabled: true,
+            InputDevicePath: inputDevice,
+            ModuleIndex: null,
+            Message: "HID button support enabled. Hardware volume/mute buttons will control the player."
+        ));
     }
 
     /// <summary>
     /// Disable HID button support for a device.
     /// </summary>
-    public async Task<HidButtonEnableResponse> DisableHidButtonsAsync(
+    public Task<HidButtonEnableResponse> DisableHidButtonsAsync(
         AudioDevice device,
         CancellationToken cancellationToken = default)
     {
@@ -270,51 +156,250 @@ public class HidButtonService : IAsyncDisposable
 
         _logger.LogInformation("Disabling HID buttons for device {SinkName}", sinkName);
 
-        if (!_deviceStates.TryRemove(sinkName, out var state))
+        if (_deviceStates.TryRemove(sinkName, out var state))
         {
-            // Not enabled - just update config
-            var deviceKey = ConfigurationService.GenerateDeviceKey(device);
-            SaveHidButtonConfig(deviceKey, false, null, device);
-
-            return new HidButtonEnableResponse(
-                Success: true,
-                DeviceId: sinkName,
-                HidButtonsEnabled: false,
-                InputDevicePath: null,
-                ModuleIndex: null,
-                Message: "HID button support was not enabled for this device."
-            );
-        }
-
-        // Unload the module
-        if (state.ModuleIndex.HasValue)
-        {
-            try
-            {
-                await _moduleRunner.UnloadModuleAsync(state.ModuleIndex.Value, cancellationToken);
-                _logger.LogDebug("Unloaded module {ModuleIndex} for {SinkName}", state.ModuleIndex.Value, sinkName);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to unload module {ModuleIndex} for {SinkName}",
-                    state.ModuleIndex.Value, sinkName);
-            }
+            // Stop the reader task
+            StopHidReader(state);
         }
 
         // Save configuration
-        var key = ConfigurationService.GenerateDeviceKey(device);
-        SaveHidButtonConfig(key, false, null, device);
+        var deviceKey = ConfigurationService.GenerateDeviceKey(device);
+        SaveHidButtonConfig(deviceKey, false, null, device);
 
         _logger.LogInformation("HID buttons disabled for {SinkName}", sinkName);
 
-        return new HidButtonEnableResponse(
+        return Task.FromResult(new HidButtonEnableResponse(
             Success: true,
             DeviceId: sinkName,
             HidButtonsEnabled: false,
             InputDevicePath: null,
             ModuleIndex: null,
             Message: "HID button support disabled."
-        );
+        ));
+    }
+
+    /// <summary>
+    /// Start HID event reading for a player.
+    /// Called by PlayerManagerService when a player is created/started.
+    /// </summary>
+    public void StartHidReaderForPlayer(string sinkName, string playerName)
+    {
+        // Check if HID is enabled for this device
+        var deviceConfig = FindDeviceConfigBySinkName(sinkName);
+        if (deviceConfig?.HidButtons?.Enabled != true)
+        {
+            _logger.LogDebug("HID buttons not enabled for {SinkName}", sinkName);
+            return;
+        }
+
+        var inputDevice = deviceConfig.HidButtons.LastKnownInputPath;
+        if (string.IsNullOrEmpty(inputDevice))
+        {
+            _logger.LogDebug("No input device path for {SinkName}", sinkName);
+            return;
+        }
+
+        // Get or create state
+        var state = _deviceStates.GetOrAdd(sinkName, _ => new HidButtonDeviceState
+        {
+            SinkName = sinkName,
+            Enabled = true,
+            InputDevicePath = inputDevice
+        });
+
+        // If already running for this player, skip
+        if (state.ReaderTask != null && !state.ReaderTask.IsCompleted && state.PlayerName == playerName)
+        {
+            _logger.LogDebug("HID reader already running for {SinkName} / {PlayerName}", sinkName, playerName);
+            return;
+        }
+
+        // Stop any existing reader
+        StopHidReader(state);
+
+        // Start new reader
+        state.PlayerName = playerName;
+        state.ReaderCts = new CancellationTokenSource();
+        state.ReaderTask = Task.Run(() => ReadHidEventsAsync(state, state.ReaderCts.Token));
+
+        _logger.LogInformation("Started HID event reader for {SinkName} -> player '{PlayerName}' (input: {InputDevice})",
+            sinkName, playerName, inputDevice);
+    }
+
+    /// <summary>
+    /// Stop HID event reading for a player.
+    /// Called by PlayerManagerService when a player is stopped/deleted.
+    /// </summary>
+    public void StopHidReaderForPlayer(string sinkName, string playerName)
+    {
+        if (_deviceStates.TryGetValue(sinkName, out var state) && state.PlayerName == playerName)
+        {
+            StopHidReader(state);
+            _logger.LogInformation("Stopped HID event reader for {SinkName} / {PlayerName}", sinkName, playerName);
+        }
+    }
+
+    /// <summary>
+    /// Check if HID buttons are enabled for a device (by sink name).
+    /// </summary>
+    public bool IsHidEnabledForDevice(string sinkName)
+    {
+        var deviceConfig = FindDeviceConfigBySinkName(sinkName);
+        return deviceConfig?.HidButtons?.Enabled == true;
+    }
+
+    private DeviceConfiguration? FindDeviceConfigBySinkName(string sinkName)
+    {
+        var allConfigs = _configService.GetAllDeviceConfigurations();
+        foreach (var (_, config) in allConfigs)
+        {
+            if (config.LastKnownSinkName?.Equals(sinkName, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private void StopHidReader(HidButtonDeviceState state)
+    {
+        if (state.ReaderCts != null)
+        {
+            state.ReaderCts.Cancel();
+            state.ReaderCts.Dispose();
+            state.ReaderCts = null;
+        }
+        state.ReaderTask = null;
+        state.PlayerName = null;
+    }
+
+    private async Task ReadHidEventsAsync(HidButtonDeviceState state, CancellationToken ct)
+    {
+        var inputDevice = state.InputDevicePath;
+        var playerName = state.PlayerName;
+
+        if (string.IsNullOrEmpty(inputDevice) || string.IsNullOrEmpty(playerName))
+        {
+            _logger.LogWarning("Cannot start HID reader: missing input device or player name");
+            return;
+        }
+
+        _logger.LogDebug("Opening HID input device: {InputDevice}", inputDevice);
+
+        try
+        {
+            using var fs = new FileStream(inputDevice, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var buffer = new byte[LinuxInputConstants.InputEventSize];
+
+            while (!ct.IsCancellationRequested)
+            {
+                int bytesRead;
+                try
+                {
+                    bytesRead = await fs.ReadAsync(buffer, 0, buffer.Length, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                if (bytesRead < LinuxInputConstants.InputEventSize)
+                    continue;
+
+                var evt = ParseInputEvent(buffer);
+
+                // Only process key press events (not release or repeat)
+                if (evt.Type != LinuxInputConstants.EV_KEY || evt.Value != LinuxInputConstants.KEY_PRESSED)
+                    continue;
+
+                await HandleKeyEventAsync(evt.Code, state, playerName);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("HID reader cancelled for {InputDevice}", inputDevice);
+        }
+        catch (FileNotFoundException)
+        {
+            _logger.LogWarning("HID input device not found: {InputDevice}. Device may have been unplugged.", inputDevice);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _logger.LogError("Permission denied reading HID device {InputDevice}. Ensure the container has access to /dev/input devices.", inputDevice);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading HID events from {InputDevice}", inputDevice);
+        }
+    }
+
+    private static LinuxInputEvent ParseInputEvent(byte[] buffer)
+    {
+        var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+        try
+        {
+            return Marshal.PtrToStructure<LinuxInputEvent>(handle.AddrOfPinnedObject());
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    private async Task HandleKeyEventAsync(ushort keyCode, HidButtonDeviceState state, string playerName)
+    {
+        // Get PlayerManagerService from DI
+        using var scope = _serviceProvider.CreateScope();
+        var playerManager = scope.ServiceProvider.GetService<PlayerManagerService>();
+        if (playerManager == null)
+        {
+            _logger.LogWarning("PlayerManagerService not available");
+            return;
+        }
+
+        switch (keyCode)
+        {
+            case LinuxInputConstants.KEY_MUTE:
+                // Toggle mute state
+                state.IsMuted = !state.IsMuted;
+                _logger.LogInformation("HID mute button pressed for player '{PlayerName}': {State}",
+                    playerName, state.IsMuted ? "muted" : "unmuted");
+                playerManager.SetMuted(playerName, state.IsMuted);
+                break;
+
+            case LinuxInputConstants.KEY_VOLUMEUP:
+                _logger.LogDebug("HID volume up pressed for player '{PlayerName}'", playerName);
+                await AdjustVolumeAsync(playerManager, playerName, VolumeStep);
+                break;
+
+            case LinuxInputConstants.KEY_VOLUMEDOWN:
+                _logger.LogDebug("HID volume down pressed for player '{PlayerName}'", playerName);
+                await AdjustVolumeAsync(playerManager, playerName, -VolumeStep);
+                break;
+
+            default:
+                _logger.LogDebug("Unhandled HID key code: {KeyCode}", keyCode);
+                break;
+        }
+    }
+
+    private async Task AdjustVolumeAsync(PlayerManagerService playerManager, string playerName, int delta)
+    {
+        var allPlayers = playerManager.GetAllPlayers();
+        var player = allPlayers.Players.FirstOrDefault(p =>
+            p.Name.Equals(playerName, StringComparison.OrdinalIgnoreCase));
+
+        if (player == null)
+        {
+            _logger.LogWarning("Player '{PlayerName}' not found for volume adjustment", playerName);
+            return;
+        }
+
+        var newVolume = Math.Clamp(player.Volume + delta, 0, 100);
+        _logger.LogInformation("HID volume {Direction} for player '{PlayerName}': {OldVol}% -> {NewVol}%",
+            delta > 0 ? "up" : "down", playerName, player.Volume, newVolume);
+
+        await playerManager.SetVolumeAsync(playerName, newVolume);
     }
 
     private void SaveHidButtonConfig(string deviceKey, bool enabled, string? inputPath, AudioDevice device)
@@ -341,181 +426,6 @@ public class HidButtonService : IAsyncDisposable
         _configService.SaveDevices();
     }
 
-    private void OnSinkChanged(object? sender, SinkChangeEventArgs e)
-    {
-        // Fire and forget - we don't want to block the event service
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await HandleSinkChangeAsync(e);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error handling sink change for {SinkName}", e.SinkName);
-            }
-        });
-    }
-
-    private async Task HandleSinkChangeAsync(SinkChangeEventArgs e)
-    {
-        // Check if this sink has HID buttons enabled
-        if (!_deviceStates.TryGetValue(e.SinkName, out var state) || !state.Enabled)
-        {
-            return;
-        }
-
-        // Layer 1: Check if we're already processing a change (feedback loop prevention)
-        if (state.IsProcessingChange)
-        {
-            _logger.LogDebug("Ignoring sink change for {SinkName} - already processing", e.SinkName);
-            return;
-        }
-
-        // Layer 2: Check if state actually changed
-        if (state.LastKnownVolume == e.VolumePercent && state.LastKnownMuted == e.IsMuted)
-        {
-            _logger.LogDebug("Ignoring sink change for {SinkName} - no actual change", e.SinkName);
-            return;
-        }
-
-        // Layer 3: Debounce rapid changes
-        var timeSinceLastChange = DateTime.UtcNow - state.LastChangeTime;
-        if (timeSinceLastChange < DebounceInterval)
-        {
-            // Update pending state - let debounce handle it
-            state.PendingVolume = e.VolumePercent;
-            state.PendingMuted = e.IsMuted;
-            _logger.LogDebug("Debouncing sink change for {SinkName}", e.SinkName);
-
-            // Schedule processing after debounce interval
-            _ = Task.Delay(DebounceInterval).ContinueWith(_ => ProcessPendingChanges(e.SinkName));
-            return;
-        }
-
-        // Process the change
-        await ProcessChangeAsync(e.SinkName, e.VolumePercent, e.IsMuted, state);
-    }
-
-    private async void ProcessPendingChanges(string sinkName)
-    {
-        try
-        {
-            if (!_deviceStates.TryGetValue(sinkName, out var state) || !state.Enabled)
-                return;
-
-            if (!state.PendingVolume.HasValue && !state.PendingMuted.HasValue)
-                return;
-
-            var volume = state.PendingVolume ?? state.LastKnownVolume;
-            var muted = state.PendingMuted ?? state.LastKnownMuted;
-
-            state.PendingVolume = null;
-            state.PendingMuted = null;
-
-            await ProcessChangeAsync(sinkName, volume, muted, state);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing pending changes for {SinkName}", sinkName);
-        }
-    }
-
-    private async Task ProcessChangeAsync(string sinkName, int volume, bool muted, HidButtonDeviceState state)
-    {
-        try
-        {
-            state.IsProcessingChange = true;
-            state.LastKnownVolume = volume;
-            state.LastKnownMuted = muted;
-            state.LastChangeTime = DateTime.UtcNow;
-
-            _logger.LogInformation("Hardware button change detected: {SinkName} -> Volume={Volume}%, Muted={Muted}",
-                sinkName, volume, muted);
-
-            // Find player(s) using this sink and apply changes
-            await ApplyChangeToPlayersAsync(sinkName, volume, muted);
-        }
-        finally
-        {
-            // Clear flag after grace period
-            _ = Task.Delay(ProcessingGracePeriod).ContinueWith(_ =>
-            {
-                state.IsProcessingChange = false;
-            });
-        }
-    }
-
-    private async Task ApplyChangeToPlayersAsync(string sinkName, int volume, bool muted)
-    {
-        // Get PlayerManagerService from DI (avoid circular dependency)
-        using var scope = _serviceProvider.CreateScope();
-        var playerManager = scope.ServiceProvider.GetService<PlayerManagerService>();
-        if (playerManager == null)
-        {
-            _logger.LogWarning("PlayerManagerService not available");
-            return;
-        }
-
-        // Find players using this sink
-        var allPlayers = playerManager.GetAllPlayers();
-        var matchingPlayers = allPlayers.Players.Where(p =>
-            p.Device?.Equals(sinkName, StringComparison.OrdinalIgnoreCase) == true ||
-            p.Device?.Contains(sinkName, StringComparison.OrdinalIgnoreCase) == true)
-            .ToList();
-
-        if (matchingPlayers.Count == 0)
-        {
-            _logger.LogDebug("No players found using sink {SinkName}", sinkName);
-            return;
-        }
-
-        foreach (var player in matchingPlayers)
-        {
-            _logger.LogDebug("Applying hardware change to player {PlayerName}: Volume={Volume}%, Muted={Muted}",
-                player.Name, volume, muted);
-
-            try
-            {
-                // Apply volume change
-                await playerManager.ApplyHardwareVolumeChangeAsync(player.Name, volume);
-
-                // Apply mute change (use same path as UI mute for consistent behavior)
-                playerManager.SetMuted(player.Name, muted);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to apply hardware change to player {PlayerName}", player.Name);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Update state tracking when software changes volume (to prevent feedback loop).
-    /// Called by PlayerManagerService when volume is changed via API/MA.
-    /// </summary>
-    public void NotifySoftwareVolumeChange(string sinkName, int volume)
-    {
-        if (_deviceStates.TryGetValue(sinkName, out var state))
-        {
-            state.LastKnownVolume = volume;
-            state.LastChangeTime = DateTime.UtcNow;
-        }
-    }
-
-    /// <summary>
-    /// Update state tracking when software changes mute (to prevent feedback loop).
-    /// Called by PlayerManagerService when mute is changed via API/MA.
-    /// </summary>
-    public void NotifySoftwareMuteChange(string sinkName, bool muted)
-    {
-        if (_deviceStates.TryGetValue(sinkName, out var state))
-        {
-            state.LastKnownMuted = muted;
-            state.LastChangeTime = DateTime.UtcNow;
-        }
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -523,27 +433,16 @@ public class HidButtonService : IAsyncDisposable
 
         _disposed = true;
 
-        _sinkEventService.SinkChanged -= OnSinkChanged;
-
-        // Unload all modules
+        // Stop all HID readers
         foreach (var (sinkName, state) in _deviceStates)
         {
-            if (state.ModuleIndex.HasValue)
-            {
-                try
-                {
-                    await _moduleRunner.UnloadModuleAsync(state.ModuleIndex.Value);
-                    _logger.LogDebug("Unloaded module {ModuleIndex} for {SinkName} during disposal",
-                        state.ModuleIndex.Value, sinkName);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Error unloading module during disposal");
-                }
-            }
+            StopHidReader(state);
+            _logger.LogDebug("Stopped HID reader for {SinkName} during disposal", sinkName);
         }
 
         _deviceStates.Clear();
         _initLock.Dispose();
+
+        await Task.CompletedTask;
     }
 }
