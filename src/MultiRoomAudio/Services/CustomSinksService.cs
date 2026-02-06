@@ -969,10 +969,33 @@ public class CustomSinksService : IAsyncDisposable
             {
                 var deviceConfigs = configService.GetAllDeviceConfigurations();
 
-                // Find a device config whose LastKnownSinkName ends with our target profile
-                var matchingConfig = deviceConfigs.Values.FirstOrDefault(dc =>
+                // Extract card number from old sink name (e.g., "alsa_card_0" -> "0")
+                // This helps distinguish between multiple cards that might have the same profile
+                string? oldCardNumber = null;
+                var cardMatch = System.Text.RegularExpressions.Regex.Match(
+                    deviceIdentifier, @"alsa_card_(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (cardMatch.Success)
+                {
+                    oldCardNumber = cardMatch.Groups[1].Value;
+                }
+
+                // Find device configs that match our target profile
+                var matchingConfigs = deviceConfigs.Values.Where(dc =>
                     dc.LastKnownSinkName != null &&
-                    dc.LastKnownSinkName.EndsWith("." + profile, StringComparison.OrdinalIgnoreCase));
+                    dc.LastKnownSinkName.EndsWith("." + profile, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                // If we have a card number, prefer configs that had the same card number
+                DeviceConfiguration? matchingConfig = null;
+                if (oldCardNumber != null && matchingConfigs.Count > 1)
+                {
+                    // Prefer the config whose LastKnownSinkName had the same card number
+                    matchingConfig = matchingConfigs.FirstOrDefault(dc =>
+                        dc.LastKnownSinkName!.Contains($"alsa_card_{oldCardNumber}.", StringComparison.OrdinalIgnoreCase) ||
+                        dc.LastKnownSinkName!.Contains($"alsa_card_{oldCardNumber}+", StringComparison.OrdinalIgnoreCase));
+                }
+
+                // Fall back to first match if no card number match found
+                matchingConfig ??= matchingConfigs.FirstOrDefault();
 
                 if (matchingConfig?.Identifiers != null)
                 {
@@ -990,8 +1013,8 @@ public class CustomSinksService : IAsyncDisposable
                     if (match != null)
                     {
                         _logger.LogDebug(
-                            "Matched old sink '{Old}' to '{New}' via devices.yaml historical sink name '{Historical}'",
-                            oldSinkName, match.Id, matchingConfig.LastKnownSinkName);
+                            "Matched old sink '{Old}' to '{New}' via devices.yaml historical sink name '{Historical}' (card number match: {CardMatch})",
+                            oldSinkName, match.Id, matchingConfig.LastKnownSinkName, oldCardNumber != null);
                         return match;
                     }
                 }
