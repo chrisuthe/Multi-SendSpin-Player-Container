@@ -1073,7 +1073,7 @@ const Wizard = {
 
     // Remove a custom sink
     async removeCustomSink(sinkId) {
-        if (!confirm(`Remove sink "${sinkId}"? This will unload it from PulseAudio.`)) {
+        if (!await showConfirm('Remove Sink', `Remove sink "${sinkId}"? This will unload it from PulseAudio.`, 'Remove', 'btn-danger')) {
             return;
         }
 

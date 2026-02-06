@@ -1199,7 +1199,7 @@ async function savePlayer() {
 }
 
 async function deletePlayer(name) {
-    if (!confirm(`Delete player "${name}"? This will also remove its configuration.`)) {
+    if (!await showConfirm('Delete Player', `Delete player "${name}"? This will also remove its configuration.`, 'Delete', 'btn-danger')) {
         return;
     }
 
@@ -1222,7 +1222,7 @@ async function deletePlayer(name) {
 }
 
 async function stopPlayer(name) {
-    if (!confirm(`Stop player "${name}"? This will disconnect it from the server.`)) {
+    if (!await showConfirm('Stop Player', `Stop player "${name}"? This will disconnect it from the server.`, 'Stop', 'btn-warning')) {
         return;
     }
 
@@ -1809,102 +1809,6 @@ function showAlert(message, type = 'info', duration = 5000) {
         alert.classList.remove('show');
         setTimeout(() => alert.remove(), 150);
     }, duration);
-}
-
-// Show a styled confirmation modal (returns a Promise that resolves to true/false)
-function showConfirm(title, message, okText = 'OK', okClass = 'btn-danger') {
-    return new Promise((resolve) => {
-        const modal = document.getElementById('confirmModal');
-        const titleEl = document.getElementById('confirmModalTitle');
-        const messageEl = document.getElementById('confirmModalMessage');
-        const okBtn = document.getElementById('confirmModalOkBtn');
-
-        titleEl.textContent = title;
-        messageEl.textContent = message;
-        okBtn.textContent = okText;
-        okBtn.className = `btn ${okClass}`;
-
-        const bsModal = new bootstrap.Modal(modal);
-
-        // Clean up any previous handlers
-        const newOkBtn = okBtn.cloneNode(true);
-        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
-
-        let resolved = false;
-
-        newOkBtn.addEventListener('click', () => {
-            resolved = true;
-            bsModal.hide();
-            resolve(true);
-        });
-
-        modal.addEventListener('hidden.bs.modal', function handler() {
-            modal.removeEventListener('hidden.bs.modal', handler);
-            if (!resolved) {
-                resolve(false);
-            }
-        });
-
-        bsModal.show();
-    });
-}
-
-// Show a styled prompt modal for text input (returns a Promise that resolves to the input value or null)
-function showPrompt(title, label, defaultValue = '', placeholder = '') {
-    return new Promise((resolve) => {
-        const modal = document.getElementById('promptModal');
-        const titleEl = document.getElementById('promptModalTitle');
-        const labelEl = document.getElementById('promptModalLabel');
-        const inputEl = document.getElementById('promptModalInput');
-        const okBtn = document.getElementById('promptModalOkBtn');
-
-        titleEl.textContent = title;
-        labelEl.textContent = label;
-        inputEl.value = defaultValue;
-        inputEl.placeholder = placeholder;
-
-        const bsModal = new bootstrap.Modal(modal);
-
-        // Clean up any previous handlers
-        const newOkBtn = okBtn.cloneNode(true);
-        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
-
-        let resolved = false;
-
-        const submitValue = () => {
-            resolved = true;
-            bsModal.hide();
-            resolve(inputEl.value);
-        };
-
-        newOkBtn.addEventListener('click', submitValue);
-
-        // Allow Enter key to submit
-        const keyHandler = (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitValue();
-            }
-        };
-        inputEl.addEventListener('keydown', keyHandler);
-
-        modal.addEventListener('hidden.bs.modal', function handler() {
-            modal.removeEventListener('hidden.bs.modal', handler);
-            inputEl.removeEventListener('keydown', keyHandler);
-            if (!resolved) {
-                resolve(null);
-            }
-        });
-
-        bsModal.show();
-
-        // Focus the input after modal is shown
-        modal.addEventListener('shown.bs.modal', function focusHandler() {
-            modal.removeEventListener('shown.bs.modal', focusHandler);
-            inputEl.focus();
-            inputEl.select();
-        });
-    });
 }
 
 // ========== Stats for Nerds ==========
@@ -3037,7 +2941,7 @@ async function createRemapSink() {
 
 // Delete sink
 async function deleteSink(name) {
-    if (!confirm(`Delete custom sink "${name}"?`)) return;
+    if (!await showConfirm('Delete Sink', `Delete custom sink "${name}"?`, 'Delete', 'btn-danger')) return;
 
     try {
         const response = await fetch(`./api/sinks/${encodeURIComponent(name)}`, {
@@ -4176,7 +4080,7 @@ function updateLogsCount(total) {
 
 // Clear all logs
 async function clearLogs() {
-    if (!confirm('Clear all logs? This cannot be undone.')) return;
+    if (!await showConfirm('Clear Logs', 'Clear all logs? This cannot be undone.', 'Clear', 'btn-danger')) return;
 
     try {
         const response = await fetch('./api/logs', { method: 'DELETE' });
@@ -4223,7 +4127,7 @@ function runSetupWizard() {
 
 // Reset first-run state to allow wizard to show again
 async function resetOnboarding() {
-    if (!confirm('Reset first-run state? The setup wizard will appear on the next page load.')) {
+    if (!await showConfirm('Reset Wizard', 'Reset first-run state? The setup wizard will appear on the next page load.', 'Reset', 'btn-primary')) {
         return;
     }
 
