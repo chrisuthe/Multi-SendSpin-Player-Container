@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-91f9692
+## Development Build: sha-89c7112
 
 **Current Dev Build Changes** (recent)
 
-- Merge pull request #161 from scyto/dev
-- Merge pull request #107 from scyto/feature/sink-identifier-migration
-- Fix circular DI dependency by resolving CardProfileService lazily
-- Add identity verification to prevent wrong device after ALSA renumbering
-- Add proactive sink identifier extraction during migration
-- Merge pull request #160 from scyto/dev
-- Merge pull request #106 from scyto/feature/shared-modal-utils
-- Replace native browser dialogs with Bootstrap modals
-- Merge pull request #159 from scyto/dev
-- Remove 'v' prefix for dev builds in ProductName
+- Merge pull request #162 from scyto/dev
+- Merge pull request #110 from scyto/feature/enhanced-refresh-button
+- Merge pull request #111 from scyto/feature/trigger-accordion-focus-fix
+- Merge pull request #109 from scyto/bug/api-docs-missing-endpoints
+- Fix: Separate manual refresh from force-refresh flag
+- Use counter instead of boolean for operation lock
+- Fix trigger accordion losing focus during operations
+- Enhance Refresh button to rescan devices and show feedback
+- Add missing API endpoints to documentation
+- Restore legacy-key fallback in card profile reads
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
