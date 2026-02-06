@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-8ab3627
+## Development Build: sha-e74a7bc
 
 **Current Dev Build Changes** (recent)
 
-- Merge pull request #153 from scyto/dev
-- Merge pull request #89 from scyto/bug/hid-signalr-broadcast
-- Add SignalR broadcast for mute changes and log all HID events
-- Merge pull request #88 from scyto/bug/hid-mute-state-sync
-- Fix HID mute toggle using actual player state instead of cached state
-- Merge pull request #87 from scyto/bug/hid-mute-race-condition
-- Read HID events directly from /dev/input instead of PA events
-- Merge pull request #86 from scyto/bug/hid-mute-race-condition
-- Add grace period for mute changes to prevent race condition
-- Merge pull request #85 from scyto/bug/hid-mute-uses-wrong-api
+- i fucking hate USB devices
+- Merge pull request #96 from scyto/feature/auto-reconnect-option
+- Fix auto-resume not saved when creating new player
+- Add auto-resume option for device reconnection
+- Merge pull request #95 from scyto/bug/grace-period-cts-disposal
+- Fix CTS disposal timing in grace period debouncing
+- Merge pull request #94 from scyto/bug/hid-enable-on-running-player
+- Merge pull request #93 from scyto/feature/device-loss-grace-period
+- Start HID reader immediately when enabling on running player
+- Check subscription service IsReady before device reconnection
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
