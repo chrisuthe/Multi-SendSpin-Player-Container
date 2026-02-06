@@ -2223,7 +2223,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         if (_deviceLossGracePeriods.TryRemove(name, out var existingCts))
         {
             existingCts.Cancel();
-            existingCts.Dispose();
+            // Don't dispose here - the old task's finally block will handle it
+            // Disposing now causes ObjectDisposedException in the old task
         }
 
         var cts = new CancellationTokenSource();
@@ -2259,7 +2260,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             }
             finally
             {
-                _deviceLossGracePeriods.TryRemove(name, out _);
+                // Only remove from dictionary if we're still the active grace period
+                // (avoids removing a newer grace period that superseded us)
+                _deviceLossGracePeriods.TryRemove(KeyValuePair.Create(name, cts));
                 cts.Dispose();
             }
         });
@@ -2312,6 +2315,16 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// </summary>
     private async Task RecoverPlayerStreamAsync(string name, PlayerContext context)
     {
+        // Check if player is still in a recoverable state
+        // If already stopped or queued for reconnection, skip recovery
+        if (context.State == Models.PlayerState.Stopped ||
+            context.State == Models.PlayerState.Error ||
+            _devicePendingPlayers.ContainsKey(name))
+        {
+            _logger.LogDebug("Player '{Name}' already stopped or queued, skipping stream recovery", name);
+            return;
+        }
+
         var deviceId = context.Config.DeviceId;
 
         _logger.LogInformation("Attempting stream recovery for '{Name}' on device '{Device}'", name, deviceId);
