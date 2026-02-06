@@ -4175,6 +4175,7 @@ let triggersData = null;
 let customSinksList = [];
 let ftdiDevicesData = null;
 let triggersRefreshInterval = null;
+let triggersOperationInProgress = false; // Prevents refresh interval from clobbering state during operations
 
 // Open the triggers configuration modal
 async function openTriggersModal() {
@@ -4199,6 +4200,10 @@ async function openTriggersModal() {
 
 // Refresh only the trigger states (lightweight update without full reload)
 async function refreshTriggersState() {
+    // Skip refresh if an operation is in progress to prevent state clobbering
+    if (triggersOperationInProgress) {
+        return;
+    }
     try {
         const response = await fetch('./api/triggers');
         if (response.ok) {
@@ -4736,6 +4741,18 @@ async function removeBoard(boardId) {
         return;
     }
 
+    // Prevent refresh interval from clobbering expanded state during this operation
+    triggersOperationInProgress = true;
+
+    // Save expanded state before any async operations
+    const container = document.getElementById('triggersContainer');
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
     try {
         const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
             method: 'DELETE'
@@ -4751,6 +4768,8 @@ async function removeBoard(boardId) {
     } catch (error) {
         console.error('Error removing board:', error);
         showAlert(`Failed to remove board: ${error.message}`, 'danger');
+    } finally {
+        triggersOperationInProgress = false;
     }
 }
 
@@ -4870,6 +4889,18 @@ async function updateBoardBehavior(boardId, behaviorType, value) {
     const isStartup = behaviorType === 'startupBehavior';
     const typeName = isStartup ? 'Startup' : 'Shutdown';
 
+    // Prevent refresh interval from clobbering expanded state during this operation
+    triggersOperationInProgress = true;
+
+    // Save expanded state before any async operations
+    const container = document.getElementById('triggersContainer');
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
     try {
         const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
             method: 'PUT',
@@ -4896,11 +4927,16 @@ async function updateBoardBehavior(boardId, behaviorType, value) {
         showAlert(`Failed to update ${typeName.toLowerCase()} behavior: ${error.message}`, 'danger');
         // Revert the dropdown by reloading
         await loadTriggers();
+    } finally {
+        triggersOperationInProgress = false;
     }
 }
 
 // Reconnect a specific board
 async function reconnectBoard(boardId) {
+    // Prevent refresh interval from clobbering expanded state during this operation
+    triggersOperationInProgress = true;
+
     // Save expanded state before any async operations
     const container = document.getElementById('triggersContainer');
     container.querySelectorAll('.accordion-collapse.show').forEach(el => {
@@ -4926,6 +4962,8 @@ async function reconnectBoard(boardId) {
     } catch (error) {
         console.error('Error reconnecting board:', error);
         showAlert(`Failed to reconnect: ${error.message}`, 'danger');
+    } finally {
+        triggersOperationInProgress = false;
     }
 }
 
@@ -4989,6 +5027,9 @@ async function updateTriggerDelay(boardId, channel, delay) {
 
 // Test a trigger relay (multi-board)
 async function testTrigger(boardId, channel, on) {
+    // Prevent refresh interval from clobbering expanded state during this operation
+    triggersOperationInProgress = true;
+
     // Save expanded state before any async operations
     const container = document.getElementById('triggersContainer');
     container.querySelectorAll('.accordion-collapse.show').forEach(el => {
@@ -5019,6 +5060,8 @@ async function testTrigger(boardId, channel, on) {
     } catch (error) {
         console.error('Error testing trigger:', error);
         showAlert(`Failed to test relay: ${error.message}`, 'danger');
+    } finally {
+        triggersOperationInProgress = false;
     }
 }
 
