@@ -961,6 +961,42 @@ public class CustomSinksService : IAsyncDisposable
                 }
             }
 
+            // Fallback: use devices.yaml historical sink names
+            // This works even when the card profile has changed, because we use the historical record
+            // of which device previously had this profile
+            var configService = _services.GetService<ConfigurationService>();
+            if (configService != null && !string.IsNullOrEmpty(profile))
+            {
+                var deviceConfigs = configService.GetAllDeviceConfigurations();
+
+                // Find a device config whose LastKnownSinkName ends with our target profile
+                var matchingConfig = deviceConfigs.Values.FirstOrDefault(dc =>
+                    dc.LastKnownSinkName != null &&
+                    dc.LastKnownSinkName.EndsWith("." + profile, StringComparison.OrdinalIgnoreCase));
+
+                if (matchingConfig?.Identifiers != null)
+                {
+                    // Use the stored identifiers to find the matching current device
+                    var identifiers = new SinkIdentifiersConfig
+                    {
+                        BusPath = matchingConfig.Identifiers.BusPath,
+                        AlsaLongCardName = matchingConfig.Identifiers.AlsaLongCardName,
+                        Serial = matchingConfig.Identifiers.Serial,
+                        VendorId = matchingConfig.Identifiers.VendorId,
+                        ProductId = matchingConfig.Identifiers.ProductId
+                    };
+
+                    var match = ResolveSinkByIdentifiers(identifiers, devices);
+                    if (match != null)
+                    {
+                        _logger.LogDebug(
+                            "Matched old sink '{Old}' to '{New}' via devices.yaml historical sink name '{Historical}'",
+                            oldSinkName, match.Id, matchingConfig.LastKnownSinkName);
+                        return match;
+                    }
+                }
+            }
+
             // Fallback: match by profile suffix (weak match)
             var profileMatch = devices.FirstOrDefault(d =>
                 d.Id != null && profile != null && d.Id.EndsWith("." + profile, StringComparison.OrdinalIgnoreCase));
