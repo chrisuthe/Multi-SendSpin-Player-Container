@@ -1200,6 +1200,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     Metrics: null,
                     DeviceCapabilities: null,
                     IsPendingReconnection: isPendingReconnection,
+                    AutoResume: config.AutoResume,
                     ReconnectionAttempts: isPendingReconnection ? reconnectState!.RetryCount : null,
                     NextReconnectionAttempt: isPendingReconnection ? reconnectState!.NextRetryTime : null,
                     AdvertisedFormat: config.AdvertisedFormat,
@@ -2304,7 +2305,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             }
         }
 
-        // Sink gone or recovery failed - do full disconnect/reconnect
+        // Sink gone or recovery failed - queue for reconnection
         _logger.LogWarning("Player '{Name}' sink unavailable after grace period, queuing for reconnection", name);
         await QueueForDeviceReconnectionAsync(name, context);
     }
@@ -2548,8 +2549,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
             _logger.LogInformation("Player '{Name}' restarted after device reconnection", name);
 
-            // Resume playback if was playing before device loss
-            if (wasPlaying)
+            // Resume playback if was playing before device loss AND auto-resume is enabled
+            var autoResume = config.AutoResume;
+            if (wasPlaying && autoResume)
             {
                 // Small delay to ensure player is fully connected before sending command
                 await Task.Delay(500);
@@ -2558,7 +2560,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 {
                     try
                     {
-                        _logger.LogInformation("Player '{Name}' was playing before device loss, sending play command", name);
+                        _logger.LogInformation("Player '{Name}' was playing before device loss, sending play command (auto-resume enabled)", name);
                         await newContext.Client.SendCommandAsync("play");
                     }
                     catch (Exception ex)
@@ -2566,6 +2568,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                         _logger.LogWarning(ex, "Failed to send play command to resume playback for '{Name}'", name);
                     }
                 }
+            }
+            else if (wasPlaying && !autoResume)
+            {
+                _logger.LogInformation("Player '{Name}' was playing before device loss but auto-resume is disabled, not resuming", name);
             }
         }
         catch (Exception ex)
@@ -2820,6 +2826,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             ) : null,
             DeviceCapabilities: context.DeviceCapabilities,
             IsPendingReconnection: isPendingReconnection,
+            AutoResume: persistedConfig?.AutoResume ?? false,
             ReconnectionAttempts: isPendingReconnection ? reconnectState!.RetryCount : null,
             NextReconnectionAttempt: isPendingReconnection ? reconnectState!.NextRetryTime : null,
             AdvertisedFormat: context.Config.AdvertisedFormat,

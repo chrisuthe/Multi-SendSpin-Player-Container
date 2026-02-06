@@ -110,6 +110,16 @@ public class PlayerConfiguration
     public string Device { get; set; } = string.Empty;
     public string Provider { get; set; } = "sendspin";
     public bool Autostart { get; set; } = true;
+
+    /// <summary>
+    /// Whether to automatically resume playback when the audio device is reconnected.
+    /// The player always restarts when its device reappears, but this controls whether
+    /// playback resumes automatically or not.
+    /// When enabled: Player restarts and resumes playing where it left off.
+    /// When disabled: Player restarts but stays paused/stopped.
+    /// </summary>
+    public bool AutoResume { get; set; } = false;
+
     public int DelayMs { get; set; } = 0;
     public string? Server { get; set; }
     public int? Volume { get; set; }

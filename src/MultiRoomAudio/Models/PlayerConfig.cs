@@ -92,6 +92,12 @@ public record DeviceSwitchRequest(
 public record MuteRequest(bool Muted);
 
 /// <summary>
+/// Request to enable/disable auto-resume on device reconnection.
+/// </summary>
+/// <param name="Enabled">True to enable auto-resume, false to disable.</param>
+public record AutoResumeRequest(bool Enabled);
+
+/// <summary>
 /// Request to set volume.
 /// </summary>
 /// <param name="Volume">Volume level from 0 to 100.</param>

@@ -41,6 +41,7 @@ public static class PlayersEndpoint
     /// <item>PUT /api/players/{name}/volume - Set volume (0-100)</item>
     /// <item>PUT /api/players/{name}/startup-volume - Set startup volume</item>
     /// <item>PUT /api/players/{name}/mute - Set mute state</item>
+    /// <item>PUT /api/players/{name}/auto-resume - Enable/disable auto-resume on device reconnect</item>
     /// <item>PUT /api/players/{name}/offset - Set delay offset (-10000 to 10000ms)</item>
     /// <item>PUT /api/players/{name}/device - Switch audio device</item>
     /// <item>PUT /api/players/{name}/rename - Rename player</item>
@@ -321,6 +322,33 @@ public static class PlayersEndpoint
         })
         .WithName("SetMute")
         .WithDescription("Mute or unmute player");
+
+        // PUT /api/players/{name}/auto-resume - Enable/disable auto-resume
+        group.MapPut("/{name}/auto-resume", (
+            string name,
+            AutoResumeRequest request,
+            ConfigurationService config,
+            ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
+            logger.LogInformation("API: PUT /api/players/{PlayerName}/auto-resume: {Enabled}", name, request.Enabled);
+            return ApiExceptionHandler.Execute(() =>
+            {
+                if (!config.Players.TryGetValue(name, out var playerConfig))
+                    return PlayerNotFoundResult(name, logger, "set auto-resume");
+
+                playerConfig.AutoResume = request.Enabled;
+                config.Save();
+
+                logger.LogInformation("Player '{Name}': auto-resume {State}",
+                    name, request.Enabled ? "enabled" : "disabled");
+
+                return Results.Ok(new SuccessResponse(true,
+                    $"Auto-resume {(request.Enabled ? "enabled" : "disabled")}"));
+            }, logger, "set auto-resume", name);
+        })
+        .WithName("SetAutoResume")
+        .WithDescription("Enable or disable auto-resume when audio device is reconnected");
 
         // PUT /api/players/{name}/offset - Set delay offset
         group.MapPut("/{name}/offset", (
