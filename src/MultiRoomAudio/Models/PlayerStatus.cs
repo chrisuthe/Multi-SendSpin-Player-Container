@@ -46,6 +46,7 @@ public record PlayerResponse(
     PlayerMetrics? Metrics,
     DeviceCapabilities? DeviceCapabilities = null,
     bool IsPendingReconnection = false,
+    bool AutoResume = false,
     int? ReconnectionAttempts = null,
     DateTime? NextReconnectionAttempt = null,
     string? AdvertisedFormat = null,
