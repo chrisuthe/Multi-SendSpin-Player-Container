@@ -77,4 +77,14 @@ public static class PlayerStatusHubExtensions
     {
         await hubContext.Clients.All.SendAsync("PlayerStatusUpdate", new { players = players.Players });
     }
+
+    /// <summary>
+    /// Notifies all connected clients that the device list has changed.
+    /// Clients should refresh their device lists via the API.
+    /// </summary>
+    public static async Task BroadcastDeviceListChangedAsync(
+        this IHubContext<PlayerStatusHub> hubContext)
+    {
+        await hubContext.Clients.All.SendAsync("DeviceListChanged");
+    }
 }

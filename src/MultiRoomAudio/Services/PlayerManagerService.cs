@@ -447,10 +447,11 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _serverDiscovery = new MdnsServerDiscovery(
             loggerFactory.CreateLogger<MdnsServerDiscovery>());
 
-        // Subscribe to device change events for auto-reconnect
+        // Subscribe to device change events for auto-reconnect and UI updates
         if (_subscriptionService != null)
         {
             _subscriptionService.SinkAppeared += OnSinkAppeared;
+            _subscriptionService.SinkDisappeared += OnSinkDisappeared;
         }
     }
 
@@ -2531,21 +2532,41 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Called when PulseAudio reports a new sink appeared (e.g., USB device plugged in).
-    /// Triggers check for device-pending players after a short delay.
+    /// Triggers check for device-pending players after a short delay and notifies UI.
     /// </summary>
     private void OnSinkAppeared(object? sender, SinkEventArgs args)
     {
-        if (_devicePendingPlayers.IsEmpty)
-            return;
-
-        _logger.LogDebug("Sink appeared (index={Index}), checking {Count} device-pending players",
+        _logger.LogDebug("Sink appeared (index={Index}), notifying UI and checking {Count} device-pending players",
             args.Index, _devicePendingPlayers.Count);
 
         // Small delay to let PulseAudio fully register the new sink
         Task.Run(async () =>
         {
             await Task.Delay(500);
-            await CheckDevicePendingPlayersAsync();
+
+            // Notify UI that device list has changed
+            await _hubContext.BroadcastDeviceListChangedAsync();
+
+            // Check if any pending players can now be restarted
+            if (!_devicePendingPlayers.IsEmpty)
+            {
+                await CheckDevicePendingPlayersAsync();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Called when PulseAudio reports a sink disappeared (e.g., USB device unplugged).
+    /// Notifies UI to refresh device list.
+    /// </summary>
+    private void OnSinkDisappeared(object? sender, SinkEventArgs args)
+    {
+        _logger.LogDebug("Sink disappeared (index={Index}), notifying UI", args.Index);
+
+        // Notify UI that device list has changed
+        Task.Run(async () =>
+        {
+            await _hubContext.BroadcastDeviceListChangedAsync();
         });
     }
 
@@ -3536,6 +3557,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         if (_subscriptionService != null)
         {
             _subscriptionService.SinkAppeared -= OnSinkAppeared;
+            _subscriptionService.SinkDisappeared -= OnSinkDisappeared;
         }
 
         // Stop mDNS watch outside lock
@@ -3591,6 +3613,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         if (_subscriptionService != null)
         {
             _subscriptionService.SinkAppeared -= OnSinkAppeared;
+            _subscriptionService.SinkDisappeared -= OnSinkDisappeared;
         }
 
         // Stop mDNS watch outside lock

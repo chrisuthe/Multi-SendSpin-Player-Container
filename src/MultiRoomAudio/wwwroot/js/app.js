@@ -660,6 +660,11 @@ function setupSignalR() {
         }
     });
 
+    connection.on('DeviceListChanged', async () => {
+        console.log('Device list changed, refreshing devices...');
+        await refreshDevices();
+    });
+
     connection.onreconnecting(() => {
         statusBadge.textContent = 'Reconnecting...';
         statusBadge.className = 'badge bg-warning me-2';
