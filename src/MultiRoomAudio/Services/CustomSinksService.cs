@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.DependencyInjection;
+using MultiRoomAudio.Audio;
 using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Utilities;
@@ -16,6 +18,7 @@ public class CustomSinksService : IAsyncDisposable
     private readonly ILogger<CustomSinksService> _logger;
     private readonly IPaModuleRunner _moduleRunner;
     private readonly EnvironmentService _environment;
+    private readonly IServiceProvider _services;
     private readonly ConcurrentDictionary<string, CustomSinkContext> _sinks = new();
     private readonly string _configPath;
     private readonly IDeserializer _deserializer;
@@ -39,11 +42,13 @@ public class CustomSinksService : IAsyncDisposable
     public CustomSinksService(
         ILogger<CustomSinksService> logger,
         IPaModuleRunner moduleRunner,
-        EnvironmentService environment)
+        EnvironmentService environment,
+        IServiceProvider services)
     {
         _logger = logger;
         _moduleRunner = moduleRunner;
         _environment = environment;
+        _services = services;
         _configPath = Path.Combine(environment.ConfigPath, "custom-sinks.yaml");
 
         _deserializer = new DeserializerBuilder()
@@ -74,6 +79,9 @@ public class CustomSinksService : IAsyncDisposable
             _logger.LogInformation("No custom sinks configured");
             return;
         }
+
+        // Migrate old configs that don't have identifiers or have stale sink names
+        configs = MigrateConfigurations(configs);
 
         // Sort by dependency order: combine sinks first, then remap sinks
         // (remap sinks might depend on combine sinks as their master)
@@ -152,12 +160,19 @@ public class CustomSinksService : IAsyncDisposable
             throw new EntityAlreadyExistsException("PulseAudio sink", request.Name);
         }
 
+        // Get slave identifiers for future migration
+        var backend = _services.GetService<BackendFactory>();
+        var slaveIdentifiers = request.Slaves
+            .Select(s => ExtractIdentifiers(backend?.GetDevice(s)))
+            .ToList();
+
         var config = new CustomSinkConfiguration
         {
             Name = request.Name,
             Type = CustomSinkType.Combine,
             Description = request.Description,
-            Slaves = request.Slaves
+            Slaves = request.Slaves,
+            SlaveIdentifiers = slaveIdentifiers!
         };
 
         var context = new CustomSinkContext(config, DateTime.UtcNow)
@@ -248,12 +263,18 @@ public class CustomSinksService : IAsyncDisposable
         var channelMap = string.Join(",", request.ChannelMappings.Select(m => m.OutputChannel));
         var masterChannelMap = string.Join(",", request.ChannelMappings.Select(m => m.MasterChannel));
 
+        // Get master sink identifiers for future migration
+        var backend = _services.GetService<BackendFactory>();
+        var masterDevice = backend?.GetDevice(request.MasterSink);
+        var masterIdentifiers = ExtractIdentifiers(masterDevice);
+
         var config = new CustomSinkConfiguration
         {
             Name = request.Name,
             Type = CustomSinkType.Remap,
             Description = request.Description,
             MasterSink = request.MasterSink,
+            MasterSinkIdentifiers = masterIdentifiers,
             Channels = request.Channels,
             ChannelMappings = request.ChannelMappings,
             Remix = request.Remix
@@ -340,16 +361,25 @@ public class CustomSinksService : IAsyncDisposable
             throw new EntityAlreadyExistsException("Sink", detected.SinkName);
         }
 
+        // Get backend for resolving identifiers
+        var backend = _services.GetService<BackendFactory>();
+
         CustomSinkConfiguration config;
 
         if (detected.Type == CustomSinkType.Combine)
         {
+            // Get slave identifiers for future migration
+            var slaveIdentifiers = (detected.Slaves ?? [])
+                .Select(s => ExtractIdentifiers(backend?.GetDevice(s)))
+                .ToList();
+
             config = new CustomSinkConfiguration
             {
                 Name = detected.SinkName,
                 Type = CustomSinkType.Combine,
                 Description = detected.Description,
-                Slaves = detected.Slaves ?? []
+                Slaves = detected.Slaves ?? [],
+                SlaveIdentifiers = slaveIdentifiers!
             };
         }
         else
@@ -370,12 +400,17 @@ public class CustomSinksService : IAsyncDisposable
                 }
             }
 
+            // Get master sink identifiers for future migration
+            var masterDevice = detected.MasterSink != null ? backend?.GetDevice(detected.MasterSink) : null;
+            var masterIdentifiers = ExtractIdentifiers(masterDevice);
+
             config = new CustomSinkConfiguration
             {
                 Name = detected.SinkName,
                 Type = CustomSinkType.Remap,
                 Description = detected.Description,
                 MasterSink = detected.MasterSink,
+                MasterSinkIdentifiers = masterIdentifiers,
                 Channels = detected.Channels ?? 2,
                 ChannelMappings = channelMappings,
                 Remix = detected.Remix ?? false
@@ -612,6 +647,519 @@ public class CustomSinksService : IAsyncDisposable
         {
             _configLock.ExitReadLock();
         }
+    }
+
+    /// <summary>
+    /// Migrates sink configurations by resolving stale master/slave sink names using stored identifiers.
+    /// This handles ALSA card number changes after reboot.
+    /// </summary>
+    private List<CustomSinkConfiguration> MigrateConfigurations(List<CustomSinkConfiguration> configs)
+    {
+        // Get current devices to resolve identifiers
+        var backend = _services.GetService<BackendFactory>();
+        if (backend == null)
+        {
+            _logger.LogWarning("BackendFactory not available, skipping sink configuration migration");
+            return configs;
+        }
+
+        var currentDevices = backend.GetOutputDevices().ToList();
+        if (currentDevices.Count == 0)
+        {
+            _logger.LogDebug("No devices available for migration resolution");
+            return configs;
+        }
+
+        var needsSave = false;
+
+        foreach (var config in configs)
+        {
+            if (config.Type == CustomSinkType.Remap && !string.IsNullOrEmpty(config.MasterSink))
+            {
+                // Check if master sink exists
+                var masterExists = currentDevices.Any(d => d.Id.Equals(config.MasterSink, StringComparison.OrdinalIgnoreCase));
+
+                if (!masterExists && config.MasterSinkIdentifiers != null)
+                {
+                    // Try to resolve using identifiers
+                    var resolvedSink = ResolveSinkByIdentifiers(config.MasterSinkIdentifiers, currentDevices);
+                    if (resolvedSink != null)
+                    {
+                        _logger.LogInformation(
+                            "Migrated sink '{Name}' master from '{Old}' to '{New}' (resolved by {Method})",
+                            config.Name, config.MasterSink, resolvedSink.Id, GetResolutionMethod(config.MasterSinkIdentifiers, resolvedSink));
+                        config.MasterSink = resolvedSink.Id;
+                        config.MasterSinkIdentifiers.LastKnownSinkName = resolvedSink.Id;
+                        needsSave = true;
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "Could not resolve master sink for '{Name}' - original '{MasterSink}' not found and identifiers didn't match any device",
+                            config.Name, config.MasterSink);
+                    }
+                }
+                else if (!masterExists)
+                {
+                    // Fallback: try to resolve using sink name pattern (for old configs without identifiers)
+                    var resolvedSink = ResolveSinkByNamePattern(config.MasterSink, currentDevices);
+                    if (resolvedSink != null)
+                    {
+                        _logger.LogInformation(
+                            "Migrated sink '{Name}' master from '{Old}' to '{New}' (resolved by name pattern)",
+                            config.Name, config.MasterSink, resolvedSink.Id);
+                        config.MasterSink = resolvedSink.Id;
+                        // Store identifiers for future migrations
+                        config.MasterSinkIdentifiers = ExtractIdentifiers(resolvedSink);
+                        needsSave = true;
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "Master sink '{MasterSink}' for '{Name}' not found and no identifiers stored for migration",
+                            config.MasterSink, config.Name);
+                    }
+                }
+            }
+            else if (config.Type == CustomSinkType.Combine && config.Slaves?.Count > 0)
+            {
+                // Check and resolve each slave sink
+                var resolvedSlaves = new List<string>();
+                var slaveIdentifiers = config.SlaveIdentifiers ?? [];
+
+                for (int i = 0; i < config.Slaves.Count; i++)
+                {
+                    var slave = config.Slaves[i];
+                    var slaveExists = currentDevices.Any(d => d.Id.Equals(slave, StringComparison.OrdinalIgnoreCase));
+
+                    if (!slaveExists && i < slaveIdentifiers.Count && slaveIdentifiers[i] != null)
+                    {
+                        var resolvedSink = ResolveSinkByIdentifiers(slaveIdentifiers[i], currentDevices);
+                        if (resolvedSink != null)
+                        {
+                            _logger.LogInformation(
+                                "Migrated sink '{Name}' slave[{Index}] from '{Old}' to '{New}'",
+                                config.Name, i, slave, resolvedSink.Id);
+                            resolvedSlaves.Add(resolvedSink.Id);
+                            slaveIdentifiers[i].LastKnownSinkName = resolvedSink.Id;
+                            needsSave = true;
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "Could not resolve slave[{Index}] for '{Name}' - original '{Slave}' not found",
+                                i, config.Name, slave);
+                            resolvedSlaves.Add(slave); // Keep original (will fail to load)
+                        }
+                    }
+                    else if (!slaveExists)
+                    {
+                        // Fallback: try to resolve using sink name pattern (for old configs without identifiers)
+                        var resolvedSink = ResolveSinkByNamePattern(slave, currentDevices);
+                        if (resolvedSink != null)
+                        {
+                            _logger.LogInformation(
+                                "Migrated sink '{Name}' slave[{Index}] from '{Old}' to '{New}' (resolved by name pattern)",
+                                config.Name, i, slave, resolvedSink.Id);
+                            resolvedSlaves.Add(resolvedSink.Id);
+                            // Store identifiers for future migrations
+                            if (config.SlaveIdentifiers == null)
+                                config.SlaveIdentifiers = new List<SinkIdentifiersConfig>();
+                            while (config.SlaveIdentifiers.Count <= i)
+                                config.SlaveIdentifiers.Add(null!);
+                            config.SlaveIdentifiers[i] = ExtractIdentifiers(resolvedSink)!;
+                            needsSave = true;
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "Slave sink '{Slave}' for '{Name}' not found and no identifiers stored",
+                                slave, config.Name);
+                            resolvedSlaves.Add(slave);
+                        }
+                    }
+                    else
+                    {
+                        resolvedSlaves.Add(slave);
+                    }
+                }
+
+                config.Slaves = resolvedSlaves;
+            }
+        }
+
+        // Save migrated configs
+        if (needsSave)
+        {
+            SaveAllConfigurations(configs);
+        }
+
+        return configs;
+    }
+
+    /// <summary>
+    /// Resolves a sink using stored identifiers, matching by priority: BusPath > Serial > VID/PID > AlsaLongCardName.
+    /// </summary>
+    private AudioDevice? ResolveSinkByIdentifiers(SinkIdentifiersConfig identifiers, List<AudioDevice> devices)
+    {
+        // Priority 1: Bus path (most stable for USB devices)
+        if (!string.IsNullOrEmpty(identifiers.BusPath))
+        {
+            var match = devices.FirstOrDefault(d =>
+                d.Identifiers?.BusPath != null &&
+                d.Identifiers.BusPath.Equals(identifiers.BusPath, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+                return match;
+        }
+
+        // Priority 2: ALSA long card name (stable for PCIe devices)
+        if (!string.IsNullOrEmpty(identifiers.AlsaLongCardName))
+        {
+            var match = devices.FirstOrDefault(d =>
+                d.Identifiers?.AlsaLongCardName != null &&
+                d.Identifiers.AlsaLongCardName.Equals(identifiers.AlsaLongCardName, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+                return match;
+        }
+
+        // Priority 3: Serial number (may not be unique)
+        if (!string.IsNullOrEmpty(identifiers.Serial))
+        {
+            var match = devices.FirstOrDefault(d =>
+                d.Identifiers?.Serial != null &&
+                d.Identifiers.Serial.Equals(identifiers.Serial, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+                return match;
+        }
+
+        // Priority 4: VID/PID combination (will match first device of same type)
+        if (!string.IsNullOrEmpty(identifiers.VendorId) && !string.IsNullOrEmpty(identifiers.ProductId))
+        {
+            var match = devices.FirstOrDefault(d =>
+                d.Identifiers?.VendorId != null &&
+                d.Identifiers?.ProductId != null &&
+                d.Identifiers.VendorId.Equals(identifiers.VendorId, StringComparison.OrdinalIgnoreCase) &&
+                d.Identifiers.ProductId.Equals(identifiers.ProductId, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+                return match;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Fallback resolution for old configs without stored identifiers.
+    /// Extracts device identifier from old sink name pattern and matches against current devices.
+    /// </summary>
+    /// <remarks>
+    /// Sink name patterns:
+    /// - alsa_output.pci-0000_01_00.0.analog-surround-71 → extract "pci-0000_01_00.0"
+    /// - alsa_output.usb-0d8c_USB_Sound_Device-00.analog-stereo → extract "usb-0d8c_USB_Sound_Device-00"
+    /// - alsa_output.platform-soc_audio.stereo-fallback → extract "platform-soc_audio"
+    ///
+    /// For "alsa_card_N" style names, we extract the profile and match by profile suffix.
+    /// </remarks>
+    private AudioDevice? ResolveSinkByNamePattern(string oldSinkName, List<AudioDevice> devices)
+    {
+        if (string.IsNullOrEmpty(oldSinkName))
+            return null;
+
+        // Extract the device identifier and profile from sink name
+        // Format: alsa_output.<device-identifier>.<profile>
+        // Note: Device identifiers can contain dots (e.g., pci-0000_01_00.0)
+        // Profiles typically start with: analog-, digital-, iec958-, hdmi-, pro-audio, stereo-fallback
+        var (deviceIdentifier, profile) = ParseSinkName(oldSinkName);
+        if (deviceIdentifier == null)
+            return null;
+
+        // Case 1: PCI device (e.g., "pci-0000_01_00.0")
+        // The PCI address is stable across reboots
+        if (deviceIdentifier.StartsWith("pci-", StringComparison.OrdinalIgnoreCase))
+        {
+            // Extract full PCI address (e.g., "0000_01_00.0" or "0000:01:00.0")
+            var pciAddress = deviceIdentifier.Substring(4);
+
+            var match = devices.FirstOrDefault(d =>
+            {
+                if (d.Id == null) return false;
+                var (currentDeviceId, _) = ParseSinkName(d.Id);
+                if (currentDeviceId == null || !currentDeviceId.StartsWith("pci-", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                var currentPciAddress = currentDeviceId.Substring(4);
+                // Normalize for comparison (underscores vs colons, etc.)
+                return NormalizePciAddress(currentPciAddress).Equals(
+                    NormalizePciAddress(pciAddress), StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (match != null)
+            {
+                _logger.LogDebug("Matched old sink '{Old}' to '{New}' by PCI address '{Pci}'",
+                    oldSinkName, match.Id, pciAddress);
+                return match;
+            }
+        }
+
+        // Case 2: USB device (e.g., "usb-0d8c_USB_Sound_Device-00")
+        // Contains VID and product name which are stable
+        if (deviceIdentifier.StartsWith("usb-", StringComparison.OrdinalIgnoreCase))
+        {
+            // Extract VID from USB identifier (first 4 hex chars after "usb-")
+            var usbInfo = deviceIdentifier.Substring(4);
+            var vidMatch = System.Text.RegularExpressions.Regex.Match(usbInfo, @"^([0-9a-fA-F]{4})");
+            if (vidMatch.Success)
+            {
+                var vid = vidMatch.Groups[1].Value.ToLowerInvariant();
+
+                // Try to match by VID and similar product name
+                var match = devices.FirstOrDefault(d =>
+                {
+                    if (d.Id == null) return false;
+                    var (currentDeviceId, _) = ParseSinkName(d.Id);
+                    if (currentDeviceId == null || !currentDeviceId.StartsWith("usb-", StringComparison.OrdinalIgnoreCase))
+                        return false;
+                    return currentDeviceId.Contains(vid, StringComparison.OrdinalIgnoreCase);
+                });
+
+                if (match != null)
+                {
+                    _logger.LogDebug("Matched old sink '{Old}' to '{New}' by USB VID '{Vid}'",
+                        oldSinkName, match.Id, vid);
+                    return match;
+                }
+            }
+        }
+
+        // Case 3: alsa_card_N style (e.g., "alsa_card_0")
+        // Card numbers are NOT stable - use card identifiers from card-profiles.yaml
+        if (deviceIdentifier.StartsWith("alsa_card_", StringComparison.OrdinalIgnoreCase))
+        {
+            // Try to find matching card by profile, then use its stable identifier
+            // Only attempt if we have a non-empty profile to match against
+            var cardService = _services.GetService<CardProfileService>();
+            if (cardService != null && !string.IsNullOrEmpty(profile))
+            {
+                var cards = cardService.GetCards().ToList();
+
+                // Find card whose active profile matches our sink's profile
+                // e.g., if sink profile is "analog-surround-71", card active profile might be "output:analog-surround-71+input:..."
+                var matchingCard = cards.FirstOrDefault(c =>
+                    c.ActiveProfile?.Contains(profile, StringComparison.OrdinalIgnoreCase) == true);
+
+                if (matchingCard != null)
+                {
+                    // Use card's identifier to find matching device
+                    var cardIdentifier = matchingCard.Name.Replace("alsa_card.", "");
+                    var match = devices.FirstOrDefault(d =>
+                        d.Id != null && d.Id.Contains(cardIdentifier, StringComparison.OrdinalIgnoreCase));
+
+                    if (match != null)
+                    {
+                        _logger.LogDebug("Matched old sink '{Old}' to '{New}' via card '{Card}' identifier",
+                            oldSinkName, match.Id, matchingCard.Name);
+                        return match;
+                    }
+                }
+            }
+
+            // Fallback: use devices.yaml historical sink names
+            // This works even when the card profile has changed, because we use the historical record
+            // of which device previously had this profile
+            var configService = _services.GetService<ConfigurationService>();
+            if (configService != null && !string.IsNullOrEmpty(profile))
+            {
+                var deviceConfigs = configService.GetAllDeviceConfigurations();
+
+                // Extract card number from old sink name (e.g., "alsa_card_0" -> "0")
+                // This helps distinguish between multiple cards that might have the same profile
+                string? oldCardNumber = null;
+                var cardMatch = System.Text.RegularExpressions.Regex.Match(
+                    deviceIdentifier, @"alsa_card_(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (cardMatch.Success)
+                {
+                    oldCardNumber = cardMatch.Groups[1].Value;
+                }
+
+                // Find device configs that match our target profile
+                var matchingConfigs = deviceConfigs.Values.Where(dc =>
+                    dc.LastKnownSinkName != null &&
+                    dc.LastKnownSinkName.EndsWith("." + profile, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                // If we have a card number, prefer configs that had the same card number
+                DeviceConfiguration? matchingConfig = null;
+                if (oldCardNumber != null && matchingConfigs.Count > 1)
+                {
+                    // Prefer the config whose LastKnownSinkName had the same card number
+                    matchingConfig = matchingConfigs.FirstOrDefault(dc =>
+                        dc.LastKnownSinkName!.Contains($"alsa_card_{oldCardNumber}.", StringComparison.OrdinalIgnoreCase) ||
+                        dc.LastKnownSinkName!.Contains($"alsa_card_{oldCardNumber}+", StringComparison.OrdinalIgnoreCase));
+                }
+
+                // Fall back to first match if no card number match found
+                matchingConfig ??= matchingConfigs.FirstOrDefault();
+
+                if (matchingConfig?.Identifiers != null)
+                {
+                    // Use the stored identifiers to find the matching current device
+                    var identifiers = new SinkIdentifiersConfig
+                    {
+                        BusPath = matchingConfig.Identifiers.BusPath,
+                        AlsaLongCardName = matchingConfig.Identifiers.AlsaLongCardName,
+                        Serial = matchingConfig.Identifiers.Serial,
+                        VendorId = matchingConfig.Identifiers.VendorId,
+                        ProductId = matchingConfig.Identifiers.ProductId
+                    };
+
+                    var match = ResolveSinkByIdentifiers(identifiers, devices);
+                    if (match != null)
+                    {
+                        _logger.LogDebug(
+                            "Matched old sink '{Old}' to '{New}' via devices.yaml historical sink name '{Historical}' (card number match: {CardMatch})",
+                            oldSinkName, match.Id, matchingConfig.LastKnownSinkName, oldCardNumber != null);
+                        return match;
+                    }
+                }
+            }
+
+            // Fallback: match by profile suffix (weak match)
+            var profileMatch = devices.FirstOrDefault(d =>
+                d.Id != null && profile != null && d.Id.EndsWith("." + profile, StringComparison.OrdinalIgnoreCase));
+
+            if (profileMatch != null)
+            {
+                _logger.LogDebug("Matched old sink '{Old}' to '{New}' by profile suffix '{Profile}' (weak match)",
+                    oldSinkName, profileMatch.Id, profile);
+                return profileMatch;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Parses a PulseAudio sink name into device identifier and profile.
+    /// Handles device identifiers that contain dots (e.g., PCI addresses).
+    /// </summary>
+    /// <remarks>
+    /// Profiles typically start with: analog-, digital-, iec958-, hdmi-, pro-audio, stereo-fallback
+    /// Examples:
+    /// - alsa_output.pci-0000_01_00.0.analog-surround-71 → ("pci-0000_01_00.0", "analog-surround-71")
+    /// - alsa_output.usb-0d8c_USB_Sound_Device-00.analog-stereo → ("usb-0d8c_USB_Sound_Device-00", "analog-stereo")
+    /// </remarks>
+    private static (string? deviceIdentifier, string? profile) ParseSinkName(string sinkName)
+    {
+        if (string.IsNullOrEmpty(sinkName))
+            return (null, null);
+
+        // Must start with alsa_output.
+        const string prefix = "alsa_output.";
+        if (!sinkName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return (null, null);
+
+        var remainder = sinkName.Substring(prefix.Length);
+
+        // Known profile prefixes - find where the profile starts
+        string[] profilePrefixes = ["analog-", "digital-", "iec958-", "hdmi-", "pro-audio", "stereo-fallback", "multichannel-"];
+
+        // Search for profile start from the end (profiles are typically at the end)
+        var lastDotIndex = -1;
+        foreach (var profilePrefix in profilePrefixes)
+        {
+            var idx = remainder.LastIndexOf("." + profilePrefix, StringComparison.OrdinalIgnoreCase);
+            if (idx > lastDotIndex)
+                lastDotIndex = idx;
+        }
+
+        if (lastDotIndex > 0)
+        {
+            var deviceIdentifier = remainder.Substring(0, lastDotIndex);
+            var profile = remainder.Substring(lastDotIndex + 1);
+            return (deviceIdentifier, profile);
+        }
+
+        // Fallback: split on first dot (may be incorrect for dotted device IDs)
+        var firstDot = remainder.IndexOf('.');
+        if (firstDot > 0)
+        {
+            return (remainder.Substring(0, firstDot), remainder.Substring(firstDot + 1));
+        }
+
+        return (remainder, null);
+    }
+
+    /// <summary>
+    /// Normalizes a PCI address for comparison (handles _ vs : vs . separators).
+    /// </summary>
+    private static string NormalizePciAddress(string pciAddress)
+    {
+        // Replace all separators with dots for consistent comparison
+        return pciAddress.Replace("_", ".").Replace(":", ".").ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Gets the method used to resolve a sink for logging purposes.
+    /// </summary>
+    private static string GetResolutionMethod(SinkIdentifiersConfig identifiers, AudioDevice device)
+    {
+        if (!string.IsNullOrEmpty(identifiers.BusPath) &&
+            device.Identifiers?.BusPath?.Equals(identifiers.BusPath, StringComparison.OrdinalIgnoreCase) == true)
+            return "bus path";
+
+        if (!string.IsNullOrEmpty(identifiers.AlsaLongCardName) &&
+            device.Identifiers?.AlsaLongCardName?.Equals(identifiers.AlsaLongCardName, StringComparison.OrdinalIgnoreCase) == true)
+            return "ALSA long card name";
+
+        if (!string.IsNullOrEmpty(identifiers.Serial) &&
+            device.Identifiers?.Serial?.Equals(identifiers.Serial, StringComparison.OrdinalIgnoreCase) == true)
+            return "serial number";
+
+        return "VID/PID";
+    }
+
+    /// <summary>
+    /// Saves all configurations to the config file (used for migration).
+    /// </summary>
+    private void SaveAllConfigurations(List<CustomSinkConfiguration> configs)
+    {
+        _configLock.EnterWriteLock();
+        try
+        {
+            var dict = configs.ToDictionary(c => c.Name);
+            var yaml = _serializer.Serialize(dict);
+            var dir = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            File.WriteAllText(_configPath, yaml);
+            _logger.LogInformation("Saved migrated custom sink configurations");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save migrated custom sink configurations");
+        }
+        finally
+        {
+            _configLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Extracts identifiers from an audio device for storing in sink configuration.
+    /// </summary>
+    private static SinkIdentifiersConfig? ExtractIdentifiers(AudioDevice? device)
+    {
+        if (device?.Identifiers == null)
+            return null;
+
+        return new SinkIdentifiersConfig
+        {
+            BusPath = device.Identifiers.BusPath,
+            Serial = device.Identifiers.Serial,
+            VendorId = device.Identifiers.VendorId,
+            ProductId = device.Identifiers.ProductId,
+            AlsaLongCardName = device.Identifiers.AlsaLongCardName,
+            LastKnownSinkName = device.Id
+        };
     }
 
     private void SaveConfiguration(CustomSinkConfiguration config)

@@ -35,6 +35,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private readonly BackendFactory _backendFactory;
     private readonly TriggerService _triggerService;
     private readonly IServiceProvider _serviceProvider;
+    private readonly VersionService _versionService;
     private readonly ConcurrentDictionary<string, PlayerContext> _players = new();
     private readonly MdnsServerDiscovery _serverDiscovery;
     private bool _disposed;
@@ -432,6 +433,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         BackendFactory backendFactory,
         TriggerService triggerService,
         IServiceProvider serviceProvider,
+        VersionService versionService,
         PulseAudioSubscriptionService? subscriptionService = null)
     {
         _logger = logger;
@@ -443,6 +445,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _backendFactory = backendFactory;
         _triggerService = triggerService;
         _serviceProvider = serviceProvider;
+        _versionService = versionService;
         _subscriptionService = subscriptionService;
         _serverDiscovery = new MdnsServerDiscovery(
             loggerFactory.CreateLogger<MdnsServerDiscovery>());
@@ -904,7 +907,12 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             AudioFormats = audioFormats,
             BufferCapacity = ServerAnnouncedBufferCapacityBytes,
             InitialVolume = request.Volume,
-            InitialMuted = false // Players start unmuted
+            InitialMuted = false, // Players start unmuted
+
+            // Device metadata for Music Assistant display
+            Manufacturer = "MultiRoom-Audio",
+            ProductName = _versionService.ModelString,        // "v1.2.3 (abc123f)"
+            SoftwareVersion = _versionService.SoftwareVersion // "1.2.3"
         };
 
         // Create clock synchronizer

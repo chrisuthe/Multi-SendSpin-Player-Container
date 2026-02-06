@@ -106,6 +106,7 @@ builder.Services.AddSingleton<VolumeCommandRunner>();
 builder.Services.AddSingleton<BackendFactory>();
 builder.Services.AddSingleton<AlsaCapabilityService>();
 builder.Services.AddSingleton<DeviceMatchingService>();
+builder.Services.AddSingleton<VersionService>();
 
 // Onboarding services
 builder.Services.AddSingleton<ToneGeneratorService>();

@@ -141,6 +141,31 @@ public class ImportSinksRequest
 }
 
 /// <summary>
+/// YAML-serializable stable identifiers for a sink.
+/// Used for re-matching sinks when ALSA card numbers change after reboot.
+/// </summary>
+public class SinkIdentifiersConfig
+{
+    /// <summary>USB bus path (most stable identifier for USB devices).</summary>
+    public string? BusPath { get; set; }
+
+    /// <summary>Device serial number (may not be unique across identical devices).</summary>
+    public string? Serial { get; set; }
+
+    /// <summary>USB vendor ID.</summary>
+    public string? VendorId { get; set; }
+
+    /// <summary>USB product ID.</summary>
+    public string? ProductId { get; set; }
+
+    /// <summary>ALSA long card name (stable for PCIe devices).</summary>
+    public string? AlsaLongCardName { get; set; }
+
+    /// <summary>Last known sink name (may become stale after reboot).</summary>
+    public string? LastKnownSinkName { get; set; }
+}
+
+/// <summary>
 /// Configuration for a custom sink (stored in YAML).
 /// </summary>
 public class CustomSinkConfiguration
@@ -164,15 +189,32 @@ public class CustomSinkConfiguration
 
     /// <summary>
     /// List of slave sink names (for combine-sink).
+    /// May become stale after reboot if ALSA card numbers change.
+    /// Use SlaveIdentifiers for stable re-matching.
     /// </summary>
     public List<string>? Slaves { get; set; }
+
+    /// <summary>
+    /// Stable identifiers for slave sinks (for combine-sink).
+    /// Used to re-match slaves when ALSA card numbers change after reboot.
+    /// The list order matches Slaves.
+    /// </summary>
+    public List<SinkIdentifiersConfig>? SlaveIdentifiers { get; set; }
 
     // Remap-sink specific properties
 
     /// <summary>
     /// Master sink name (for remap-sink).
+    /// May become stale after reboot if ALSA card numbers change.
+    /// Use MasterSinkIdentifiers for stable re-matching.
     /// </summary>
     public string? MasterSink { get; set; }
+
+    /// <summary>
+    /// Stable identifiers for the master sink (for remap-sink).
+    /// Used to re-match the master sink when ALSA card numbers change after reboot.
+    /// </summary>
+    public SinkIdentifiersConfig? MasterSinkIdentifiers { get; set; }
 
     /// <summary>
     /// Number of output channels (for remap-sink).

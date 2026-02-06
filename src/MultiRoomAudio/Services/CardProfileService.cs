@@ -83,24 +83,37 @@ public class CardProfileService
                     availableProfiles,
                     card.ActiveProfile);
             }
-
-            // Track all cards for persistence (saves new cards with current profile)
-            foreach (var card in cards)
-            {
-                EnsureCardTracked(card);
-            }
         }
 
+        // IMPORTANT: Load and migrate profiles BEFORE tracking cards
+        // Otherwise EnsureCardTracked would save current (potentially wrong) profiles
+        // before migration can map old configs to their new stable keys
         var savedProfiles = LoadConfigurations();
 
         if (savedProfiles.Count == 0)
         {
             _logger.LogInformation("No saved card profiles to restore");
+
+            // Only track cards as new if there were no saved profiles
+            foreach (var card in cards)
+            {
+                EnsureCardTracked(card);
+            }
             return;
         }
 
         // Migrate old-format keys and build lookup by new key format
         var migratedProfiles = MigrateAndBuildLookup(savedProfiles, cards);
+
+        // Now track any truly new cards (cards that weren't found in migrated profiles)
+        foreach (var card in cards)
+        {
+            var stableKey = ConfigurationService.GenerateCardKey(card);
+            if (!migratedProfiles.ContainsKey(stableKey))
+            {
+                EnsureCardTracked(card);
+            }
+        }
 
         var restoredCount = 0;
         var failedCount = 0;
