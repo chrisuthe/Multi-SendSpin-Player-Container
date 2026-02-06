@@ -2332,6 +2332,12 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             "Player '{Name}' detected device loss ({Source}), starting {Ms}ms grace period before disconnect",
             name, source, DeviceLossGracePeriodMs);
 
+        // Immediately update UI to show device issue (don't wait for grace period)
+        // Note: Don't change state yet - keep player in current state so recovery can work
+        // The error message will indicate the issue to the user
+        context.ErrorMessage = "Audio device disconnected, checking...";
+        _ = BroadcastStatusAsync();
+
         _ = Task.Run(async () =>
         {
             try
@@ -2557,17 +2563,60 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Called when PulseAudio reports a sink disappeared (e.g., USB device unplugged).
-    /// Notifies UI to refresh device list.
+    /// Notifies UI and checks if any active players lost their device.
     /// </summary>
     private void OnSinkDisappeared(object? sender, SinkEventArgs args)
     {
-        _logger.LogDebug("Sink disappeared (index={Index}), notifying UI", args.Index);
+        _logger.LogDebug("Sink disappeared (index={Index}), notifying UI and checking players", args.Index);
 
-        // Notify UI that device list has changed
         Task.Run(async () =>
         {
+            // Notify UI that device list has changed
             await _hubContext.BroadcastDeviceListChangedAsync();
+
+            // Check if any active players were using a sink that no longer exists
+            await CheckPlayersForLostDeviceAsync();
         });
+    }
+
+    /// <summary>
+    /// Checks all active players to see if their device has disappeared.
+    /// Triggers device loss handling for any players whose sink no longer exists.
+    /// This handles the case where a device is unplugged while the player is idle (not streaming).
+    /// </summary>
+    private async Task CheckPlayersForLostDeviceAsync()
+    {
+        // Small delay to let PulseAudio fully process the sink removal
+        await Task.Delay(200);
+
+        foreach (var (name, context) in _players.ToArray())
+        {
+            if (_disposed) break;
+
+            // Skip players already in error/stopped state or already pending device reconnection
+            if (context.State == Models.PlayerState.Error ||
+                context.State == Models.PlayerState.Stopped ||
+                _devicePendingPlayers.ContainsKey(name) ||
+                _deviceLossGracePeriods.ContainsKey(name))
+            {
+                continue;
+            }
+
+            var deviceId = context.Config.DeviceId;
+            if (string.IsNullOrEmpty(deviceId))
+                continue;
+
+            // Check if the player's device still exists
+            if (!_backendFactory.ValidateDevice(deviceId, out _))
+            {
+                _logger.LogWarning(
+                    "Player '{Name}' device '{Device}' no longer available (detected via sink disappear event)",
+                    name, deviceId);
+
+                // Start the grace period - this handles debouncing and recovery attempts
+                StartDeviceLossGracePeriod(name, context, "sink-disappear");
+            }
+        }
     }
 
     /// <summary>
