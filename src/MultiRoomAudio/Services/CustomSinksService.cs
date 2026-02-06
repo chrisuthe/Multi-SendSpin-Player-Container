@@ -934,15 +934,16 @@ public class CustomSinksService : IAsyncDisposable
         if (deviceIdentifier.StartsWith("alsa_card_", StringComparison.OrdinalIgnoreCase))
         {
             // Try to find matching card by profile, then use its stable identifier
+            // Only attempt if we have a non-empty profile to match against
             var cardService = _services.GetService<CardProfileService>();
-            if (cardService != null)
+            if (cardService != null && !string.IsNullOrEmpty(profile))
             {
                 var cards = cardService.GetCards().ToList();
 
                 // Find card whose active profile matches our sink's profile
                 // e.g., if sink profile is "analog-surround-71", card active profile might be "output:analog-surround-71+input:..."
                 var matchingCard = cards.FirstOrDefault(c =>
-                    c.ActiveProfile?.Contains(profile ?? "", StringComparison.OrdinalIgnoreCase) == true);
+                    c.ActiveProfile?.Contains(profile, StringComparison.OrdinalIgnoreCase) == true);
 
                 if (matchingCard != null)
                 {
