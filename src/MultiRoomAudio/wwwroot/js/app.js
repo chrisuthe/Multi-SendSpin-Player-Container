@@ -3248,8 +3248,11 @@ let expandedDeviceState = null; // Track which device accordion is expanded (sin
 async function openSoundCardsModal() {
     if (!soundCardsModal) {
         soundCardsModal = new bootstrap.Modal(document.getElementById('soundCardsModal'));
-        // Save aliases when modal is closed
-        document.getElementById('soundCardsModal').addEventListener('hidden.bs.modal', saveDeviceAliases);
+        // Save aliases and reset accordion state when modal is closed
+        document.getElementById('soundCardsModal').addEventListener('hidden.bs.modal', () => {
+            saveDeviceAliases();
+            expandedDeviceState = null;
+        });
     }
 
     // Clear pending aliases when opening
@@ -3375,16 +3378,19 @@ async function loadSoundCards() {
     const modalBody = document.querySelector('#soundCardsModal .modal-body');
 
     // Save expanded device state BEFORE replacing with loading spinner
-    // Clear stale state if no panel is expanded (e.g., device was unplugged)
-    const expandedItem = container.querySelector('.accordion-collapse.show');
-    if (expandedItem) {
-        const match = expandedItem.id.match(/^device-(.+)$/);
-        if (match) {
-            expandedDeviceState = match[1];
+    // Only capture from DOM if we have an existing state (i.e., refreshing within open modal)
+    // If expandedDeviceState is null, we intentionally reset it (modal was closed/reopened)
+    if (expandedDeviceState !== null) {
+        const expandedItem = container.querySelector('.accordion-collapse.show');
+        if (expandedItem) {
+            const match = expandedItem.id.match(/^device-(.+)$/);
+            if (match) {
+                expandedDeviceState = match[1];
+            }
+        } else if (container.querySelector('.accordion')) {
+            // Accordion exists but nothing is expanded - clear stale state
+            expandedDeviceState = null;
         }
-    } else if (container.querySelector('.accordion')) {
-        // Accordion exists but nothing is expanded - clear stale state
-        expandedDeviceState = null;
     }
 
     // Save scroll position
