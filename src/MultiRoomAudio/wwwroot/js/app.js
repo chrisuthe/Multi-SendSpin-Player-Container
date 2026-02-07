@@ -9,6 +9,22 @@ let connection = null;
 let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
 let pendingUpdate = null; // Store pending updates during interaction
+
+/**
+ * Check if user is actively interacting with player tiles.
+ * Only checks for transient interactions that have clear start/end:
+ * - Volume slider is being dragged
+ * - Dropdown menu is open on a player card
+ */
+function isUserInteractingWithPlayers() {
+    // Slider drag in progress
+    if (isUserInteracting) return true;
+
+    // Any dropdown open on a player card
+    if (document.querySelector('.player-card .dropdown-menu.show')) return true;
+
+    return false;
+}
 let isModalOpen = false; // Pause auto-refresh while modal is open
 let serverAvailable = true; // Track whether the backend is reachable
 let disconnectedSince = null; // Timestamp when server became unavailable
@@ -587,6 +603,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Periodic version check (every 30 seconds) as fallback
     setInterval(checkVersionAndReload, 30000);
+
+    // Apply pending updates when dropdown closes (Bootstrap event)
+    document.addEventListener('hidden.bs.dropdown', (event) => {
+        // Only care about dropdowns inside player cards
+        if (event.target.closest('.player-card') && pendingUpdate) {
+            console.log('Dropdown closed - applying pending update');
+            players = pendingUpdate.players;
+            pendingUpdate = null;
+            renderPlayers();
+        }
+    });
+
 });
 
 // SignalR setup
@@ -650,9 +678,9 @@ function setupSignalR() {
                 players[p.name] = p;
             });
 
-            // If user is interacting with a slider, defer the update
-            if (isUserInteracting) {
-                console.log('Deferring update - user is interacting');
+            // If user is interacting with player tiles, defer the update
+            if (isUserInteractingWithPlayers()) {
+                console.log('Deferring update - user is interacting with players');
                 pendingUpdate = { players: { ...players } };
             } else {
                 renderPlayers();
@@ -774,7 +802,12 @@ async function refreshStatus(force = false, manual = false) {
                 players[p.name] = p;
             });
 
-            renderPlayers();
+            // Defer DOM update if user is interacting with player tiles
+            if (isUserInteractingWithPlayers()) {
+                pendingUpdate = { players: { ...players } };
+            } else {
+                renderPlayers();
+            }
 
             // Show toast - warn if device refresh failed
             const playerCount = Object.keys(players).length;
@@ -796,7 +829,12 @@ async function refreshStatus(force = false, manual = false) {
                 players[p.name] = p;
             });
 
-            renderPlayers();
+            // Defer DOM update if user is interacting with player tiles
+            if (isUserInteractingWithPlayers()) {
+                pendingUpdate = { players: { ...players } };
+            } else {
+                renderPlayers();
+            }
         }
 
         // Server responded successfully — if it was previously unavailable, recover
