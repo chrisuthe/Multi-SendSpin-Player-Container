@@ -10,6 +10,20 @@ let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
 let pendingUpdate = null; // Store pending updates during interaction
 
+// Debounced volume change for real-time slider updates
+let volumeDebounceTimers = {}; // Per-player debounce timers
+function setVolumeDebounced(name, volume) {
+    // Clear existing timer for this player
+    if (volumeDebounceTimers[name]) {
+        clearTimeout(volumeDebounceTimers[name]);
+    }
+    // Set new timer - 100ms debounce for responsive feel without flooding API
+    volumeDebounceTimers[name] = setTimeout(() => {
+        setVolume(name, volume);
+        delete volumeDebounceTimers[name];
+    }, 100);
+}
+
 /**
  * Check if user is actively interacting with player tiles.
  * Only checks for transient interactions that have clear start/end:
@@ -1741,7 +1755,7 @@ function renderPlayers() {
                             <div class="d-flex align-items-center">
                                 <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100" value="${player.volume}"
                                     onchange="setVolume('${escapeJsString(name)}', this.value)"
-                                    oninput="this.nextElementSibling.textContent = this.value + '%'">
+                                    oninput="this.nextElementSibling.textContent = this.value + '%'; setVolumeDebounced('${escapeJsString(name)}', this.value)">
                                 <span class="volume-display ms-2 small">${player.volume}%</span>
                                 <button class="btn card-mute-toggle ms-2"
                                         title="${getPlayerMuteDisplayState(player).label}"
