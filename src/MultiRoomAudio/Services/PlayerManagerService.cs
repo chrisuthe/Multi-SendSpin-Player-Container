@@ -915,17 +915,17 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             SoftwareVersion = _versionService.SoftwareVersion // "1.2.3"
         };
 
-        // Create clock synchronizer
+        // Create clock synchronizer with player-prefixed logger for debugging
         var clockSync = new KalmanClockSynchronizer(
-            _loggerFactory.CreateLogger<KalmanClockSynchronizer>());
+            _loggerFactory.CreatePlayerLogger<KalmanClockSynchronizer>(request.Name));
 
         // Create audio player using the appropriate backend
         var player = _backendFactory.CreatePlayer(request.Device, _loggerFactory);
 
-        // Create audio pipeline with proper factories
+        // Create audio pipeline with proper factories (player-prefixed loggers for debugging)
         var decoderFactory = new AudioDecoderFactory();
         var pipeline = new AudioPipeline(
-            _loggerFactory.CreateLogger<AudioPipeline>(),
+            _loggerFactory.CreatePlayerLogger<AudioPipeline>(request.Name),
             decoderFactory,
             clockSync,
             bufferFactory: (format, sync) =>
@@ -944,21 +944,21 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 return new BufferedAudioSampleSource(
                     buffer,
                     timeFunc,
-                    _loggerFactory.CreateLogger<BufferedAudioSampleSource>());
+                    _loggerFactory.CreatePlayerLogger<BufferedAudioSampleSource>(request.Name));
             },
             waitForConvergence: true,
             convergenceTimeoutMs: 1000);
 
-        // Create WebSocket connection.
+        // Create WebSocket connection with player-prefixed logger.
         // AutoReconnect disabled: the app's own reconnection logic handles recovery
         // with fresh mDNS discovery and clean player contexts (see QueueForReconnection).
         var connection = new SendspinConnection(
-            _loggerFactory.CreateLogger<SendspinConnection>(),
+            _loggerFactory.CreatePlayerLogger<SendspinConnection>(request.Name),
             new ConnectionOptions { AutoReconnect = false });
 
-        // Create SDK client
+        // Create SDK client with player-prefixed logger
         var client = new SendspinClientService(
-            _loggerFactory.CreateLogger<SendspinClientService>(),
+            _loggerFactory.CreatePlayerLogger<SendspinClientService>(request.Name),
             connection,
             clockSync,
             clientCapabilities,
