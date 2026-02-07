@@ -1142,6 +1142,60 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* ============================================
+   Toast Notifications
+   ============================================ */
+
+/* Toast container - floats over header */
+.toast-container {
+    width: 100%;
+    max-width: 400px;
+    pointer-events: none; /* Allow clicks to pass through container */
+}
+
+.toast {
+    pointer-events: all; /* Re-enable clicks on toasts themselves */
+    background: var(--bs-body-bg);
+    border: 1px solid rgba(var(--bs-body-color-rgb), 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: var(--radius-md);
+    min-width: 250px;
+    max-width: 100%;
+    margin-bottom: 0.5rem;
+}
+
+.toast-header {
+    background: transparent;
+    border-bottom: 1px solid rgba(var(--bs-body-color-rgb), 0.1);
+    color: var(--bs-body-color);
+    padding: 0.5rem 0.75rem;
+}
+
+.toast-body {
+    padding: 0.75rem;
+    color: var(--bs-body-color);
+    font-size: 0.9375rem;
+}
+
+/* Mobile adjustments */
+@media (max-width: 576px) {
+    .toast-container {
+        width: calc(100% - 2rem);
+        left: 1rem !important;
+        transform: none !important;
+    }
+
+    .toast {
+        min-width: 100%;
+    }
+}
+
+/* Dark theme adjustments */
+[data-bs-theme="dark"] .toast {
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================
    Logs Viewer
    ============================================ */
 
