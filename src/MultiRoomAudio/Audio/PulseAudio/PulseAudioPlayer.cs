@@ -752,55 +752,63 @@ public class PulseAudioPlayer : IAudioPlayer
                 // USB audio devices report jittery latency values (±25-50ms) due to
                 // PulseAudio's timer-based scheduling and USB isochronous transfer timing.
                 // We collect samples and lock to the median to avoid constant sync corrections.
-                _latencySamples ??= new List<int>(LatencyLockSampleCount + LatencyLockWarmupSamples);
-                _latencySamples.Add(newLatencyMs);
-
-                if (_latencySamples.Count >= LatencyLockSampleCount + LatencyLockWarmupSamples)
+                //
+                // IMPORTANT: Skip 0ms or very low latency values (<5ms) - these occur when
+                // PA hasn't established accurate timing yet. Including them corrupts the median
+                // (e.g., range 0-38ms locks at 36ms when actual latency is ~70ms), causing
+                // multi-room sync issues when rooms join at different times.
+                if (newLatencyMs >= 5)
                 {
-                    // Discard warmup samples, compute median of the rest
-                    var stableSamples = _latencySamples.Skip(LatencyLockWarmupSamples).OrderBy(x => x).ToList();
-                    var median = stableSamples[stableSamples.Count / 2];
-                    var minLatency = stableSamples.First();
-                    var maxLatency = stableSamples.Last();
-                    var range = maxLatency - minLatency;
+                    _latencySamples ??= new List<int>(LatencyLockSampleCount + LatencyLockWarmupSamples);
+                    _latencySamples.Add(newLatencyMs);
 
-                    // Handle unreliable measurements (e.g., Pi 4 reporting 132-1376ms range)
-                    if (range > HighVarianceThresholdMs)
+                    if (_latencySamples.Count >= LatencyLockSampleCount + LatencyLockWarmupSamples)
                     {
-                        // Wide variance indicates unreliable timing from hardware.
-                        // Use minimum + small margin instead of median to avoid massive sync errors.
-                        OutputLatencyMs = Math.Min(minLatency + 20, MaxReasonableLatencyMs);
-                        _logger.LogWarning(
-                            "Latency range {Range}ms too wide (min={Min}ms, max={Max}ms). " +
-                            "Using {Latency}ms instead of median {Median}ms to avoid sync issues",
-                            range, minLatency, maxLatency, OutputLatencyMs, median);
-                    }
-                    else if (median > MaxReasonableLatencyMs)
-                    {
-                        // Even with stable measurements, cap at reasonable maximum
-                        OutputLatencyMs = MaxReasonableLatencyMs;
-                        _logger.LogWarning(
-                            "Measured latency {Median}ms exceeds maximum, capping to {Max}ms",
-                            median, MaxReasonableLatencyMs);
+                        // Discard warmup samples, compute median of the rest
+                        var stableSamples = _latencySamples.Skip(LatencyLockWarmupSamples).OrderBy(x => x).ToList();
+                        var median = stableSamples[stableSamples.Count / 2];
+                        var minLatency = stableSamples.First();
+                        var maxLatency = stableSamples.Last();
+                        var range = maxLatency - minLatency;
+
+                        // Handle unreliable measurements (e.g., Pi 4 reporting 132-1376ms range)
+                        if (range > HighVarianceThresholdMs)
+                        {
+                            // Wide variance indicates unreliable timing from hardware.
+                            // Use minimum + small margin instead of median to avoid massive sync errors.
+                            OutputLatencyMs = Math.Min(minLatency + 20, MaxReasonableLatencyMs);
+                            _logger.LogWarning(
+                                "Latency range {Range}ms too wide (min={Min}ms, max={Max}ms). " +
+                                "Using {Latency}ms instead of median {Median}ms to avoid sync issues",
+                                range, minLatency, maxLatency, OutputLatencyMs, median);
+                        }
+                        else if (median > MaxReasonableLatencyMs)
+                        {
+                            // Even with stable measurements, cap at reasonable maximum
+                            OutputLatencyMs = MaxReasonableLatencyMs;
+                            _logger.LogWarning(
+                                "Measured latency {Median}ms exceeds maximum, capping to {Max}ms",
+                                median, MaxReasonableLatencyMs);
+                        }
+                        else
+                        {
+                            // Normal case: use median
+                            OutputLatencyMs = median;
+                            _logger.LogInformation(
+                                "Latency locked at {Latency}ms (median of {Count} samples, range: {Min}-{Max}ms)",
+                                OutputLatencyMs, stableSamples.Count, minLatency, maxLatency);
+                        }
+
+                        _latencyLocked = true;
+                        _latencySamples = null; // Free memory
                     }
                     else
                     {
-                        // Normal case: use median
-                        OutputLatencyMs = median;
-                        _logger.LogInformation(
-                            "Latency locked at {Latency}ms (median of {Count} samples, range: {Min}-{Max}ms)",
-                            OutputLatencyMs, stableSamples.Count, minLatency, maxLatency);
-                    }
-
-                    _latencyLocked = true;
-                    _latencySamples = null; // Free memory
-                }
-                else
-                {
-                    // During collection: use current measurement (with hysteresis)
-                    if (Math.Abs(newLatencyMs - OutputLatencyMs) > 5)
-                    {
-                        OutputLatencyMs = newLatencyMs;
+                        // During collection: use current measurement (with hysteresis)
+                        if (Math.Abs(newLatencyMs - OutputLatencyMs) > 5)
+                        {
+                            OutputLatencyMs = newLatencyMs;
+                        }
                     }
                 }
             }
