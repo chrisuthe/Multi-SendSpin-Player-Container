@@ -9,6 +9,36 @@ let connection = null;
 let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
 let pendingUpdate = null; // Store pending updates during interaction
+
+// Debounced volume change for real-time slider updates
+let volumeDebounceTimers = {}; // Per-player debounce timers
+function setVolumeDebounced(name, volume) {
+    // Clear existing timer for this player
+    if (volumeDebounceTimers[name]) {
+        clearTimeout(volumeDebounceTimers[name]);
+    }
+    // Set new timer - 100ms debounce for responsive feel without flooding API
+    volumeDebounceTimers[name] = setTimeout(() => {
+        setVolume(name, volume);
+        delete volumeDebounceTimers[name];
+    }, 100);
+}
+
+/**
+ * Check if user is actively interacting with player tiles.
+ * Only checks for transient interactions that have clear start/end:
+ * - Volume slider is being dragged
+ * - Dropdown menu is open on a player card
+ */
+function isUserInteractingWithPlayers() {
+    // Slider drag in progress
+    if (isUserInteracting) return true;
+
+    // Any dropdown open on a player card
+    if (document.querySelector('.player-card .dropdown-menu.show')) return true;
+
+    return false;
+}
 let isModalOpen = false; // Pause auto-refresh while modal is open
 let serverAvailable = true; // Track whether the backend is reachable
 let disconnectedSince = null; // Timestamp when server became unavailable
@@ -587,6 +617,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Periodic version check (every 30 seconds) as fallback
     setInterval(checkVersionAndReload, 30000);
+
+    // Apply pending updates when dropdown closes (Bootstrap event)
+    document.addEventListener('hidden.bs.dropdown', (event) => {
+        // Only care about dropdowns inside player cards
+        if (event.target.closest('.player-card') && pendingUpdate) {
+            console.log('Dropdown closed - applying pending update');
+            players = pendingUpdate.players;
+            pendingUpdate = null;
+            renderPlayers();
+        }
+    });
+
 });
 
 // SignalR setup
@@ -650,9 +692,9 @@ function setupSignalR() {
                 players[p.name] = p;
             });
 
-            // If user is interacting with a slider, defer the update
-            if (isUserInteracting) {
-                console.log('Deferring update - user is interacting');
+            // If user is interacting with player tiles, defer the update
+            if (isUserInteractingWithPlayers()) {
+                console.log('Deferring update - user is interacting with players');
                 pendingUpdate = { players: { ...players } };
             } else {
                 renderPlayers();
@@ -774,7 +816,12 @@ async function refreshStatus(force = false, manual = false) {
                 players[p.name] = p;
             });
 
-            renderPlayers();
+            // Defer DOM update if user is interacting with player tiles
+            if (isUserInteractingWithPlayers()) {
+                pendingUpdate = { players: { ...players } };
+            } else {
+                renderPlayers();
+            }
 
             // Show toast - warn if device refresh failed
             const playerCount = Object.keys(players).length;
@@ -796,7 +843,12 @@ async function refreshStatus(force = false, manual = false) {
                 players[p.name] = p;
             });
 
-            renderPlayers();
+            // Defer DOM update if user is interacting with player tiles
+            if (isUserInteractingWithPlayers()) {
+                pendingUpdate = { players: { ...players } };
+            } else {
+                renderPlayers();
+            }
         }
 
         // Server responded successfully — if it was previously unavailable, recover
@@ -1333,6 +1385,10 @@ async function setVolume(name, volume) {
         if (players[name]) {
             players[name].volume = volume;
         }
+        // Also update in pendingUpdate so other player updates aren't lost
+        if (pendingUpdate?.players?.[name]) {
+            pendingUpdate.players[name] = players[name];
+        }
     } catch (error) {
         console.error('Error setting volume:', error);
         showAlert(error.message, 'danger');
@@ -1388,6 +1444,10 @@ async function setPlayerMute(playerName, muted) {
         // Update local state
         if (players[playerName]) {
             players[playerName].isMuted = muted;
+        }
+        // Also update in pendingUpdate so other player updates aren't lost
+        if (pendingUpdate?.players?.[playerName]) {
+            pendingUpdate.players[playerName] = players[playerName];
         }
 
         // Update button UI
@@ -1695,7 +1755,7 @@ function renderPlayers() {
                             <div class="d-flex align-items-center">
                                 <input type="range" class="form-range form-range-sm flex-grow-1 volume-slider" min="0" max="100" value="${player.volume}"
                                     onchange="setVolume('${escapeJsString(name)}', this.value)"
-                                    oninput="this.nextElementSibling.textContent = this.value + '%'">
+                                    oninput="this.nextElementSibling.textContent = this.value + '%'; setVolumeDebounced('${escapeJsString(name)}', this.value)">
                                 <span class="volume-display ms-2 small">${player.volume}%</span>
                                 <button class="btn card-mute-toggle ms-2"
                                         title="${getPlayerMuteDisplayState(player).label}"
