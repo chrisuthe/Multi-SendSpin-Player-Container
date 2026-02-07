@@ -971,6 +971,120 @@ h1, h2, h3, h4, h5, h6 {
     outline: none;
 }
 
+/* Device Accordion Header - Two-line layout */
+.device-header-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    gap: 0.25rem;
+}
+
+.device-header-info {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    padding-right: 9.5rem; /* Space for volume + mute + chevron */
+}
+
+/* Profile badge on second line - left aligned */
+.device-header-profile {
+    display: flex;
+    align-items: center;
+}
+
+.device-header-profile .badge {
+    max-width: calc(100% - 9.5rem); /* Don't overlap with volume/mute/chevron */
+    font-weight: normal;
+    font-size: 0.75rem;
+}
+
+/* Accordion header needs relative positioning for absolute elements */
+.device-accordion-header {
+    position: relative;
+}
+
+/* Volume percentage positioned absolutely in header */
+.device-header-volume {
+    position: absolute;
+    right: 5rem; /* Before mute + chevron */
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    white-space: nowrap;
+    font-size: 0.8rem;
+}
+
+/* Mute button positioned outside accordion-button to prevent toggle */
+.device-header-mute {
+    position: absolute;
+    right: 2.75rem; /* Position before the chevron */
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    padding: 0.15rem 0.35rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--bs-border-color);
+    background-color: var(--bs-tertiary-bg);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+    z-index: 10;
+    font-size: 0.875rem;
+    line-height: 1;
+}
+
+.device-header-mute:hover {
+    background-color: var(--bs-secondary-bg);
+    border-color: var(--bs-secondary-border-subtle);
+}
+
+/* Editable alias input - inline with device name */
+.device-header-alias {
+    width: 120px;
+    max-width: 120px;
+    height: 1.5rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.device-header-alias::placeholder {
+    font-style: italic;
+    opacity: 0.6;
+}
+
+/* Card message - hide when empty, show with margin when has content */
+[id^="settings-card-message-"]:empty {
+    display: none;
+}
+
+[id^="settings-card-message-"]:not(:empty) {
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+/* Hidden device accordion styling - uses same overlay as wizard */
+.accordion-item.device-hidden .accordion-header {
+    opacity: 0.6;
+}
+
+.accordion-item.device-hidden .device-hidden-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 5;
+}
+
+/* Device info labels - aligned */
+.device-info-label {
+    display: inline-block;
+    width: 3.5rem;
+    color: var(--bs-secondary-color);
+}
+
 /* ============================================
    Forms
    ============================================ */

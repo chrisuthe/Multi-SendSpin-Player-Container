@@ -555,7 +555,8 @@ const Wizard = {
                                        id="alias-${escapeHtml(device.id)}"
                                        value="${escapeHtml(alias)}"
                                        ${isHidden ? 'disabled' : ''}
-                                       onchange="Wizard.setAlias('${escapeJsString(device.id)}', this.value)">
+                                       onchange="Wizard.setAlias('${escapeJsString(device.id)}', this.value)"
+                                       onkeydown="Wizard.handleAliasKeydown(event, '${escapeJsString(device.id)}', this)">
                             </div>
                         </div>
                         <div class="btn-group-vertical">
@@ -1408,6 +1409,15 @@ const Wizard = {
             });
         } catch (error) {
             console.error(`Failed to save alias for ${deviceId}:`, error);
+        }
+    },
+
+    // Handle Enter key in alias input - save and exit edit mode
+    handleAliasKeydown(event, deviceId, input) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            this.setAlias(deviceId, input.value);
+            input.blur();
         }
     },
 

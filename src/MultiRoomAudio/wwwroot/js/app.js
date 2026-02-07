@@ -3242,13 +3242,17 @@ let soundCardsModal = null;
 let soundCards = [];
 let soundCardDevices = []; // Devices associated with sound cards
 let pendingDeviceAliases = {}; // Track pending alias changes: { deviceId: newAlias }
+let expandedDeviceState = null; // Track which device accordion is expanded (single value - only one at a time)
 
 // Open the sound cards configuration modal
 async function openSoundCardsModal() {
     if (!soundCardsModal) {
         soundCardsModal = new bootstrap.Modal(document.getElementById('soundCardsModal'));
-        // Save aliases when modal is closed
-        document.getElementById('soundCardsModal').addEventListener('hidden.bs.modal', saveDeviceAliases);
+        // Save aliases and reset accordion state when modal is closed
+        document.getElementById('soundCardsModal').addEventListener('hidden.bs.modal', () => {
+            saveDeviceAliases();
+            expandedDeviceState = null;
+        });
     }
 
     // Clear pending aliases when opening
@@ -3268,6 +3272,77 @@ function markDeviceAliasChanged(input) {
         pendingDeviceAliases[deviceId] = newAlias;
     } else {
         delete pendingDeviceAliases[deviceId];
+    }
+}
+
+// Handle keydown in alias input - stop propagation to prevent accordion toggle
+async function handleAliasKeydown(event, input) {
+    // Always stop propagation to prevent accordion from reacting to keys (especially spacebar)
+    event.stopPropagation();
+
+    if (event.key === 'Enter') {
+        event.preventDefault();
+
+        const deviceId = input.dataset.deviceId;
+        const newAlias = input.value.trim();
+
+        // Save immediately
+        try {
+            await fetch(`./api/devices/${encodeURIComponent(deviceId)}/alias`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ alias: newAlias || null })
+            });
+            // Update the original alias so it won't be re-saved on modal close
+            input.dataset.originalAlias = newAlias;
+            // Remove from pending since we just saved it
+            delete pendingDeviceAliases[deviceId];
+        } catch (error) {
+            console.error(`Failed to save alias for device ${deviceId}:`, error);
+        }
+
+        // Exit edit mode (like clicking outside)
+        input.blur();
+    }
+}
+
+// Handle clicks on accordion header - manually toggle, but not when clicking alias input
+function handleDeviceAccordionClick(event, targetId) {
+    // Don't toggle if clicking on alias input (or inside it)
+    // Also check activeElement for keyboard-triggered clicks (spacebar on button while input focused)
+    const activeEl = document.activeElement;
+    if (event.target.classList.contains('device-header-alias') ||
+        event.target.closest('.device-header-alias') ||
+        (activeEl && activeEl.classList.contains('device-header-alias'))) {
+        event.stopPropagation();
+        return;
+    }
+
+    // Manually toggle the Bootstrap collapse and update button state
+    const collapse = document.getElementById(targetId);
+    const button = event.currentTarget;
+    if (collapse && button) {
+        const isCurrentlyExpanded = collapse.classList.contains('show');
+        const bsCollapse = bootstrap.Collapse.getOrCreateInstance(collapse);
+        bsCollapse.toggle();
+        // Update button's collapsed class for styling
+        button.classList.toggle('collapsed', isCurrentlyExpanded);
+    }
+}
+
+// Handle keydown on accordion button - block spacebar from toggling when typing in alias
+function handleDeviceAccordionKeydown(event) {
+    // If the event originated from the alias input, block spacebar from activating the button
+    if (event.target.classList.contains('device-header-alias')) {
+        if (event.key === ' ' || event.key === 'Spacebar') {
+            // Stop the button from receiving this as an activation
+            event.stopImmediatePropagation();
+            // Don't preventDefault - let the space character be typed in the input
+        }
+        // Block Enter from activating the button (handleAliasKeydown handles Enter for saving)
+        if (event.key === 'Enter') {
+            event.stopImmediatePropagation();
+        }
     }
 }
 
@@ -3300,6 +3375,27 @@ async function saveDeviceAliases() {
 // Load sound cards and their associated devices from API
 async function loadSoundCards() {
     const container = document.getElementById('soundCardsContainer');
+    const modalBody = document.querySelector('#soundCardsModal .modal-body');
+
+    // Save expanded device state BEFORE replacing with loading spinner
+    // Only capture from DOM if we have an existing state (i.e., refreshing within open modal)
+    // If expandedDeviceState is null, we intentionally reset it (modal was closed/reopened)
+    if (expandedDeviceState !== null) {
+        const expandedItem = container.querySelector('.accordion-collapse.show');
+        if (expandedItem) {
+            const match = expandedItem.id.match(/^device-(.+)$/);
+            if (match) {
+                expandedDeviceState = match[1];
+            }
+        } else if (container.querySelector('.accordion')) {
+            // Accordion exists but nothing is expanded - clear stale state
+            expandedDeviceState = null;
+        }
+    }
+
+    // Save scroll position
+    const scrollTop = modalBody ? modalBody.scrollTop : 0;
+
     container.innerHTML = `
         <div class="text-center py-4">
             <div class="spinner-border text-primary" role="status">
@@ -3329,7 +3425,7 @@ async function loadSoundCards() {
         soundCards = cardsData.cards || [];
         soundCardDevices = devicesData.devices || [];
 
-        renderSoundCards();
+        renderSoundCards(scrollTop);
     } catch (error) {
         console.error('Error loading sound cards:', error);
         container.innerHTML = `
@@ -3341,9 +3437,10 @@ async function loadSoundCards() {
     }
 }
 
-// Render sound cards list
-function renderSoundCards() {
+// Render sound cards list as accordion
+function renderSoundCards(savedScrollTop = 0) {
     const container = document.getElementById('soundCardsContainer');
+    const modalBody = document.querySelector('#soundCardsModal .modal-body');
 
     if (soundCards.length === 0) {
         container.innerHTML = `
@@ -3355,7 +3452,14 @@ function renderSoundCards() {
         return;
     }
 
-    const cardsHtml = soundCards.map(card => {
+    // Determine which device should be expanded
+    // Only auto-expand if exactly 1 device AND no saved state
+    const shouldAutoExpand = soundCards.length === 1 && !expandedDeviceState;
+
+    const accordionHtml = soundCards.map((card, index) => {
+        const cardKey = card.index.toString();
+        const isExpanded = expandedDeviceState === cardKey || (shouldAutoExpand && index === 0);
+
         const availableProfiles = card.profiles.filter(p => p.isAvailable);
         const hasMultipleProfiles = availableProfiles.length > 1;
 
@@ -3384,51 +3488,74 @@ function renderSoundCards() {
         const busLabel = getBusTypeLabel(busType);
 
         // Find the device associated with this card by matching name patterns
-        // Card name: alsa_card.pci-0000_01_00.0 -> Device id: alsa_output.pci-0000_01_00.0.analog-stereo
-        // (Previous code used cardIndex === card.index, but cardIndex is ALSA number and card.index is PulseAudio index)
-        const cardBase = card.name.replace('alsa_card.', '');
+        // For ALSA cards: alsa_card.pci-0000_00_1f.3 -> alsa_output.pci-0000_00_1f.3.analog-stereo
+        // For Bluetooth: bluez_card.00_1A_7D_DA_71_13 -> bluez_sink.00_1A_7D_DA_71_13.a2dp_sink
+        const cardBase = card.name.replace('alsa_card.', '').replace('bluez_card.', '');
         const device = soundCardDevices.find(d => d.id && d.id.includes(cardBase));
         const deviceAlias = device?.alias || '';
         const deviceId = device?.id || '';
+        const deviceName = card.description || card.name;
+        const maxVolumeDisplay = card.maxVolume !== null && card.maxVolume !== undefined ? card.maxVolume : 100;
+        const isHidden = device?.hidden || false;
 
         return `
-            <div class="card mb-3" id="settings-card-${card.index}">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <div class="flex-grow-1">
-                            <h6 class="mb-1">
+            <div class="accordion-item ${isHidden ? 'device-hidden' : ''}" id="device-item-${card.index}">
+                <h2 class="accordion-header device-accordion-header">
+                    ${isHidden ? '<div class="device-hidden-overlay"></div>' : ''}
+                    <button class="accordion-button ${isExpanded ? '' : 'collapsed'}" type="button"
+                            onclick="handleDeviceAccordionClick(event, 'device-${cardKey}')"
+                            onkeydown="handleDeviceAccordionKeydown(event)">
+                        <div class="device-header-content">
+                            <span class="device-header-info">
                                 <i class="${busIcon} text-primary me-2" title="${busLabel}"></i>
-                                ${escapeHtml(card.description || card.name)}
-                            </h6>
-                            <input type="text" class="form-control form-control-sm card-alias-input"
-                                   placeholder="Add alias (e.g., Living Room DAC)"
-                                   value="${escapeHtml(deviceAlias)}"
-                                   data-device-id="${escapeHtml(deviceId)}"
-                                   data-original-alias="${escapeHtml(deviceAlias)}"
-                                   ${deviceId ? '' : 'disabled title="No device found for this card"'}
-                                   onchange="markDeviceAliasChanged(this)">
-                            <small class="text-muted">${escapeHtml(card.driver)}</small>
-                        </div>
-                        <span class="badge bg-secondary" id="settings-card-status-${card.index}">
-                            ${escapeHtml(activeDesc)}
-                        </span>
-                    </div>
-
-                    <div class="mb-2">
-                        <label class="form-label small text-muted mb-1">Mute Options</label>
-                        <div class="d-flex flex-wrap align-items-center gap-3">
-                            <div class="d-flex align-items-center gap-2">
-                                <button class="btn card-mute-toggle"
-                                        title="${escapeHtml(muteState.label)}"
-                                        aria-label="${escapeHtml(muteState.label)}"
-                                        onclick="toggleSoundCardMute('${escapeJsString(card.name)}', ${card.index})">
-                                    <i class="fas ${muteState.icon} ${muteState.iconClass}"></i>
-                                </button>
+                                <span class="fw-bold">${escapeHtml(deviceName)}</span>
+                                <input type="text" class="device-header-alias form-control form-control-sm ms-2"
+                                       placeholder="Alias"
+                                       value="${escapeHtml(deviceAlias)}"
+                                       data-device-id="${escapeHtml(deviceId)}"
+                                       data-original-alias="${escapeHtml(deviceAlias)}"
+                                       ${deviceId ? '' : 'disabled title="No device found for this card"'}
+                                       onchange="markDeviceAliasChanged(this)"
+                                       onkeydown="handleAliasKeydown(event, this)">
+                            </span>
+                            <div class="device-header-profile">
+                                <span class="badge bg-secondary text-truncate" id="device-profile-badge-${card.index}">${escapeHtml(activeDesc)}</span>
                             </div>
+                        </div>
+                    </button>
+                    <span class="device-header-volume small text-muted">Max Vol: ${maxVolumeDisplay}%</span>
+                    <span class="device-header-mute"
+                          role="button"
+                          tabindex="0"
+                          title="${escapeHtml(muteState.label)}"
+                          aria-label="${escapeHtml(muteState.label)}"
+                          data-card-name="${escapeJsString(card.name)}"
+                          data-card-index="${card.index}"
+                          onclick="handleDeviceHeaderMute(event, this)">
+                        <i class="fas ${muteState.icon} ${muteState.iconClass}"></i>
+                    </span>
+                </h2>
+                <div id="device-${cardKey}" class="accordion-collapse collapse ${isExpanded ? 'show' : ''}"
+                     data-bs-parent="#soundCardsAccordion">
+                    <div class="accordion-body">
+                        <!-- Row 1: Max Volume slider with driver info -->
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">Max Volume</label>
                             <div class="d-flex align-items-center gap-2">
-                                <label class="form-label small text-muted mb-0">Boot-time</label>
-                                <select class="form-select form-select-sm"
-                                        style="width: auto;"
+                                <input type="range" class="form-range flex-grow-1" min="0" max="100" step="1"
+                                       value="${card.maxVolume || 100}"
+                                       id="settings-max-volume-${card.index}"
+                                       oninput="document.getElementById('settings-max-volume-value-${card.index}').textContent = this.value + '%'; updateDeviceHeaderVolume(${card.index}, this.value)"
+                                       onchange="setDeviceMaxVolume('${escapeJsString(card.name)}', this.value, ${card.index})">
+                                <span class="text-muted small" style="min-width: 40px;" id="settings-max-volume-value-${card.index}">${card.maxVolume || 100}%</span>
+                            </div>
+                        </div>
+
+                        <!-- Row 2: Boot Mute | Audio Profile -->
+                        <div class="d-flex flex-wrap align-items-center gap-3 mb-1">
+                            <div class="d-flex align-items-center gap-2">
+                                <label class="form-label small text-muted mb-0">Boot Mute</label>
+                                <select class="form-select form-select-sm" style="width: auto;"
                                         id="settings-boot-mute-select-${card.index}"
                                         onchange="setSoundCardBootMute('${escapeJsString(card.name)}', this.value, ${card.index})">
                                     <option value="unset" ${bootPreference === 'unset' ? 'selected' : ''}>Not set</option>
@@ -3436,99 +3563,104 @@ function renderSoundCards() {
                                     <option value="unmuted" ${bootPreference === 'unmuted' ? 'selected' : ''}>Unmuted</option>
                                 </select>
                             </div>
+                            ${hasMultipleProfiles ? `
+                                <div class="d-flex align-items-center gap-2 flex-grow-1">
+                                    <label class="form-label small text-muted mb-0">Profile</label>
+                                    <select class="form-select form-select-sm flex-grow-1"
+                                            id="settings-profile-select-${card.index}"
+                                            onchange="setSoundCardProfile('${escapeJsString(card.name)}', this.value, ${card.index})">
+                                        ${profileOptions}
+                                    </select>
+                                </div>
+                            ` : `
+                                <span class="text-muted small">
+                                    <i class="fas fa-check-circle text-success me-1"></i>
+                                    Profile: ${escapeHtml(activeDesc)}
+                                </span>
+                            `}
                         </div>
-                    </div>
+                        <div id="settings-card-message-${card.index}" class="small" style="min-height: 0;"></div>
 
-                    <div class="mb-2">
-                        <label class="form-label small text-muted mb-1">Limit Max. Vol.</label>
-                        <div class="d-flex align-items-center gap-2">
-                            <input type="range" class="form-range flex-grow-1" min="0" max="100" step="1"
-                                   value="${card.maxVolume || 100}"
-                                   id="settings-max-volume-${card.index}"
-                                   oninput="document.getElementById('settings-max-volume-value-${card.index}').textContent = this.value + '%'"
-                                   onchange="setDeviceMaxVolume('${escapeJsString(card.name)}', this.value, ${card.index})">
-                            <span class="text-muted" style="min-width: 45px;" id="settings-max-volume-value-${card.index}">${card.maxVolume || 100}%</span>
+                        <!-- Checkboxes -->
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox"
+                                   id="settings-device-hidden-${card.index}"
+                                   ${device?.hidden ? 'checked' : ''}
+                                   ${deviceId ? '' : 'disabled'}
+                                   onchange="toggleDeviceHidden('${escapeJsString(deviceId)}', this.checked, ${card.index})">
+                            <label class="form-check-label small" for="settings-device-hidden-${card.index}">
+                                Hide from player and sink creation
+                            </label>
                         </div>
-                    </div>
 
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox"
-                               id="settings-device-hidden-${card.index}"
-                               ${device?.hidden ? 'checked' : ''}
-                               ${deviceId ? '' : 'disabled'}
-                               onchange="toggleDeviceHidden('${escapeJsString(deviceId)}', this.checked, ${card.index})">
-                        <label class="form-check-label small" for="settings-device-hidden-${card.index}">
-                            Hide from player and sink creation
-                        </label>
-                    </div>
-
-                    <div class="form-check mb-2" id="settings-hid-buttons-container-${card.index}">
-                        <input class="form-check-input" type="checkbox"
-                               id="settings-hid-buttons-${card.index}"
-                               disabled
-                               onchange="toggleHidButtons('${escapeJsString(deviceId)}', this.checked, ${card.index})">
-                        <label class="form-check-label small" for="settings-hid-buttons-${card.index}">
-                            Enable hardware volume/mute buttons (may not work with all devices)
-                        </label>
-                        <span id="settings-hid-buttons-status-${card.index}" class="text-muted small ms-1"></span>
-                    </div>
-
-                    ${hasMultipleProfiles ? `
-                        <div class="mb-2">
-                            <label class="form-label small text-muted mb-1">Audio Profile</label>
-                            <select class="form-select"
-                                    id="settings-profile-select-${card.index}"
-                                    onchange="setSoundCardProfile('${escapeJsString(card.name)}', this.value, ${card.index})">
-                                ${profileOptions}
-                            </select>
+                        <div class="form-check mb-2" id="settings-hid-buttons-container-${card.index}">
+                            <input class="form-check-input" type="checkbox"
+                                   id="settings-hid-buttons-${card.index}"
+                                   disabled
+                                   onchange="toggleHidButtons('${escapeJsString(deviceId)}', this.checked, ${card.index})">
+                            <label class="form-check-label small" for="settings-hid-buttons-${card.index}">
+                                Enable hardware volume/mute buttons
+                            </label>
+                            <span id="settings-hid-buttons-status-${card.index}" class="text-muted small ms-1"></span>
                         </div>
-                        <div id="settings-card-message-${card.index}" class="small"></div>
-                    ` : `
-                        <div class="text-muted small">
-                            <i class="fas fa-check-circle text-success me-1"></i>
-                            Single profile available: ${escapeHtml(activeDesc)}
-                        </div>
-                    `}
 
-                    ${device?.capabilities ? `
-                        <hr class="my-2" style="border-style: dotted; opacity: 0.3;">
-                        <div class="small">
-                            <div class="text-muted mb-1" style="font-weight: 500;">
-                                Device Capabilities${device.capabilitySource === 'PulseAudioMax' ? ' <span class="badge bg-secondary ms-1" style="font-size: 0.7em;">Max</span>' : ''}
+                        ${device?.capabilities ? `
+                            <hr class="my-2" style="border-style: dotted; opacity: 0.3;">
+                            <div class="small text-muted">
+                                <span style="font-weight: 500;">Capabilities:</span>
+                                ${device.capabilities.supportedSampleRates?.length > 0
+                                    ? device.capabilities.supportedSampleRates.map(r => formatSampleRate(r)).join(' • ')
+                                    : '?'}
+                                &nbsp;|&nbsp;
+                                ${device.capabilities.supportedBitDepths?.length > 0
+                                    ? device.capabilities.supportedBitDepths.map(b => b + '-bit').join(' • ')
+                                    : '?'}
+                                &nbsp;|&nbsp;
+                                ${device.capabilities.maxChannels
+                                    ? device.capabilities.maxChannels + 'ch'
+                                    : '?'}
+                                ${device.capabilitySource === 'PulseAudioMax' ? ' <span class="badge bg-secondary" style="font-size: 0.65em;">inferred</span>' : ''}
                             </div>
-                            ${device.capabilitySource === 'PulseAudioMax' ? `
-                                <div class="text-muted mb-2" style="font-size: 0.85em; opacity: 0.8;">
-                                    <i class="fas fa-info-circle me-1"></i>Hardware capabilities inferred from current sink config
-                                </div>
-                            ` : ''}
-                            <div class="d-flex flex-column gap-1">
-                                <div class="d-flex">
-                                    <span class="text-muted" style="min-width: 100px;">Sample Rates</span>
-                                    <span>${device.capabilities.supportedSampleRates?.length > 0
-                                        ? device.capabilities.supportedSampleRates.map(r => formatSampleRate(r)).join(' • ')
-                                        : 'Unknown'}</span>
-                                </div>
-                                <div class="d-flex">
-                                    <span class="text-muted" style="min-width: 100px;">Bit Depths</span>
-                                    <span>${device.capabilities.supportedBitDepths?.length > 0
-                                        ? device.capabilities.supportedBitDepths.map(b => b + '-bit').join(' • ')
-                                        : 'Unknown'}</span>
-                                </div>
-                                <div class="d-flex">
-                                    <span class="text-muted" style="min-width: 100px;">Channels</span>
-                                    <span>${device.capabilities.maxChannels
-                                        ? device.capabilities.maxChannels + (device.capabilities.maxChannels === 2 ? ' (stereo)' : 'ch')
-                                        : 'Unknown'}</span>
-                                </div>
-                            </div>
+                        ` : ''}
+                        <div class="small text-muted mt-2" style="opacity: 0.7;">
+                            <div style="font-weight: 500; margin-bottom: 0.25rem;">Device Info</div>
+                            ${card.driver ? `<div><span class="device-info-label">Driver:</span> ${escapeHtml(card.driver)}</div>` : ''}
+                            ${device?.identifiers?.bluetoothMac ? `<div><span class="device-info-label">MAC:</span> ${escapeHtml(device.identifiers.bluetoothMac)}</div>` : ''}
+                            ${device?.identifiers?.bluetoothCodec ? `<div><span class="device-info-label">Codec:</span> ${escapeHtml(device.identifiers.bluetoothCodec).toUpperCase()}</div>` : ''}
+                            ${device?.identifiers?.busPath ? `<div><span class="device-info-label">Bus:</span> ${escapeHtml(device.identifiers.busPath)}</div>` : ''}
+                            ${deviceId ? `<div><span class="device-info-label">Sink:</span> ${escapeHtml(deviceId)}</div>` : ''}
                         </div>
-                    ` : ''}
+                    </div>
                 </div>
             </div>
         `;
     }).join('');
 
-    container.innerHTML = cardsHtml;
+    container.innerHTML = `<div class="accordion" id="soundCardsAccordion">${accordionHtml}</div>`;
+
+    // Add event listeners to sync button state with Bootstrap collapse events
+    container.querySelectorAll('.accordion-collapse').forEach(collapse => {
+        collapse.addEventListener('show.bs.collapse', () => {
+            const button = collapse.closest('.accordion-item')?.querySelector('.accordion-button');
+            if (button) button.classList.remove('collapsed');
+        });
+        collapse.addEventListener('hide.bs.collapse', () => {
+            const button = collapse.closest('.accordion-item')?.querySelector('.accordion-button');
+            if (button) button.classList.add('collapsed');
+        });
+    });
+
+    // Update expandedDeviceState to match current DOM state if we auto-expanded
+    if (shouldAutoExpand) {
+        expandedDeviceState = soundCards[0].index.toString();
+    }
+
+    // Restore scroll position
+    if (modalBody && savedScrollTop > 0) {
+        requestAnimationFrame(() => {
+            modalBody.scrollTop = savedScrollTop;
+        });
+    }
 
     // Check HID button availability for each card
     soundCards.forEach(card => {
@@ -3547,6 +3679,35 @@ function renderSoundCards() {
     });
 }
 
+// Handle mute button click in device accordion header
+// Prevents accordion toggle and calls the mute function
+function handleDeviceHeaderMute(event, button) {
+    // Stop all event propagation to prevent accordion toggle
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    event.preventDefault();
+
+    // Prevent rapid clicks while API call is in flight (span doesn't support disabled)
+    if (button.dataset.busy === 'true') {
+        return false;
+    }
+
+    const cardName = button.dataset.cardName;
+    const cardIndex = parseInt(button.dataset.cardIndex, 10);
+
+    toggleSoundCardMute(cardName, cardIndex);
+
+    return false;
+}
+
+// Update the max volume display in the device accordion header
+function updateDeviceHeaderVolume(cardIndex, value) {
+    const volumeSpan = document.querySelector(`#device-item-${cardIndex} .device-header-volume`);
+    if (volumeSpan) {
+        volumeSpan.textContent = `Max Vol: ${value}%`;
+    }
+}
+
 function getCardMuteDisplayState(card) {
     if (typeof card.isMuted !== 'boolean') {
         return {
@@ -3558,20 +3719,20 @@ function getCardMuteDisplayState(card) {
     }
 
     const isMuted = card.isMuted;
-    const usesBoot = typeof card.bootMuted === 'boolean' && card.bootMuteMatchesCurrent;
-    const labelSuffix = usesBoot ? ' (boot)' : ' (manual)';
     return {
         isMuted,
-        label: `${isMuted ? 'Muted' : 'Unmuted'}${labelSuffix}`,
+        label: isMuted ? 'Muted' : 'Unmuted',
         icon: isMuted ? 'fa-volume-mute' : 'fa-volume-up',
         iconClass: isMuted ? 'text-danger' : 'text-success'
     };
 }
 
 async function setSoundCardMute(cardName, muted, cardIndex) {
-    const button = document.querySelector(`#settings-card-${cardIndex} .card-mute-toggle`);
+    // Find the mute button in the accordion header
+    const button = document.querySelector(`#device-item-${cardIndex} .device-header-mute`);
 
-    if (button) button.disabled = true;
+    // Use data-busy attribute since span doesn't support disabled
+    if (button) button.dataset.busy = 'true';
 
     try {
         const response = await fetch(`./api/cards/${encodeURIComponent(cardName)}/mute`, {
@@ -3604,7 +3765,7 @@ async function setSoundCardMute(cardName, muted, cardIndex) {
         console.error('Failed to set card mute:', error);
         showAlert(error.message, 'danger');
     } finally {
-        if (button) button.disabled = false;
+        if (button) delete button.dataset.busy;
     }
 }
 
@@ -3640,12 +3801,7 @@ async function setSoundCardBootMute(cardName, value, cardIndex) {
             card.bootMuted = muted;
             card.bootMuteMatchesCurrent = typeof card.isMuted === 'boolean' && card.isMuted === muted;
         }
-
-        const muteState = getCardMuteDisplayState(card || { isMuted: null, bootMuted: muted, bootMuteMatchesCurrent: false });
-        const button = document.querySelector(`#settings-card-${cardIndex} .card-mute-toggle i`);
-        if (button) {
-            button.className = `fas ${muteState.icon} ${muteState.iconClass}`;
-        }
+        // Note: Boot mute doesn't affect the header mute button - it only shows current state
     } catch (error) {
         console.error('Failed to set boot mute:', error);
         showAlert(error.message, 'danger');
@@ -3724,6 +3880,26 @@ async function toggleDeviceHidden(deviceId, hidden, cardIndex) {
         const device = soundCardDevices.find(d => d.id === deviceId);
         if (device) {
             device.hidden = hidden;
+        }
+
+        // Update visual treatment for hidden state
+        const accordionItem = document.getElementById(`device-item-${cardIndex}`);
+        const accordionHeader = accordionItem?.querySelector('.accordion-header');
+        if (accordionItem && accordionHeader) {
+            if (hidden) {
+                // Add hidden styling
+                accordionItem.classList.add('device-hidden');
+                if (!accordionHeader.querySelector('.device-hidden-overlay')) {
+                    const overlay = document.createElement('div');
+                    overlay.className = 'device-hidden-overlay';
+                    accordionHeader.insertBefore(overlay, accordionHeader.firstChild);
+                }
+            } else {
+                // Remove hidden styling
+                accordionItem.classList.remove('device-hidden');
+                const overlay = accordionHeader.querySelector('.device-hidden-overlay');
+                if (overlay) overlay.remove();
+            }
         }
 
         // Refresh global devices array so sink/player creation modals reflect the change
@@ -3837,7 +4013,7 @@ async function toggleHidButtons(deviceId, enabled, cardIndex) {
 // Set a sound card's profile
 async function setSoundCardProfile(cardName, profileName, cardIndex) {
     const select = document.getElementById(`settings-profile-select-${cardIndex}`);
-    const statusBadge = document.getElementById(`settings-card-status-${cardIndex}`);
+    const statusBadge = document.getElementById(`device-profile-badge-${cardIndex}`);
     const messageDiv = document.getElementById(`settings-card-message-${cardIndex}`);
 
     if (select) select.disabled = true;
@@ -4277,10 +4453,18 @@ async function refreshTriggersState() {
 
 // Track which accordion boards are expanded (persists across loadTriggers calls)
 let expandedBoardsState = new Set();
+// Track scroll position for triggers modal (persists across loadTriggers calls)
+let triggersScrollPosition = 0;
 
 // Load triggers status and custom sinks from API
 async function loadTriggers() {
     const container = document.getElementById('triggersContainer');
+    const modalBody = document.querySelector('#triggersModal .modal-body');
+
+    // Save scroll position BEFORE replacing with loading spinner
+    if (modalBody) {
+        triggersScrollPosition = modalBody.scrollTop;
+    }
 
     // Save expanded boards state BEFORE replacing with loading spinner
     container.querySelectorAll('.accordion-collapse.show').forEach(el => {
@@ -4347,8 +4531,12 @@ function renderTriggers() {
     const totalChannelsSpan = document.getElementById('triggersTotalChannels');
 
     // Save scroll position of modal body before re-rendering
+    // Use saved position from loadTriggers if available (DOM was cleared by loading spinner)
     const modalBody = document.querySelector('#triggersModal .modal-body');
-    const scrollTop = modalBody ? modalBody.scrollTop : 0;
+    const currentScrollTop = modalBody ? modalBody.scrollTop : 0;
+    const scrollTop = currentScrollTop > 0 ? currentScrollTop : triggersScrollPosition;
+    // Reset the saved position after using it
+    triggersScrollPosition = 0;
 
     // Save which accordion items are currently expanded (by boardId)
     // First check the current DOM, then fall back to the global state (for when DOM was cleared by loading spinner)
@@ -4443,11 +4631,14 @@ function renderTriggers() {
         return;
     }
 
+    // Only auto-expand first item if there's exactly 1 board AND no saved state
+    const shouldAutoExpand = triggersData.boards.length === 1 && expandedBoards.size === 0;
+
     const accordionHtml = triggersData.boards.map((board, index) => {
         const boardId = escapeHtml(board.boardId);
         const boardIdSafe = board.boardId.replace(/[^a-zA-Z0-9]/g, '_');
-        // Preserve expanded state: if we have saved state, use it; otherwise default to first item expanded
-        const isExpanded = expandedBoards.size > 0 ? expandedBoards.has(boardIdSafe) : index === 0;
+        // Preserve expanded state: use saved state, or auto-expand single item
+        const isExpanded = expandedBoards.has(boardIdSafe) || (shouldAutoExpand && index === 0);
         const controlsDisabled = noHardware || !triggersData.enabled;
         const testButtonsDisabled = controlsDisabled || !board.isConnected;
 

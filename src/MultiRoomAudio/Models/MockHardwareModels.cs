@@ -93,6 +93,18 @@ public class MockAudioDeviceConfig
     /// Links the device to a MockAudioCardConfig by its Index.
     /// </summary>
     public int? CardIndex { get; set; }
+
+    /// <summary>
+    /// Bluetooth MAC address (e.g., "00:1A:7D:DA:71:13").
+    /// Only for Bluetooth devices.
+    /// </summary>
+    public string? BluetoothMac { get; set; }
+
+    /// <summary>
+    /// Bluetooth codec in use (e.g., "sbc", "aac", "aptx", "ldac").
+    /// Only for Bluetooth devices.
+    /// </summary>
+    public string? BluetoothCodec { get; set; }
 }
 
 /// <summary>

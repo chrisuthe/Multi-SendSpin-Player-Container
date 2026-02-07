@@ -65,12 +65,17 @@ public static class MockCardEnumerator
             var maxVolume = _maxVolumes.TryGetValue(config.Index, out var vol) ? vol : (int?)null;
 
             // Generate fake device identifiers based on card index (simulates stable USB bus path)
+            // Detect Bluetooth cards from name or driver
+            var isBluetooth = config.Name.StartsWith("bluez_card", StringComparison.OrdinalIgnoreCase)
+                           || config.Driver.Contains("bluez", StringComparison.OrdinalIgnoreCase);
             var identifiers = new DeviceIdentifiers(
                 Serial: $"mock_serial_{config.Index:D4}",
-                BusPath: $"pci-mock-usb-0:{config.Index}:1.0",
-                VendorId: "mock",
-                ProductId: $"{config.Index:D4}",
-                AlsaLongCardName: $"Mock Card {config.Index} at usb-mock-{config.Index}"
+                BusPath: isBluetooth ? null : $"pci-mock-usb-0:{config.Index}:1.0",
+                VendorId: isBluetooth ? null : "mock",
+                ProductId: isBluetooth ? null : $"{config.Index:D4}",
+                AlsaLongCardName: $"Mock Card {config.Index} at usb-mock-{config.Index}",
+                BluetoothMac: isBluetooth ? $"00:11:22:33:44:{config.Index:X2}" : null,
+                BluetoothCodec: isBluetooth ? "sbc" : null
             );
 
             return new PulseAudioCard(

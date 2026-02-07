@@ -467,16 +467,20 @@ public class CardProfileService
     /// </summary>
     public CardBootMuteResponse SetCardBootMute(string cardNameOrIndex, bool muted)
     {
-        var card = PulseAudioCardEnumerator.GetCard(cardNameOrIndex);
+        var card = _environment.IsMockHardware
+            ? MockCardEnumerator.GetCard(cardNameOrIndex)
+            : PulseAudioCardEnumerator.GetCard(cardNameOrIndex);
         if (card == null)
         {
             return new CardBootMuteResponse(false, $"Card '{cardNameOrIndex}' not found.");
         }
 
         var savedProfiles = LoadConfigurations();
-        var previousPreference = savedProfiles.TryGetValue(card.Name, out var existing)
-            ? existing.BootMuted
-            : null;
+        // Look up by stable key first, fall back to card.Name for legacy configs
+        var stableKey = ConfigurationService.GenerateCardKey(card);
+        var existing = savedProfiles.GetValueOrDefault(stableKey)
+            ?? savedProfiles.GetValueOrDefault(card.Name);
+        var previousPreference = existing?.BootMuted;
 
         SaveBootMute(card, muted);
 
@@ -512,7 +516,9 @@ public class CardProfileService
     /// </summary>
     public async Task<CardMaxVolumeResponse> SetCardMaxVolumeAsync(string cardNameOrIndex, int? maxVolume)
     {
-        var card = PulseAudioCardEnumerator.GetCard(cardNameOrIndex);
+        var card = _environment.IsMockHardware
+            ? MockCardEnumerator.GetCard(cardNameOrIndex)
+            : PulseAudioCardEnumerator.GetCard(cardNameOrIndex);
         if (card == null)
         {
             return new CardMaxVolumeResponse(false, $"Card '{cardNameOrIndex}' not found.");
@@ -1042,12 +1048,16 @@ public class CardProfileService
     private async Task ApplyBootMutePreferenceAsync(PulseAudioCard card, bool defaultUnmute, bool logBootAction = false)
     {
         var savedProfiles = LoadConfigurations();
-        if (!savedProfiles.TryGetValue(card.Name, out var config))
+        // Look up by stable key first, fall back to card.Name for legacy configs
+        var stableKey = ConfigurationService.GenerateCardKey(card);
+        if (!savedProfiles.TryGetValue(stableKey, out var config))
         {
-            if (!defaultUnmute)
-            {
-                return;
-            }
+            // Try legacy key (card name) as fallback
+            savedProfiles.TryGetValue(card.Name, out config);
+        }
+        if (config == null && !defaultUnmute)
+        {
+            return;
         }
 
         if (config?.BootMuted == null && !defaultUnmute)

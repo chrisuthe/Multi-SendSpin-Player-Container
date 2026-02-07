@@ -333,7 +333,9 @@ public class DeviceMatchingService
                     BusPath: null,
                     VendorId: null,
                     ProductId: null,
-                    AlsaLongCardName: $"Custom {customSink.Type} Sink"
+                    AlsaLongCardName: $"Custom {customSink.Type} Sink",
+                    BluetoothMac: null,
+                    BluetoothCodec: null
                 )
             );
             return EnrichWithConfig(customDevice);
