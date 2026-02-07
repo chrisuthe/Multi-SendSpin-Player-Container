@@ -1371,6 +1371,10 @@ async function setVolume(name, volume) {
         if (players[name]) {
             players[name].volume = volume;
         }
+        // Also update in pendingUpdate so other player updates aren't lost
+        if (pendingUpdate?.players?.[name]) {
+            pendingUpdate.players[name] = players[name];
+        }
     } catch (error) {
         console.error('Error setting volume:', error);
         showAlert(error.message, 'danger');
@@ -1426,6 +1430,10 @@ async function setPlayerMute(playerName, muted) {
         // Update local state
         if (players[playerName]) {
             players[playerName].isMuted = muted;
+        }
+        // Also update in pendingUpdate so other player updates aren't lost
+        if (pendingUpdate?.players?.[playerName]) {
+            pendingUpdate.players[playerName] = players[playerName];
         }
 
         // Update button UI
