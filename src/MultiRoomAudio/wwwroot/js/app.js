@@ -1847,21 +1847,57 @@ function getStateDisplayName(player) {
 }
 
 // Alert helpers
+/**
+ * Show a toast notification
+ * @param {string} message - The message to display
+ * @param {string} type - 'success', 'danger', 'warning', or 'info'
+ * @param {number} duration - Auto-hide delay in milliseconds (0 = no auto-hide)
+ */
 function showAlert(message, type = 'info', duration = 5000) {
-    const container = document.getElementById('alert-container');
-    const alert = document.createElement('div');
-    alert.className = `alert alert-${type} alert-dismissible fade show`;
-    alert.innerHTML = `
-        ${escapeHtml(message)}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    container.appendChild(alert);
+    const container = document.getElementById('toast-container');
 
-    // Auto-dismiss after specified duration
-    setTimeout(() => {
-        alert.classList.remove('show');
-        setTimeout(() => alert.remove(), 150);
-    }, duration);
+    // Create toast element
+    const toastEl = document.createElement('div');
+    toastEl.className = 'toast';
+    toastEl.setAttribute('role', 'alert');
+    toastEl.setAttribute('aria-live', 'polite');
+    toastEl.setAttribute('aria-atomic', 'true');
+
+    // Icon mapping
+    const typeConfig = {
+        success: { icon: 'fa-check-circle', color: 'text-success', title: 'Success' },
+        danger: { icon: 'fa-exclamation-circle', color: 'text-danger', title: 'Error' },
+        warning: { icon: 'fa-exclamation-triangle', color: 'text-warning', title: 'Warning' },
+        info: { icon: 'fa-info-circle', color: 'text-info', title: 'Info' }
+    };
+
+    const config = typeConfig[type] || typeConfig.info;
+
+    toastEl.innerHTML = `
+        <div class="toast-header">
+            <i class="fas ${config.icon} ${config.color} me-2"></i>
+            <strong class="me-auto">${config.title}</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body">
+            ${escapeHtml(message)}
+        </div>
+    `;
+
+    container.appendChild(toastEl);
+
+    // Initialize Bootstrap toast
+    const toast = new bootstrap.Toast(toastEl, {
+        autohide: duration > 0,
+        delay: duration
+    });
+
+    toast.show();
+
+    // Remove from DOM after hidden
+    toastEl.addEventListener('hidden.bs.toast', () => {
+        toastEl.remove();
+    });
 }
 
 // ========== Stats for Nerds ==========

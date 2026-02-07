@@ -16,6 +16,9 @@
     <link href="css/style.css" rel="stylesheet">
 </head>
 <body class="bg-body">
+    <!-- Toast notification container - floats over header area -->
+    <div id="toast-container" class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 1060;"></div>
+
     <div class="header-gradient text-white py-4 mb-4">
         <div class="container">
             <div class="row align-items-center">
@@ -87,8 +90,6 @@
         </div>
 
         <div id="players-main-content">
-        <div id="alert-container"></div>
-
         <div id="reconnect-banner" class="reconnect-banner">
             <div class="spinner-border text-warning" role="status"></div>
             <span id="reconnect-banner-text">Server unavailable — reconnecting...</span>
@@ -217,7 +218,7 @@
 
     <!-- Add/Edit Player Modal -->
     <div class="modal fade" id="playerModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="playerModalTitle"><i class="fas fa-plus-circle me-2" id="playerModalIcon"></i><span id="playerModalTitleText">Add New Player</span></h5>
@@ -277,7 +278,7 @@
 
     <!-- Player Stats Modal -->
     <div class="modal fade" id="playerStatsModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-chart-bar me-2"></i>Player Details</h5>
@@ -315,7 +316,7 @@
 
     <!-- Combine Sink Modal -->
     <div class="modal fade" id="combineSinkModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-layer-group me-2"></i>Create Combine Sink</h5>
@@ -355,7 +356,7 @@
 
     <!-- Remap Sink Modal -->
     <div class="modal fade" id="remapSinkModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-random me-2"></i>Create Remap Sink</h5>
@@ -417,7 +418,7 @@
 
     <!-- Import from default.pa Modal -->
     <div class="modal fade" id="importSinksModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
@@ -479,7 +480,7 @@
 
     <!-- Custom Sinks Modal -->
     <div class="modal fade" id="customSinksModal" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-layer-group me-2"></i>Custom Sinks</h5>
@@ -518,7 +519,7 @@
 
     <!-- 12V Triggers Modal -->
     <div class="modal fade" id="triggersModal" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-bolt me-2"></i>12V Trigger Control</h5>
@@ -578,7 +579,7 @@
 
     <!-- Add Board Modal -->
     <div class="modal fade" id="addBoardModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add Relay Board</h5>
@@ -636,7 +637,7 @@
 
     <!-- Audio Devices Modal -->
     <div class="modal fade" id="soundCardsModal" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-sd-card me-2"></i>Audio Device Configuration</h5>
