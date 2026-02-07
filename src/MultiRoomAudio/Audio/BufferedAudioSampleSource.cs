@@ -109,9 +109,9 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     private const long CorrectionThresholdMicroseconds = 15_000;  // 15ms deadband
 
     // Startup deadband - wider tolerance during first 500ms to prevent oscillation.
-    // Sync corrections still happen if error exceeds 50ms, maintaining multi-room sync.
+    // Must stay within ~30ms threshold where multi-room delay becomes audible.
     // After startup period, normal 15ms deadband resumes for tighter sync.
-    private const long StartupDeadbandMicroseconds = 50_000;      // 50ms during startup
+    private const long StartupDeadbandMicroseconds = 30_000;      // 30ms during startup
     private const int StartupDeadbandPeriodMs = 500;              // First 500ms
 
     // Correction rate limits (frames between corrections)
