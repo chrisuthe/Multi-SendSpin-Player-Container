@@ -387,7 +387,9 @@ public class MockHardwareConfigService
                 Serial = "00:1A:7D:DA:71:13",
                 Index = 4,
                 CardIndex = 4,
-                MaxChannels = 2
+                MaxChannels = 2,
+                BluetoothMac = "00:1A:7D:DA:71:13",
+                BluetoothCodec = "sbc"
             },
             // Sony WH-1000XM4 Bluetooth headphones
             new()
@@ -398,7 +400,9 @@ public class MockHardwareConfigService
                 Serial = "38:18:4C:E9:85:B2",
                 Index = 5,
                 CardIndex = 5,
-                MaxChannels = 2
+                MaxChannels = 2,
+                BluetoothMac = "38:18:4C:E9:85:B2",
+                BluetoothCodec = "ldac"
             },
             // NVIDIA HDMI audio (PCI device - GPU)
             new()

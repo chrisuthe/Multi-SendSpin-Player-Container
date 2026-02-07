@@ -157,7 +157,9 @@ public class MockAudioBackend : IBackend
                 BusPath: null,
                 VendorId: null,
                 ProductId: null,
-                AlsaLongCardName: $"Custom {sink.Type} Sink"
+                AlsaLongCardName: $"Custom {sink.Type} Sink",
+                BluetoothMac: null,
+                BluetoothCodec: null
             )
         );
     }
@@ -290,7 +292,9 @@ public class MockAudioBackend : IBackend
                     BusPath: config.BusPath,
                     VendorId: config.VendorId,
                     ProductId: config.ProductId,
-                    AlsaLongCardName: config.Description
+                    AlsaLongCardName: config.Description,
+                    BluetoothMac: config.BluetoothMac,
+                    BluetoothCodec: config.BluetoothCodec
                 ),
                 CardIndex: config.CardIndex
             );

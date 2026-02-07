@@ -261,10 +261,13 @@ public static partial class PulseAudioDeviceEnumerator
         var vendorIdMatch = DeviceVendorIdRegex().Match(block);
         var productIdMatch = DeviceProductIdRegex().Match(block);
         var alsaLongCardNameMatch = AlsaLongCardNameRegex().Match(block);
+        var bluetoothMacMatch = BluetoothMacRegex().Match(block);
+        var bluetoothCodecMatch = BluetoothCodecRegex().Match(block);
 
         // Only create identifiers if we found at least one useful property
         if (!serialMatch.Success && !busPathMatch.Success && !vendorIdMatch.Success &&
-            !productIdMatch.Success && !alsaLongCardNameMatch.Success)
+            !productIdMatch.Success && !alsaLongCardNameMatch.Success &&
+            !bluetoothMacMatch.Success && !bluetoothCodecMatch.Success)
         {
             return null;
         }
@@ -274,7 +277,9 @@ public static partial class PulseAudioDeviceEnumerator
             BusPath: busPathMatch.Success ? busPathMatch.Groups[1].Value : null,
             VendorId: vendorIdMatch.Success ? vendorIdMatch.Groups[1].Value : null,
             ProductId: productIdMatch.Success ? productIdMatch.Groups[1].Value : null,
-            AlsaLongCardName: alsaLongCardNameMatch.Success ? alsaLongCardNameMatch.Groups[1].Value : null
+            AlsaLongCardName: alsaLongCardNameMatch.Success ? alsaLongCardNameMatch.Groups[1].Value : null,
+            BluetoothMac: bluetoothMacMatch.Success ? bluetoothMacMatch.Groups[1].Value : null,
+            BluetoothCodec: bluetoothCodecMatch.Success ? bluetoothCodecMatch.Groups[1].Value : null
         );
     }
 
@@ -321,4 +326,11 @@ public static partial class PulseAudioDeviceEnumerator
 
     [GeneratedRegex(@"device\.card\s*=\s*""(\d+)""", RegexOptions.Multiline)]
     private static partial Regex DeviceCardRegex();
+
+    // Regex patterns for Bluetooth device identifiers
+    [GeneratedRegex(@"api\.bluez5\.address\s*=\s*""([^""]+)""", RegexOptions.Multiline)]
+    private static partial Regex BluetoothMacRegex();
+
+    [GeneratedRegex(@"api\.bluez5\.codec\s*=\s*""([^""]+)""", RegexOptions.Multiline)]
+    private static partial Regex BluetoothCodecRegex();
 }

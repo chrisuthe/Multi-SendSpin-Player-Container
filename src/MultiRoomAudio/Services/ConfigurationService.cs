@@ -76,6 +76,9 @@ public class DeviceIdentifiersConfig
     public string? VendorId { get; set; }
     public string? ProductId { get; set; }
     public string? AlsaLongCardName { get; set; }
+    // Bluetooth-specific
+    public string? BluetoothMac { get; set; }
+    public string? BluetoothCodec { get; set; }
 
     /// <summary>
     /// Create from the model record.
@@ -90,14 +93,16 @@ public class DeviceIdentifiersConfig
             BusPath = identifiers.BusPath,
             VendorId = identifiers.VendorId,
             ProductId = identifiers.ProductId,
-            AlsaLongCardName = identifiers.AlsaLongCardName
+            AlsaLongCardName = identifiers.AlsaLongCardName,
+            BluetoothMac = identifiers.BluetoothMac,
+            BluetoothCodec = identifiers.BluetoothCodec
         };
     }
 
     /// <summary>
     /// Convert to the model record.
     /// </summary>
-    public DeviceIdentifiers ToModel() => new(Serial, BusPath, VendorId, ProductId, AlsaLongCardName);
+    public DeviceIdentifiers ToModel() => new(Serial, BusPath, VendorId, ProductId, AlsaLongCardName, BluetoothMac, BluetoothCodec);
 }
 
 /// <summary>
