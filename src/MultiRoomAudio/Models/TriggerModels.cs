@@ -49,6 +49,8 @@ public enum RelayBoardType
     UsbHid,
     /// <summary>Modbus ASCII relay board (Sainsmart, etc.) - uses serial protocol over CH340/CH341.</summary>
     Modbus,
+    /// <summary>LCUS binary relay board (1-8 channel) - uses simple binary protocol over CH340/CH341.</summary>
+    Lcus,
     /// <summary>Mock board for testing.</summary>
     Mock
 }

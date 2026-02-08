@@ -766,6 +766,23 @@ public class TriggerService : IAsyncDisposable
                     connected = board.OpenBySerial(boardId);
                 }
             }
+            else if (boardId.StartsWith("LCUS:", StringComparison.OrdinalIgnoreCase))
+            {
+                var lcusId = boardId.Substring(5);
+                // Check if it's a USB path hash (8 hex chars) or a port name (/dev/ttyUSB0)
+                var isHashId = lcusId.Length == 8 && lcusId.All(c => char.IsAsciiHexDigit(c));
+
+                if (isHashId && board is LcusRelayBoard lcusBoard)
+                {
+                    // Hash-based identification - find by USB port path
+                    connected = lcusBoard.OpenByUsbPathHash(lcusId);
+                }
+                else
+                {
+                    // Legacy port-name based identification
+                    connected = board.OpenBySerial(boardId);
+                }
+            }
             else if (boardId.StartsWith("FTDI:", StringComparison.OrdinalIgnoreCase))
             {
                 // FTDI path-based identification (hash of USB bus/port path)

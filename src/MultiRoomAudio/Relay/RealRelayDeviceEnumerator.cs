@@ -4,7 +4,7 @@ namespace MultiRoomAudio.Relay;
 
 /// <summary>
 /// Real implementation of relay device enumeration.
-/// Discovers actual FTDI, HID, and Modbus relay boards connected to the system.
+/// Discovers actual FTDI, HID, Modbus, and LCUS relay boards connected to the system.
 /// </summary>
 public class RealRelayDeviceEnumerator : IRelayDeviceEnumerator
 {
@@ -19,7 +19,7 @@ public class RealRelayDeviceEnumerator : IRelayDeviceEnumerator
     public bool IsHardwareAvailable =>
         FtdiRelayBoard.IsLibraryAvailable() ||
         HidRelayBoard.EnumerateDevices(_logger).Count > 0 ||
-        ModbusRelayBoard.EnumerateDevices(_logger).Count > 0;
+        Ch340RelayProbe.EnumerateDevices(_logger).Count > 0;
 
     /// <inheritdoc />
     public List<FtdiDeviceInfo> GetFtdiDevices()
@@ -95,27 +95,34 @@ public class RealRelayDeviceEnumerator : IRelayDeviceEnumerator
             _logger.LogWarning(ex, "Error enumerating HID relay devices");
         }
 
-        // Enumerate Modbus serial relay devices (CH340/CH341)
+        // Enumerate CH340 serial relay devices (Modbus and LCUS protocols)
         try
         {
-            foreach (var modbus in ModbusRelayBoard.EnumerateDevices(_logger))
+            foreach (var ch340 in Ch340RelayProbe.EnumerateDevices(_logger))
             {
+                var boardType = ch340.Protocol switch
+                {
+                    Ch340Protocol.Modbus => RelayBoardType.Modbus,
+                    Ch340Protocol.Lcus => RelayBoardType.Lcus,
+                    _ => RelayBoardType.Unknown
+                };
+
                 result.Add(new RelayDeviceInfo(
-                    BoardId: modbus.GetBoardId(),
-                    BoardType: RelayBoardType.Modbus,
-                    SerialNumber: modbus.UsbPortPath, // Store USB port path if available
-                    Description: modbus.Description,
-                    ChannelCount: 16, // Default - user must configure manually
+                    BoardId: ch340.GetBoardId(),
+                    BoardType: boardType,
+                    SerialNumber: ch340.UsbPortPath, // Store USB port path if available
+                    Description: ch340.Description,
+                    ChannelCount: ch340.ChannelCount,
                     IsInUse: false,
-                    UsbPath: modbus.PortName, // Current serial port name
-                    IsPathBased: modbus.IsPathBased, // True if we have USB port path
-                    ChannelCountDetected: false // Modbus boards can't auto-detect channel count
+                    UsbPath: ch340.PortName, // Current serial port name
+                    IsPathBased: ch340.IsPathBased, // True if we have USB port path
+                    ChannelCountDetected: ch340.Protocol == Ch340Protocol.Lcus // LCUS auto-detects channel count
                 ));
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error enumerating Modbus relay devices");
+            _logger.LogWarning(ex, "Error enumerating CH340 relay devices");
         }
 
         _logger.LogDebug("Found {Count} total relay devices", result.Count);

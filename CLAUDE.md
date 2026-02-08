@@ -431,6 +431,7 @@ The trigger system supports USB relay boards for automatic amplifier power contr
 | **USB HID**      | `0x16C0:0x05DF` | DCT Tech, ucreatefun                                | Auto-detected     |
 | **FTDI**         | `0x0403:0x6001` | Denkovi DAE-CB/Ro8-USB, DAE-CB/Ro4-USB, Generic 8ch | Manual (model)    |
 | **Modbus/CH340** | `0x1A86:0x7523` | Sainsmart 16-channel                                | Manual            |
+| **LCUS/CH340**   | `0x1A86:0x7523` | LCUS 1-8 channel relay boards                       | Auto-detected     |
 
 ### Board Identification
 
@@ -441,6 +442,7 @@ All board types use USB port path hash for consistent identification:
 | **HID** | `HID:8HEXCHARS` | `HID:CA88BCAC` |
 | **FTDI** | `FTDI:8HEXCHARS` | `FTDI:7B9E3D1A` |
 | **Modbus** | `MODBUS:8HEXCHARS` | `MODBUS:7F3A2B1C` |
+| **LCUS** | `LCUS:8HEXCHARS` | `LCUS:2D4F6A8B` |
 
 Board IDs are stable across reboots as long as the board stays in the same USB port. Moving a board to a different port will generate a new ID.
 
@@ -481,6 +483,32 @@ The Denkovi 4-channel board uses **odd pins only** (D1, D3, D5, D7), not sequent
 - Board echoes commands back as acknowledgment (no separate response)
 - Requires `dialout` group membership for serial port access
 
+### LCUS/CH340 Protocol Details
+
+- Uses simple binary protocol over serial (9600 baud, 8N1)
+- USB-to-serial chip: CH340/CH341 (same as Modbus - detected by probing)
+- **Status query**: Send `0xFF`, receive N bytes (one per channel, 0x00=OFF, 0x01=ON)
+- **Channel count**: Auto-detected from status response (1-8 channels)
+- **Command format**: `[0xA0][Channel][Operation][Checksum]`
+  - Channel: 0x01-0x08 (1-based)
+  - Operation: 0x00=OFF, 0x01=ON
+  - Checksum: `(0xA0 + Channel + Operation) & 0xFF`
+- **Example commands**:
+  - Channel 1 ON: `A0 01 01 A2`
+  - Channel 1 OFF: `A0 01 00 A1`
+  - Channel 8 ON: `A0 08 01 A9`
+- Requires `dialout` group membership for serial port access
+
+### CH340 Device Detection
+
+CH340-based boards (Modbus and LCUS) share the same USB VID:PID. During enumeration:
+
+1. Probe with Modbus "read coils" command (`:FE0100000010F1\r\n`)
+2. If no response, probe with LCUS status query (`0xFF`)
+3. Devices that don't respond to either protocol are ignored (e.g., Arduino, GPS modules)
+
+This prevents non-relay CH340 devices from appearing in the device list.
+
 ### Key Implementation Files
 
 | File | Purpose |
@@ -489,6 +517,8 @@ The Denkovi 4-channel board uses **odd pins only** (D1, D3, D5, D7), not sequent
 | `src/MultiRoomAudio/Relay/HidRelayBoard.cs` | USB HID relay implementation using HidApi.Net |
 | `src/MultiRoomAudio/Relay/FtdiRelayBoard.cs` | FTDI relay implementation using libftdi1 |
 | `src/MultiRoomAudio/Relay/ModbusRelayBoard.cs` | Modbus ASCII relay implementation using System.IO.Ports |
+| `src/MultiRoomAudio/Relay/LcusRelayBoard.cs` | LCUS binary relay implementation using System.IO.Ports |
+| `src/MultiRoomAudio/Relay/Ch340RelayProbe.cs` | Unified CH340 device detection (Modbus vs LCUS) |
 | `src/MultiRoomAudio/Relay/MockRelayBoard.cs` | Mock implementation for testing |
 | `src/MultiRoomAudio/Services/TriggerService.cs` | Multi-board management, player↔channel mapping |
 | `src/MultiRoomAudio/Models/TriggerModels.cs` | Data models, enums, request/response types |
