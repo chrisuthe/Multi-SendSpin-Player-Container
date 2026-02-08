@@ -315,7 +315,10 @@ public static partial class PulseAudioCardEnumerator
         var sinks = new List<string>();
 
         // Extract identifier from card name (e.g., "alsa_card.pci-0000_01_00.0" → "pci-0000_01_00.0")
-        var identifier = cardName.Replace("alsa_card.", "");
+        // Also handle BlueZ cards (e.g., "bluez_card.6C_5C_3D_3B_15_3F" → "6C_5C_3D_3B_15_3F")
+        var identifier = cardName
+            .Replace("alsa_card.", "")
+            .Replace("bluez_card.", "");
         if (string.IsNullOrEmpty(identifier))
         {
             _logger?.LogWarning("Could not extract identifier from card name '{CardName}'", cardName);
