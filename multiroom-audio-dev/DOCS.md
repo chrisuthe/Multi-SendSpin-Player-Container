@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-b003c25
+## Development Build: sha-5909b26
 
 **Current Dev Build Changes** (recent)
 
-- Merge pull request #165 from scyto/dev
-- Merge pull request #119 from scyto/fix/clear-pending-update-after-actions
-- Add real-time volume changes while dragging slider
-- Merge pull request #118 from scyto/fix/clear-pending-update-after-actions
-- Preserve other player updates in pendingUpdate
-- Clear pendingUpdate after player actions to prevent stale data
-- Merge pull request #117 from scyto/feature/defer-dom-updates-during-interaction
-- Remove focus check to prevent refresh starvation
-- Defer DOM updates during user interaction with player tiles
-- Merge pull request #164 from scyto/dev
+- Merge pull request #167 from scyto/bug/bluez-card-sink-matching
+- Add comprehensive BlueZ support across all card/sink matching
+- Fix BlueZ cards not finding their sinks for max volume/mute
+- Merge pull request #123 from scyto/feature/fix-startup-crackle
+- Add player name prefix to SDK log messages
+- Skip invalid 0ms latency samples during lock-in
+- Merge pull request #122 from scyto/feature/fix-startup-crackle
+- Revert startup deadband to 50ms
+- Merge pull request #121 from scyto/feature/fix-startup-crackle
+- Reduce startup deadband from 50ms to 30ms for multi-room sync
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
