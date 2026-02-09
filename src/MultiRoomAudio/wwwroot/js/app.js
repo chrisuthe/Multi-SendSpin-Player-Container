@@ -5203,7 +5203,11 @@ async function removeBoard(boardId) {
     });
 
     try {
-        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
+        // Use query params for board IDs that contain slashes (e.g., LCUS:/dev/ttyUSB0)
+        const url = boardId.includes('/')
+            ? `./api/triggers/boards/remove?boardId=${encodeURIComponent(boardId)}`
+            : `./api/triggers/boards/${encodeURIComponent(boardId)}`;
+        const response = await fetch(url, {
             method: 'DELETE'
         });
 
@@ -5300,7 +5304,11 @@ async function editBoard(boardId) {
         }
 
         try {
-            const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
+            // Use query params for board IDs that contain slashes (e.g., LCUS:/dev/ttyUSB0)
+            const url = boardId.includes('/')
+                ? `./api/triggers/boards/settings?boardId=${encodeURIComponent(boardId)}`
+                : `./api/triggers/boards/${encodeURIComponent(boardId)}`;
+            const response = await fetch(url, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -5351,15 +5359,28 @@ async function updateBoardBehavior(boardId, behaviorType, value) {
     });
 
     try {
-        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}`, {
+        // Use query params for board IDs that contain slashes (e.g., LCUS:/dev/ttyUSB0)
+        const url = boardId.includes('/')
+            ? `./api/triggers/boards/settings?boardId=${encodeURIComponent(boardId)}`
+            : `./api/triggers/boards/${encodeURIComponent(boardId)}`;
+        const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ [behaviorType]: value })
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.message || `Failed to update ${typeName.toLowerCase()} behavior`);
+            const errorText = await response.text();
+            let errorMessage = `Failed to update ${typeName.toLowerCase()} behavior`;
+            if (errorText) {
+                try {
+                    const error = JSON.parse(errorText);
+                    errorMessage = error.message || errorMessage;
+                } catch {
+                    errorMessage = errorText;
+                }
+            }
+            throw new Error(errorMessage);
         }
 
         // Update local data
@@ -5396,7 +5417,11 @@ async function reconnectBoard(boardId) {
     });
 
     try {
-        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}/reconnect`, {
+        // Use query params for board IDs that contain slashes (e.g., LCUS:/dev/ttyUSB0)
+        const url = boardId.includes('/')
+            ? `./api/triggers/boards/reconnect?boardId=${encodeURIComponent(boardId)}`
+            : `./api/triggers/boards/${encodeURIComponent(boardId)}/reconnect`;
+        const response = await fetch(url, {
             method: 'POST'
         });
 
@@ -5423,7 +5448,11 @@ async function updateTriggerSink(boardId, channel, sinkName) {
     const delay = delayInput ? parseInt(delayInput.value, 10) : 60;
 
     try {
-        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`, {
+        // Use query params for board IDs that contain slashes (e.g., LCUS:/dev/ttyUSB0)
+        const url = boardId.includes('/')
+            ? `./api/triggers/boards/channel?boardId=${encodeURIComponent(boardId)}&channel=${channel}`
+            : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`;
+        const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5452,7 +5481,11 @@ async function updateTriggerDelay(boardId, channel, delay) {
     const sinkName = sinkSelect ? sinkSelect.value : null;
 
     try {
-        const response = await fetch(`./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`, {
+        // Use query params for board IDs that contain slashes (e.g., LCUS:/dev/ttyUSB0)
+        const url = boardId.includes('/')
+            ? `./api/triggers/boards/channel?boardId=${encodeURIComponent(boardId)}&channel=${channel}`
+            : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`;
+        const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

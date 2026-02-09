@@ -197,6 +197,38 @@ public static class TriggersEndpoint
         .WithName("UpdateBoard")
         .WithDescription("Update a relay board's settings (including startup behavior)");
 
+        // PUT /api/triggers/boards/settings - Update board settings (query params for boardId with slashes)
+        // Using query params because boardId may contain slashes (e.g., LCUS:/dev/ttyUSB0)
+        group.MapPut("/boards/settings", (
+            [FromQuery(Name = "boardId")] string boardId,
+            UpdateBoardRequest request,
+            TriggerService service,
+            ILoggerFactory lf) =>
+        {
+            boardId = HttpUtility.UrlDecode(boardId);
+            var logger = lf.CreateLogger("TriggersEndpoint");
+            logger.LogDebug("API: PUT /api/triggers/boards/settings?boardId={BoardId}", boardId);
+
+            if (request.ChannelCount.HasValue && !ValidChannelCounts.IsValid(request.ChannelCount.Value))
+            {
+                return Results.BadRequest(new ErrorResponse(false,
+                    $"Channel count must be one of: {string.Join(", ", ValidChannelCounts.Values)}"));
+            }
+
+            var success = service.UpdateBoard(boardId, request.DisplayName, request.ChannelCount, request.StartupBehavior, request.ShutdownBehavior);
+            if (success)
+            {
+                var boardStatus = service.GetBoardStatus(boardId);
+                return Results.Ok(boardStatus);
+            }
+            else
+            {
+                return Results.NotFound(new ErrorResponse(false, $"Board '{boardId}' not found"));
+            }
+        })
+        .WithName("UpdateBoardSettings")
+        .WithDescription("Update a relay board's settings (query param version for IDs with slashes)");
+
         // DELETE /api/triggers/boards/{boardId} - Remove a board
         group.MapDelete("/boards/{boardId}", (
             string boardId,
@@ -221,6 +253,30 @@ public static class TriggersEndpoint
         .WithName("RemoveBoard")
         .WithDescription("Remove a relay board");
 
+        // DELETE /api/triggers/boards/remove - Remove a board (query params for boardId with slashes)
+        group.MapDelete("/boards/remove", (
+            [FromQuery(Name = "boardId")] string boardId,
+            TriggerService service,
+            ILoggerFactory lf) =>
+        {
+            boardId = HttpUtility.UrlDecode(boardId);
+            var logger = lf.CreateLogger("TriggersEndpoint");
+            logger.LogDebug("API: DELETE /api/triggers/boards/remove?boardId={BoardId}", boardId);
+
+            var success = service.RemoveBoard(boardId);
+            if (success)
+            {
+                logger.LogInformation("Removed board '{BoardId}'", boardId);
+                return Results.Ok(new SuccessResponse(true, $"Board '{boardId}' removed"));
+            }
+            else
+            {
+                return Results.NotFound(new ErrorResponse(false, $"Board '{boardId}' not found"));
+            }
+        })
+        .WithName("RemoveBoardQuery")
+        .WithDescription("Remove a relay board (query param version for IDs with slashes)");
+
         // POST /api/triggers/boards/{boardId}/reconnect - Reconnect a specific board
         group.MapPost("/boards/{boardId}/reconnect", (
             string boardId,
@@ -243,6 +299,29 @@ public static class TriggersEndpoint
         })
         .WithName("ReconnectBoard")
         .WithDescription("Attempt to reconnect a specific relay board");
+
+        // POST /api/triggers/boards/reconnect - Reconnect a specific board (query params for boardId with slashes)
+        group.MapPost("/boards/reconnect", (
+            [FromQuery(Name = "boardId")] string boardId,
+            TriggerService service,
+            ILoggerFactory lf) =>
+        {
+            boardId = HttpUtility.UrlDecode(boardId);
+            var logger = lf.CreateLogger("TriggersEndpoint");
+            logger.LogDebug("API: POST /api/triggers/boards/reconnect?boardId={BoardId}", boardId);
+
+            var success = service.ReconnectBoard(boardId);
+            var boardStatus = service.GetBoardStatus(boardId);
+
+            if (boardStatus == null)
+            {
+                return Results.NotFound(new ErrorResponse(false, $"Board '{boardId}' not found"));
+            }
+
+            return Results.Ok(boardStatus);
+        })
+        .WithName("ReconnectBoardQuery")
+        .WithDescription("Attempt to reconnect a specific relay board (query param version for IDs with slashes)");
 
         // ============================================
         // Channel Configuration Endpoints (per board)
@@ -321,6 +400,50 @@ public static class TriggersEndpoint
         })
         .WithName("ConfigureBoardTrigger")
         .WithDescription("Configure a trigger channel mapping on a specific board");
+
+        // PUT /api/triggers/boards/channel - Configure a trigger channel (query params for boardId with slashes)
+        group.MapPut("/boards/channel", (
+            [FromQuery(Name = "boardId")] string boardId,
+            [FromQuery(Name = "channel")] int channel,
+            TriggerConfigureRequest request,
+            TriggerService service,
+            ILoggerFactory lf) =>
+        {
+            boardId = HttpUtility.UrlDecode(boardId);
+            var logger = lf.CreateLogger("TriggersEndpoint");
+            logger.LogDebug("API: PUT /api/triggers/boards/channel?boardId={BoardId}&channel={Channel}", boardId, channel);
+
+            // Validate offDelaySeconds
+            if (request.OffDelaySeconds < 0)
+            {
+                return Results.BadRequest(new ErrorResponse(false, "Off delay must be 0 or greater"));
+            }
+            if (request.OffDelaySeconds > 3600)
+            {
+                return Results.BadRequest(new ErrorResponse(false, "Off delay must not exceed 3600 seconds (1 hour)"));
+            }
+
+            try
+            {
+                var success = service.ConfigureTrigger(
+                    boardId,
+                    channel,
+                    request.CustomSinkName,
+                    request.OffDelaySeconds,
+                    request.ZoneName);
+
+                var boardStatus = service.GetBoardStatus(boardId);
+                var trigger = boardStatus?.Triggers.FirstOrDefault(t => t.Channel == channel);
+
+                return Results.Ok(trigger);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(false, ex.Message));
+            }
+        })
+        .WithName("ConfigureBoardTriggerQuery")
+        .WithDescription("Configure a trigger channel mapping (query param version for IDs with slashes)");
 
         // DELETE /api/triggers/boards/{boardId}/{channel} - Unassign a trigger channel
         group.MapDelete("/boards/{boardId}/{channel:int}", (
