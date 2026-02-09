@@ -1751,6 +1751,11 @@ textarea,
         height: 28px;
     }
 
+    /* Ensure slider row elements align to thumb height */
+    .volume-control .form-range {
+        height: 28px;
+    }
+
     .channel-pair {
         flex-direction: column;
         align-items: flex-start;
