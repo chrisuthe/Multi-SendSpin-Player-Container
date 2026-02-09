@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-1a931c9
+## Development Build: sha-810ec5f
 
 **Current Dev Build Changes** (recent)
 
-- Merge pull request #169 from scyto/feature/lcus-relay-support
-- Add LCUS relay board support and unified CH340 detection
-- Merge pull request #168 from scyto/feature/relay-board-filtering
-- Use filtered EnumerateDevices in IsHardwareAvailable check
-- Filter relay board enumeration to exclude non-relay devices
-- Merge pull request #167 from scyto/bug/bluez-card-sink-matching
-- Add comprehensive BlueZ support across all card/sink matching
-- Fix BlueZ cards not finding their sinks for max volume/mute
-- Merge pull request #123 from scyto/feature/fix-startup-crackle
-- Add player name prefix to SDK log messages
+- Merge pull request #172 from scyto/dev
+- Add Trigger log category for relay board operations (#128)
+- Merge pull request #127 from scyto/bug/trigger-modal-reload-on-relay-toggle
+- Fix LCUS board IDs to use hash instead of device path
+- Fix trigger API calls for board IDs containing slashes
+- Merge pull request #126 from scyto/bug/trigger-modal-reload-on-relay-toggle
+- Fix trigger modal showing loading spinner on relay toggle
+- Merge pull request #125 from scyto/feature/diagnostics-sdk-clock-stats
+- Fix SDK version detection and add clock sync stats to player diagnostics
+- Merge pull request #124 from scyto/feature/diagnostics-download
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
