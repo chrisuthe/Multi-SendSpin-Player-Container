@@ -5474,19 +5474,60 @@ async function updateTriggerDelay(boardId, channel, delay) {
     }
 }
 
+// Update a specific channel's UI state without reloading everything
+function updateChannelState(boardId, channel, isOn) {
+    const boardIdSafe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
+
+    // Update local triggersData
+    const board = triggersData?.boards?.find(b => b.boardId === boardId);
+    if (board) {
+        const trigger = board.triggers?.find(t => t.channel === channel);
+        if (trigger) {
+            trigger.relayState = isOn ? 'On' : 'Off';
+        }
+    }
+
+    // Find the row for this channel by looking for the sink select element
+    const sinkSelect = document.getElementById(`trigger-sink-${boardIdSafe}-${channel}`);
+    if (!sinkSelect) return;
+
+    const row = sinkSelect.closest('tr');
+    if (!row) return;
+
+    // Update the badge in the first cell
+    const firstCell = row.cells[0];
+    const badge = firstCell.querySelector('.badge.bg-success, .badge.bg-secondary');
+    if (badge) {
+        if (isOn) {
+            badge.className = 'badge bg-success ms-1';
+            badge.textContent = 'On';
+        } else {
+            badge.className = 'badge bg-secondary ms-1';
+            badge.textContent = 'Off';
+        }
+    }
+
+    // Update the button classes in the last cell
+    const lastCell = row.cells[row.cells.length - 1];
+    const buttons = lastCell.querySelectorAll('button');
+    if (buttons.length === 2) {
+        const onBtn = buttons[0];
+        const offBtn = buttons[1];
+
+        if (isOn) {
+            onBtn.className = 'btn btn-success btn-sm';
+            offBtn.className = 'btn btn-outline-secondary btn-sm';
+        } else {
+            onBtn.className = 'btn btn-outline-secondary btn-sm';
+            offBtn.className = 'btn btn-secondary btn-sm';
+        }
+    }
+}
+
 // Test a trigger relay (multi-board)
 async function testTrigger(boardId, channel, on) {
     // Prevent refresh interval from clobbering expanded state during this operation
     triggersOperationCount++;
-
-    // Save expanded state before any async operations
-    const container = document.getElementById('triggersContainer');
-    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
-        const match = el.id.match(/^board-(.+)$/);
-        if (match) {
-            expandedBoardsState.add(match[1]);
-        }
-    });
 
     try {
         // Use query params for board IDs that contain slashes (e.g., MODBUS:/dev/ttyUSB0)
@@ -5505,7 +5546,9 @@ async function testTrigger(boardId, channel, on) {
         }
 
         showAlert(`Relay ${channel} turned ${on ? 'ON' : 'OFF'}`, 'success', 2000);
-        await loadTriggers();
+
+        // Update just the affected channel's UI instead of reloading everything
+        updateChannelState(boardId, channel, on);
     } catch (error) {
         console.error('Error testing trigger:', error);
         showAlert(`Failed to test relay: ${error.message}`, 'danger');
