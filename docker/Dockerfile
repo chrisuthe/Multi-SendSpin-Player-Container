@@ -25,6 +25,8 @@ EXPOSE 8096
 # - libudev1: Required by HidSharp for USB HID device enumeration
 # CH340/Modbus serial relay board dependencies:
 # - dialout group membership for serial port access (added below)
+# Diagnostics dependencies:
+# - usbutils: lsusb for USB device enumeration in diagnostics
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pulseaudio \
     libasound2 \
@@ -33,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libftdi1-2 \
     libusb-1.0-0 \
     libudev1 \
+    usbutils \
     && rm -rf /var/lib/apt/lists/* \
     && usermod -a -G audio pulse 2>/dev/null || true \
     && usermod -a -G audio root 2>/dev/null || true \

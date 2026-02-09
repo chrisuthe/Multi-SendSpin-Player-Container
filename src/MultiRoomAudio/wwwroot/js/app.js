@@ -4437,6 +4437,107 @@ function downloadLogs() {
     window.location.href = `./api/logs/download?${params}`;
 }
 
+// Active diagnostics EventSource (for cancellation support)
+let activeDiagnosticsEventSource = null;
+
+// Download comprehensive diagnostics file with progress banner
+function downloadDiagnostics() {
+    const banner = document.getElementById('diagnostics-banner');
+    const bannerText = document.getElementById('diagnostics-banner-text');
+    const progressEl = document.getElementById('diagnostics-progress');
+
+    if (!banner) {
+        // Fallback to direct download if banner doesn't exist
+        window.location.href = './api/diagnostics/download';
+        return;
+    }
+
+    // Cancel any existing diagnostics generation
+    if (activeDiagnosticsEventSource) {
+        activeDiagnosticsEventSource.close();
+        activeDiagnosticsEventSource = null;
+    }
+
+    // Show the banner
+    banner.classList.remove('d-none');
+    bannerText.textContent = 'Generating diagnostics...';
+    progressEl.textContent = '';
+
+    // Connect to SSE endpoint
+    const eventSource = new EventSource('./api/diagnostics/stream');
+    activeDiagnosticsEventSource = eventSource;
+
+    eventSource.addEventListener('progress', (event) => {
+        const data = JSON.parse(event.data);
+        bannerText.textContent = `Generating diagnostics — ${data.phase}`;
+        progressEl.textContent = `(${data.current}/${data.total})`;
+    });
+
+    eventSource.addEventListener('complete', (event) => {
+        eventSource.close();
+        activeDiagnosticsEventSource = null;
+
+        // Decode base64 content
+        const base64Content = event.data;
+        const content = atob(base64Content);
+
+        // Create blob and trigger download
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const filename = `multiroom-diagnostics-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.txt`;
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // Hide the banner
+        banner.classList.add('d-none');
+    });
+
+    eventSource.addEventListener('error', (event) => {
+        eventSource.close();
+        activeDiagnosticsEventSource = null;
+        bannerText.textContent = 'Diagnostics generation failed';
+        progressEl.textContent = '';
+
+        // Hide after 3 seconds
+        setTimeout(() => {
+            banner.classList.add('d-none');
+        }, 3000);
+
+        showAlert('Failed to generate diagnostics', 'danger');
+    });
+
+    // Also handle connection errors
+    eventSource.onerror = () => {
+        if (eventSource.readyState === EventSource.CLOSED) {
+            return; // Already handled by 'error' event
+        }
+        eventSource.close();
+        activeDiagnosticsEventSource = null;
+        banner.classList.add('d-none');
+        showAlert('Connection lost while generating diagnostics', 'danger');
+    };
+}
+
+// Cancel diagnostics generation
+function cancelDiagnostics() {
+    const banner = document.getElementById('diagnostics-banner');
+
+    if (activeDiagnosticsEventSource) {
+        activeDiagnosticsEventSource.close();
+        activeDiagnosticsEventSource = null;
+    }
+
+    if (banner) {
+        banner.classList.add('d-none');
+    }
+}
+
 // ============================================
 // ONBOARDING WIZARD INTEGRATION
 // ============================================

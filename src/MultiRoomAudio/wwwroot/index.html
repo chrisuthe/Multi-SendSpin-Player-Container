@@ -42,6 +42,9 @@
                             <li><a class="dropdown-item" href="#" onclick="showLogsView(); return false;">
                                 <i class="fas fa-scroll me-2"></i>Logs
                             </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="downloadDiagnostics(); return false;">
+                                <i class="fas fa-file-medical me-2"></i>Diagnostics
+                            </a></li>
                         </ul>
                     </div>
                     <div class="dropdown d-inline-block me-2">
@@ -94,6 +97,13 @@
             <div class="spinner-border text-warning" role="status"></div>
             <span id="reconnect-banner-text">Server unavailable — reconnecting...</span>
             <span class="reconnect-time" id="reconnect-elapsed"></span>
+        </div>
+
+        <div id="diagnostics-banner" class="diagnostics-banner d-none">
+            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+            <span id="diagnostics-banner-text">Generating diagnostics...</span>
+            <span class="diagnostics-progress" id="diagnostics-progress"></span>
+            <button type="button" class="btn btn-sm btn-outline-secondary diagnostics-cancel" id="diagnostics-cancel" onclick="cancelDiagnostics()">Cancel</button>
         </div>
 
         <div class="row">

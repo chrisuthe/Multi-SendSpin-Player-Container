@@ -290,6 +290,7 @@ app.MapOnboardingEndpoints();
 app.MapCardsEndpoints();
 app.MapLogsEndpoints();
 app.MapTriggersEndpoints();
+app.MapDiagnosticsEndpoints();
 
 // Startup progress endpoint (for web UI to show initialization status)
 app.MapGet("/api/startup", (StartupProgressService startup) => Results.Ok(startup.GetProgress()))
