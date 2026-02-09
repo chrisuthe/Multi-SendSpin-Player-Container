@@ -303,11 +303,13 @@ public static class DiagnosticsEndpoint
         sb.AppendLine($"Uptime:         {GetUptime()}");
         sb.AppendLine();
 
-        // Quick Device Summary
+        // Quick Device Summary (hardware devices only, excludes custom sinks)
         sb.AppendLine("--- AUDIO DEVICES ---");
         try
         {
-            var devices = PulseAudioDeviceEnumerator.GetOutputDevices().ToList();
+            var allDevices = PulseAudioDeviceEnumerator.GetOutputDevices().ToList();
+            var customSinkNames = sinksService.GetAllSinks().Sinks.Select(s => s.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var devices = allDevices.Where(d => !customSinkNames.Contains(d.Name)).ToList();
             var players = playerManager.GetAllPlayers().Players;
 
             foreach (var device in devices)
@@ -363,17 +365,21 @@ public static class DiagnosticsEndpoint
         sb.AppendLine("--- TOTALS ---");
         try
         {
-            var devices = PulseAudioDeviceEnumerator.GetOutputDevices().ToList();
+            var allDevices = PulseAudioDeviceEnumerator.GetOutputDevices().ToList();
             var players = playerManager.GetAllPlayers();
             var sinks = sinksService.GetAllSinks();
             var triggerStatus = triggerService.GetStatus();
+
+            // Filter out custom sinks from hardware device count
+            var customSinkNames = sinks.Sinks.Select(s => s.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var hardwareDeviceCount = allDevices.Count(d => !customSinkNames.Contains(d.Name));
 
             var playersWithDevices = players.Players.Count(p => !string.IsNullOrEmpty(p.Device));
             var playingCount = players.Players.Count(p => p.State == PlayerState.Playing);
             var connectedBoards = triggerStatus.Boards.Count(b => b.State == TriggerFeatureState.Connected);
             var assignedChannels = triggerStatus.Boards.SelectMany(b => b.Triggers).Count(t => t.CustomSinkName != null);
 
-            sb.AppendLine($"  Audio Devices:  {devices.Count} total, {playersWithDevices} with players");
+            sb.AppendLine($"  Audio Devices:  {hardwareDeviceCount} total, {playersWithDevices} with players");
             sb.AppendLine($"  Custom Sinks:   {sinks.Count}");
             sb.AppendLine($"  Players:        {players.Count} total, {playingCount} playing");
             sb.AppendLine($"  Relay Boards:   {connectedBoards} connected, {assignedChannels} channels assigned");
