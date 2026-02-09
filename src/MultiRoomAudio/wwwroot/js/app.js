@@ -44,6 +44,7 @@ let serverAvailable = true; // Track whether the backend is reachable
 let disconnectedSince = null; // Timestamp when server became unavailable
 let gracefulShutdown = false; // True when server sent explicit shutdown notice
 let startupComplete = false; // Track whether backend startup is finished
+let intentionalSignalRRestart = false; // True when we're deliberately restarting SignalR
 
 function formatBuildVersion(apiInfo) {
     const version = apiInfo?.version;
@@ -744,7 +745,11 @@ function setupSignalR() {
     connection.onclose(() => {
         statusBadge.textContent = 'Disconnected';
         statusBadge.className = 'badge bg-danger me-2';
-        setServerAvailable(false);
+
+        // Don't reset server availability if we're intentionally restarting SignalR
+        if (!intentionalSignalRRestart) {
+            setServerAvailable(false);
+        }
 
         if (gracefulShutdown) {
             setTimeout(() => {
@@ -870,16 +875,24 @@ async function refreshStatus(force = false, manual = false) {
             if (connection && connection.state !== signalR.HubConnectionState.Connected) {
                 console.log(`Server is back — restarting SignalR (was ${connection.state})`);
                 const statusBadge = document.getElementById('connection-status');
+                // Set flag so onclose doesn't reset serverAvailable
+                intentionalSignalRRestart = true;
                 // Stop the stale connection (cancels any in-flight reconnect attempts)
                 connection.stop()
                     .catch(() => {})
                     .then(() => connection.start())
                     .then(() => {
+                        intentionalSignalRRestart = false;
                         statusBadge.textContent = 'Connected';
                         statusBadge.className = 'badge bg-success me-2';
                     })
                     .catch(err => {
+                        intentionalSignalRRestart = false;
                         console.log('SignalR restart failed, will retry on next poll:', err);
+                        // Allow next poll to retry SignalR restart
+                        if (connection.state !== signalR.HubConnectionState.Connected) {
+                            serverAvailable = false;
+                        }
                     });
             }
         }
