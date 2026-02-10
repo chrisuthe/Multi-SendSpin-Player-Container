@@ -549,7 +549,7 @@ const Wizard = {
                                 ${isHidden ? '<span class="badge bg-secondary ms-2">Hidden</span>' : ''}
                             </h6>
                             <small class="text-muted d-block">${device.maxChannels}ch, ${formatSampleRate(device.defaultSampleRate)}${portHint ? ` · <i class="fab fa-usb"></i> ${portHint}` : ''}</small>
-                            <div class="input-group input-group-sm mt-2" style="max-width: 300px;">
+                            <div class="input-group input-group-sm mt-2 alias-input-group">
                                 <input type="text" class="form-control"
                                        placeholder="e.g., Kitchen Speaker"
                                        id="alias-${escapeHtml(device.id)}"
@@ -1130,11 +1130,11 @@ const Wizard = {
                             </div>
                             <div class="d-flex align-items-center">
                                 <label class="me-2 text-muted small">Vol:</label>
-                                <input type="range" class="form-range" style="width: 80px;"
+                                <input type="range" class="form-range wizard-volume-slider"
                                        min="0" max="100" value="75"
                                        id="volume-${escapeHtml(device.id)}"
                                        oninput="document.getElementById('volume-label-${escapeHtml(device.id)}').textContent = this.value + '%'">
-                                <span class="ms-2 text-muted small" id="volume-label-${escapeHtml(device.id)}" style="width: 35px;">75%</span>
+                                <span class="ms-2 text-muted small wizard-volume-label" id="volume-label-${escapeHtml(device.id)}">75%</span>
                             </div>
                         </div>
                     </div>

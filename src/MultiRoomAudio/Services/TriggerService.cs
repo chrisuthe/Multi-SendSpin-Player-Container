@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Timers;
+using Microsoft.AspNetCore.SignalR;
+using MultiRoomAudio.Hubs;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Relay;
 using YamlDotNet.Serialization;
@@ -20,6 +22,7 @@ public class TriggerService : IAsyncDisposable
     private readonly CustomSinksService _sinksService;
     private readonly IRelayDeviceEnumerator _deviceEnumerator;
     private readonly IRelayBoardFactory _boardFactory;
+    private readonly IHubContext<PlayerStatusHub>? _hubContext;
     private readonly string _configPath;
     private readonly IDeserializer _deserializer;
     private readonly ISerializer _serializer;
@@ -54,13 +57,15 @@ public class TriggerService : IAsyncDisposable
         CustomSinksService sinksService,
         EnvironmentService environment,
         IRelayDeviceEnumerator deviceEnumerator,
-        IRelayBoardFactory boardFactory)
+        IRelayBoardFactory boardFactory,
+        IHubContext<PlayerStatusHub>? hubContext = null)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
         _sinksService = sinksService;
         _deviceEnumerator = deviceEnumerator;
         _boardFactory = boardFactory;
+        _hubContext = hubContext;
         _configPath = Path.Combine(environment.ConfigPath, "triggers.yaml");
 
         _deserializer = new DeserializerBuilder()
@@ -155,9 +160,20 @@ public class TriggerService : IAsyncDisposable
 
     /// <summary>
     /// Get the current status of the trigger feature (all boards).
+    /// Also attempts to reconnect any disconnected boards.
     /// </summary>
     public TriggerFeatureResponse GetStatus()
     {
+        // Attempt to reconnect any disconnected boards
+        foreach (var boardConfig in _config.Boards)
+        {
+            if (_boardStates.TryGetValue(boardConfig.BoardId, out var state)
+                && state == TriggerFeatureState.Disconnected)
+            {
+                TryGetOrReconnectBoard(boardConfig.BoardId);
+            }
+        }
+
         var boardResponses = new List<TriggerBoardResponse>();
 
         foreach (var boardConfig in _config.Boards)
@@ -617,7 +633,7 @@ public class TriggerService : IAsyncDisposable
                 !string.IsNullOrEmpty(t.CustomSinkName) &&
                 string.Equals(t.CustomSinkName, deviceId, StringComparison.OrdinalIgnoreCase));
 
-            if (trigger != null && _relayBoards.ContainsKey(boardConfig.BoardId))
+            if (trigger != null && _boardStates.ContainsKey(boardConfig.BoardId))
             {
                 ActivateTrigger(boardConfig.BoardId, trigger.Channel, playerName);
                 return;
@@ -639,7 +655,7 @@ public class TriggerService : IAsyncDisposable
                 !string.IsNullOrEmpty(t.CustomSinkName) &&
                 string.Equals(t.CustomSinkName, deviceId, StringComparison.OrdinalIgnoreCase));
 
-            if (trigger != null && _relayBoards.ContainsKey(boardConfig.BoardId))
+            if (trigger != null && _boardStates.ContainsKey(boardConfig.BoardId))
             {
                 DeactivateTrigger(boardConfig.BoardId, trigger.Channel, trigger.OffDelaySeconds, playerName);
                 return;
@@ -1013,6 +1029,42 @@ public class TriggerService : IAsyncDisposable
 
     #region Private Methods - Trigger Activation
 
+    /// <summary>
+    /// Gets a relay board, attempting reconnection if disconnected.
+    /// Returns the board if connected/reconnected, null otherwise.
+    /// </summary>
+    private IRelayBoard? TryGetOrReconnectBoard(string boardId)
+    {
+        // Fast path: board already connected
+        if (_relayBoards.TryGetValue(boardId, out var board) && board.IsConnected)
+            return board;
+
+        // Check if board is configured but disconnected
+        if (_boardStates.TryGetValue(boardId, out var state) && state == TriggerFeatureState.Disconnected)
+        {
+            _logger.LogInformation("Attempting lazy reconnection for board '{BoardId}'", boardId);
+
+            if (ConnectBoard(boardId, applyStartupBehavior: false))
+            {
+                _logger.LogInformation("Lazy reconnection successful for board '{BoardId}'", boardId);
+
+                // Notify via SignalR
+                _ = _hubContext?.Clients.All.SendAsync("TriggerBoardReconnected", new
+                {
+                    boardId,
+                    message = $"Relay board {boardId} reconnected"
+                });
+
+                _relayBoards.TryGetValue(boardId, out board);
+                return board;
+            }
+
+            _logger.LogDebug("Lazy reconnection failed for board '{BoardId}'", boardId);
+        }
+
+        return null;
+    }
+
     private void ActivateTrigger(string boardId, int channel, string playerName)
     {
         if (!_channelStates.TryGetValue((boardId, channel), out var state))
@@ -1031,7 +1083,8 @@ public class TriggerService : IAsyncDisposable
             if (!state.IsActive)
             {
                 state.IsActive = true;
-                if (_relayBoards.TryGetValue(boardId, out var board))
+                var board = TryGetOrReconnectBoard(boardId);
+                if (board != null)
                 {
                     var success = board.SetRelay(channel, true);
                     _logger.LogInformation(
@@ -1069,7 +1122,8 @@ public class TriggerService : IAsyncDisposable
                 {
                     // Immediate off
                     state.IsActive = false;
-                    if (_relayBoards.TryGetValue(boardId, out var board))
+                    var board = TryGetOrReconnectBoard(boardId);
+                    if (board != null)
                     {
                         var success = board.SetRelay(channel, false);
                         _logger.LogInformation(
@@ -1125,7 +1179,8 @@ public class TriggerService : IAsyncDisposable
             {
                 state.IsActive = false;
                 state.OffDelayTimer = null;
-                if (_relayBoards.TryGetValue(boardId, out var board))
+                var board = TryGetOrReconnectBoard(boardId);
+                if (board != null)
                 {
                     var success = board.SetRelay(channel, false);
                     _logger.LogInformation(

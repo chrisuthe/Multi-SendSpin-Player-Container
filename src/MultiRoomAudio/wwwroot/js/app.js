@@ -44,6 +44,7 @@ let serverAvailable = true; // Track whether the backend is reachable
 let disconnectedSince = null; // Timestamp when server became unavailable
 let gracefulShutdown = false; // True when server sent explicit shutdown notice
 let startupComplete = false; // Track whether backend startup is finished
+let intentionalSignalRRestart = false; // True when we're deliberately restarting SignalR
 
 function formatBuildVersion(apiInfo) {
     const version = apiInfo?.version;
@@ -707,6 +708,17 @@ function setupSignalR() {
         await refreshDevices();
     });
 
+    connection.on('TriggerBoardReconnected', (data) => {
+        console.log('Relay board reconnected:', data);
+        showAlert(data.message || 'Relay board reconnected', 'success', 5000);
+
+        // If triggers modal is open, refresh it
+        const triggersModal = document.getElementById('triggersModal');
+        if (triggersModal && triggersModal.classList.contains('show')) {
+            loadTriggers();
+        }
+    });
+
     connection.onreconnecting(() => {
         statusBadge.textContent = 'Reconnecting...';
         statusBadge.className = 'badge bg-warning me-2';
@@ -733,7 +745,11 @@ function setupSignalR() {
     connection.onclose(() => {
         statusBadge.textContent = 'Disconnected';
         statusBadge.className = 'badge bg-danger me-2';
-        setServerAvailable(false);
+
+        // Don't reset server availability if we're intentionally restarting SignalR
+        if (!intentionalSignalRRestart) {
+            setServerAvailable(false);
+        }
 
         if (gracefulShutdown) {
             setTimeout(() => {
@@ -859,16 +875,24 @@ async function refreshStatus(force = false, manual = false) {
             if (connection && connection.state !== signalR.HubConnectionState.Connected) {
                 console.log(`Server is back — restarting SignalR (was ${connection.state})`);
                 const statusBadge = document.getElementById('connection-status');
+                // Set flag so onclose doesn't reset serverAvailable
+                intentionalSignalRRestart = true;
                 // Stop the stale connection (cancels any in-flight reconnect attempts)
                 connection.stop()
                     .catch(() => {})
                     .then(() => connection.start())
                     .then(() => {
+                        intentionalSignalRRestart = false;
                         statusBadge.textContent = 'Connected';
                         statusBadge.className = 'badge bg-success me-2';
                     })
                     .catch(err => {
+                        intentionalSignalRRestart = false;
                         console.log('SignalR restart failed, will retry on next poll:', err);
+                        // Allow next poll to retry SignalR restart
+                        if (connection.state !== signalR.HubConnectionState.Connected) {
+                            serverAvailable = false;
+                        }
                     });
             }
         }
@@ -1623,9 +1647,9 @@ async function showPlayerStats(name) {
             <div class="d-flex align-items-center">
                 ${player.currentTrack.artworkUrl ? `<img src="${escapeHtml(player.currentTrack.artworkUrl)}" class="rounded me-3" style="width: 60px; height: 60px; object-fit: cover;" alt="Album art">` : ''}
                 <div>
-                    <div class="fw-semibold">${escapeHtml(player.currentTrack.title)}</div>
-                    ${player.currentTrack.artist ? `<div class="text-muted small">${escapeHtml(player.currentTrack.artist)}</div>` : ''}
-                    ${player.currentTrack.album ? `<div class="text-muted small">${escapeHtml(player.currentTrack.album)}</div>` : ''}
+                    <div class="fw-semibold track-title" title="${escapeHtml(player.currentTrack.title)}">${escapeHtml(player.currentTrack.title)}</div>
+                    ${player.currentTrack.artist ? `<div class="text-muted small track-artist" title="${escapeHtml(player.currentTrack.artist)}">${escapeHtml(player.currentTrack.artist)}</div>` : ''}
+                    ${player.currentTrack.album ? `<div class="text-muted small track-album" title="${escapeHtml(player.currentTrack.album)}">${escapeHtml(player.currentTrack.album)}</div>` : ''}
                 </div>
             </div>
         </div>
@@ -1639,7 +1663,7 @@ async function showPlayerStats(name) {
             <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', -10)" title="Decrease by 10ms">
                 <i class="fas fa-minus"></i>
             </button>
-            <div class="input-group input-group-sm" style="max-width: 140px;">
+            <div class="input-group input-group-sm delay-input-group">
                 <input type="number" class="form-control text-center" id="delayInput"
                     value="${player.delayMs}" min="-5000" max="5000" step="10"
                     onchange="setDelay('${escapeJsString(name)}', this.value)"
@@ -1710,7 +1734,7 @@ function renderPlayers() {
                 <div class="card player-card h-100" data-player="${escapeHtml(name)}">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h5 class="card-title mb-0">${escapeHtml(player.name)}</h5>
+                            <h5 class="card-title mb-0" title="${escapeHtml(player.name)}">${escapeHtml(player.name)}</h5>
                             <div class="d-flex">
                                 <button class="btn btn-sm btn-outline-info me-1" onclick="showPlayerStats('${escapeJsString(name)}')" title="Player Details">
                                     <i class="fas fa-info-circle"></i>
@@ -1771,7 +1795,7 @@ function renderPlayers() {
                                 <small class="text-success"><i class="fas fa-clock me-1"></i>Clock synced</small>
                             ` : ''}
                             ${player.errorMessage ? `
-                                <small class="text-danger d-block mt-1"><i class="fas fa-exclamation-circle me-1"></i>${escapeHtml(player.errorMessage)}</small>
+                                <small class="text-danger d-block mt-1 player-error-message" title="${escapeHtml(player.errorMessage)}"><i class="fas fa-exclamation-circle me-1"></i>${escapeHtml(player.errorMessage)}</small>
                             ` : ''}
                         </div>
                     </div>
@@ -2605,12 +2629,12 @@ function renderSinks() {
                 <div class="card sink-card h-100">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h6 class="card-title mb-0">
+                            <h6 class="card-title mb-0" title="${escapeHtml(sink.name)}">
                                 <i class="fas ${typeIcon} me-2 text-muted"></i>
                                 ${escapeHtml(sink.name)}
                             </h6>
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary"
+                            <div class="d-flex">
+                                <button class="btn btn-sm btn-outline-primary me-1"
                                         id="sink-test-btn-${escapeHtml(name)}"
                                         onclick="playTestToneForSink('${escapeJsString(name)}')"
                                         title="Play test tone"
@@ -2618,7 +2642,7 @@ function renderSinks() {
                                     <i class="fas fa-volume-up"></i>
                                 </button>
                                 <div class="dropdown">
-                                    <button class="btn btn-outline-secondary" data-bs-toggle="dropdown">
+                                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="dropdown">
                                         <i class="fas fa-ellipsis-v"></i>
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
@@ -2669,7 +2693,7 @@ function renderSinks() {
 
                         ${sink.errorMessage ? `
                             <div class="mt-2">
-                                <small class="text-danger">
+                                <small class="text-danger player-error-message" title="${escapeHtml(sink.errorMessage)}">
                                     <i class="fas fa-exclamation-circle me-1"></i>${escapeHtml(sink.errorMessage)}
                                 </small>
                             </div>
@@ -3604,7 +3628,7 @@ function renderSoundCards(savedScrollTop = 0) {
                         <div class="device-header-content">
                             <span class="device-header-info">
                                 <i class="${busIcon} text-primary me-2" title="${busLabel}"></i>
-                                <span class="fw-bold">${escapeHtml(deviceName)}</span>
+                                <span class="fw-bold device-header-name" title="${escapeHtml(deviceName)}">${escapeHtml(deviceName)}</span>
                                 <input type="text" class="device-header-alias form-control form-control-sm ms-2"
                                        placeholder="Alias"
                                        value="${escapeHtml(deviceAlias)}"
@@ -3643,7 +3667,7 @@ function renderSoundCards(savedScrollTop = 0) {
                                        id="settings-max-volume-${card.index}"
                                        oninput="document.getElementById('settings-max-volume-value-${card.index}').textContent = this.value + '%'; updateDeviceHeaderVolume(${card.index}, this.value)"
                                        onchange="setDeviceMaxVolume('${escapeJsString(card.name)}', this.value, ${card.index})">
-                                <span class="text-muted small" style="min-width: 40px;" id="settings-max-volume-value-${card.index}">${card.maxVolume || 100}%</span>
+                                <span class="text-muted small volume-value-display" id="settings-max-volume-value-${card.index}">${card.maxVolume || 100}%</span>
                             </div>
                         </div>
 
@@ -4843,8 +4867,10 @@ function renderTriggers() {
         const controlsDisabled = noHardware || !triggersData.enabled;
         const testButtonsDisabled = controlsDisabled || !board.isConnected;
 
-        const boardStatusClass = board.isConnected ? 'text-success' : 'text-danger';
-        const boardStatusText = board.isConnected ? 'Connected' : 'Disconnected';
+        // Connection status icon - green link for connected, red broken link for disconnected
+        const boardStatusIcon = board.isConnected
+            ? '<i class="fas fa-link text-success" title="Connected"></i>'
+            : '<i class="fas fa-link-slash text-danger" title="Disconnected"></i>';
         const portWarning = board.isPortBased
             ? '<span class="badge bg-warning text-dark ms-1" title="Identified by USB port - may change if moved"><i class="fas fa-exclamation-triangle"></i> Port-based</span>'
             : '';
@@ -4913,9 +4939,9 @@ function renderTriggers() {
                     <button class="accordion-button ${isExpanded ? '' : 'collapsed'}" type="button"
                             data-bs-toggle="collapse" data-bs-target="#board-${boardIdSafe}">
                         <span class="me-2"><i class="fas fa-microchip"></i></span>
-                        <span class="fw-bold">${escapeHtml(board.displayName || board.boardId)}</span>
+                        <span class="fw-bold trigger-board-name" title="${escapeHtml(board.displayName || board.boardId)}">${escapeHtml(board.displayName || board.boardId)}</span>
                         ${boardTypeBadge}
-                        <span class="ms-2 small ${boardStatusClass}">${boardStatusText}</span>
+                        <span class="ms-2">${boardStatusIcon}</span>
                         ${portWarning}
                         <span class="ms-auto me-3 small text-muted">${board.channelCount} channels</span>
                     </button>
@@ -4974,7 +5000,7 @@ function renderTriggers() {
                                     <th>Channel</th>
                                     <th>Sink</th>
                                     <th>Off Delay</th>
-                                    <th class="text-end" style="white-space: nowrap;"><span style="display: inline-block; width: 38px; text-align: center;">On</span><span style="display: inline-block; width: 38px; text-align: center;">Off</span></th>
+                                    <th class="text-end trigger-action-header"><span class="trigger-action-col">On</span><span class="trigger-action-col">Off</span></th>
                                 </tr>
                             </thead>
                             <tbody>
