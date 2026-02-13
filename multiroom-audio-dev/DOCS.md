@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-3b81b29
+## Development Build: sha-f07c6b3
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #175 from scyto/dev
+- Fix off-profile detection for Intel HDA combined duplex profiles (#139)
+- Fix race condition in device reconnection causing duplicate restarts (#138)
+- Fix off-profile device detection to ignore IsAvailable flag (#137)
+- Show off-profile cards in device selector (#136)
+- Fix player state for empty device and diagnostics device matching (#135)
 - Merge pull request #173 from scyto/dev
 - Fix diagnostics summary including custom sinks in audio devices (#134)
 - Fix vertical alignment of mute button with slider (#133)
 - Fix duplicate toast messages on server reconnection (#132)
-- Fix mobile slider touch: immediate drag response (#131)
-- Add lazy reconnection for FTDI relay boards (#130)
-- Add mobile-responsive UI improvements (#129)
-- Merge pull request #172 from scyto/dev
-- Add Trigger log category for relay board operations (#128)
-- Merge pull request #127 from scyto/bug/trigger-modal-reload-on-relay-toggle
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
