@@ -488,6 +488,14 @@ public static class PlayersEndpoint
                             currentName, savedConfig.Volume);
                     }
 
+                    // Persist device change
+                    if (request.Device != null && request.Device != savedConfig.Device)
+                    {
+                        savedConfig.Device = request.Device;
+                        logger.LogInformation("API: Player {PlayerName} device persisted to '{Device}'",
+                            currentName, savedConfig.Device == "" ? "(none)" : savedConfig.Device);
+                    }
+
                     if (request.ServerUrl != null && request.ServerUrl != (savedConfig.Server ?? ""))
                     {
                         savedConfig.Server = request.ServerUrl == "" ? null : request.ServerUrl;

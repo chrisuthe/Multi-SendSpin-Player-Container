@@ -1,4 +1,5 @@
 using MultiRoomAudio.Audio;
+using MultiRoomAudio.Audio.PulseAudio;
 using MultiRoomAudio.Models;
 
 namespace MultiRoomAudio.Services;
@@ -410,7 +411,203 @@ public class DeviceMatchingService
                 SinkType: sink.Type.ToString()  // "Combine" or "Remap"
             ));
 
-        // Combine and return: hardware devices first, then custom sinks
-        return hardwareDevices.Concat(customSinkDevices);
+        // Get cards with "off" profile that have available output profiles
+        var offProfileDevices = GetOffProfileDevices(rawHardwareDevices);
+
+        // Combine and return: hardware devices first, then off-profile devices, then custom sinks
+        return hardwareDevices.Concat(offProfileDevices).Concat(customSinkDevices);
+    }
+
+    /// <summary>
+    /// Gets cards with "off" profile that have available output profiles.
+    /// These are potential devices that will work when the profile is activated.
+    /// </summary>
+    private IEnumerable<AudioDevice> GetOffProfileDevices(IReadOnlyCollection<AudioDevice> activeDevices)
+    {
+        var cards = PulseAudioCardEnumerator.GetCards().ToList();
+
+        _logger.LogDebug("GetOffProfileDevices: Found {Count} cards total", cards.Count);
+
+        // Build a set of card identifiers that already have active sinks
+        var activeCardIdentifiers = activeDevices
+            .Select(d => ExtractCardIdentifier(d.Id))
+            .Where(id => id != null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var card in cards)
+        {
+            _logger.LogDebug("GetOffProfileDevices: Checking card '{Card}' (profile: {Profile})",
+                card.Name, card.ActiveProfile);
+
+            // Skip if not "off" profile
+            if (!card.ActiveProfile.Equals("off", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("GetOffProfileDevices: Card '{Card}' skipped - profile is '{Profile}', not 'off'",
+                    card.Name, card.ActiveProfile);
+                continue;
+            }
+
+            // Skip if card already has an active sink (shouldn't happen, but be safe)
+            var cardIdentifier = ExtractCardIdentifier(card.Name);
+            if (cardIdentifier != null && activeCardIdentifiers.Contains(cardIdentifier))
+            {
+                _logger.LogDebug("GetOffProfileDevices: Card '{Card}' skipped - already has active sink",
+                    card.Name);
+                continue;
+            }
+
+            // Find the best output profile (highest priority with sinks > 0)
+            // Note: Don't filter by IsAvailable - that flag means "hardware is connected right now"
+            // (e.g., headphones plugged in). We want to show the device even when hardware isn't
+            // connected, since that's the whole point of this feature.
+            var profilesWithSinks = card.Profiles.Where(p => p.Sinks > 0).ToList();
+            _logger.LogDebug("GetOffProfileDevices: Card '{Card}' has {Count} profiles with sinks > 0",
+                card.Name, profilesWithSinks.Count);
+
+            var bestProfile = profilesWithSinks
+                .OrderByDescending(p => p.Priority)
+                .FirstOrDefault();
+
+            if (bestProfile == null)
+            {
+                // Expected for input-only cards - keep at Debug to avoid alert noise
+                _logger.LogDebug("GetOffProfileDevices: Card '{Card}' has no output profiles (profiles with sinks > 0), skipping. " +
+                    "Total profiles: {Total}, Profile names: [{Names}]",
+                    card.Name, card.Profiles.Count,
+                    string.Join(", ", card.Profiles.Select(p => $"{p.Name}(sinks={p.Sinks})")));
+                continue;
+            }
+
+            // Predict what the sink name will be when profile is activated
+            var predictedSinkName = PredictSinkName(card.Name, bestProfile.Name);
+            if (predictedSinkName == null)
+            {
+                _logger.LogWarning("GetOffProfileDevices: Could not predict sink name for card '{Card}' profile '{Profile}'",
+                    card.Name, bestProfile.Name);
+                continue;
+            }
+
+            // Determine max channels from the best profile
+            var maxChannels = GetChannelsFromProfile(bestProfile.Name);
+
+            _logger.LogInformation("GetOffProfileDevices: Including off-profile card '{Card}' " +
+                "(profile: {BestProfile}) with predicted sink '{Sink}'",
+                card.Name, bestProfile.Name, predictedSinkName);
+
+            yield return new AudioDevice(
+                Index: -card.Index, // Negative index to distinguish from active devices
+                Id: predictedSinkName,
+                Name: $"{card.Description ?? card.Name} [off]",
+                MaxChannels: maxChannels,
+                DefaultSampleRate: 48000,
+                DefaultLowLatencyMs: 50,
+                DefaultHighLatencyMs: 200,
+                IsDefault: false,
+                Capabilities: null,
+                Identifiers: card.Identifiers,
+                Alias: null,
+                Hidden: false,
+                IsOffProfile: true,
+                CardName: card.Name
+            );
+        }
+    }
+
+    /// <summary>
+    /// Extracts the card identifier from a card name or sink name.
+    /// e.g., "alsa_card.pci-0000_01_00.0" → "pci-0000_01_00.0"
+    /// e.g., "alsa_output.pci-0000_01_00.0.analog-stereo" → "pci-0000_01_00.0"
+    /// </summary>
+    private static string? ExtractCardIdentifier(string name)
+    {
+        // Handle card names
+        if (name.StartsWith("alsa_card.", StringComparison.OrdinalIgnoreCase))
+            return name["alsa_card.".Length..];
+        if (name.StartsWith("bluez_card.", StringComparison.OrdinalIgnoreCase))
+            return name["bluez_card.".Length..];
+
+        // Handle sink names - extract the middle part
+        if (name.StartsWith("alsa_output.", StringComparison.OrdinalIgnoreCase))
+        {
+            var withoutPrefix = name["alsa_output.".Length..];
+            // Find the last dot that separates identifier from profile
+            var lastDotIndex = withoutPrefix.LastIndexOf('.');
+            if (lastDotIndex > 0)
+                return withoutPrefix[..lastDotIndex];
+        }
+        if (name.StartsWith("bluez_sink.", StringComparison.OrdinalIgnoreCase))
+        {
+            var withoutPrefix = name["bluez_sink.".Length..];
+            var lastDotIndex = withoutPrefix.LastIndexOf('.');
+            if (lastDotIndex > 0)
+                return withoutPrefix[..lastDotIndex];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Predicts the sink name that will be created when a profile is activated.
+    /// e.g., card "alsa_card.pci-0000_01_00.0" + profile "output:analog-stereo"
+    ///       → "alsa_output.pci-0000_01_00.0.analog-stereo"
+    /// Also handles combined profiles like "output:analog-stereo+input:analog-stereo"
+    ///       → "alsa_output.pci-0000_01_00.0.analog-stereo" (output portion only)
+    /// </summary>
+    private static string? PredictSinkName(string cardName, string profileName)
+    {
+        // Extract card identifier
+        string? identifier = null;
+        string prefix;
+
+        if (cardName.StartsWith("alsa_card.", StringComparison.OrdinalIgnoreCase))
+        {
+            identifier = cardName["alsa_card.".Length..];
+            prefix = "alsa_output.";
+        }
+        else if (cardName.StartsWith("bluez_card.", StringComparison.OrdinalIgnoreCase))
+        {
+            identifier = cardName["bluez_card.".Length..];
+            prefix = "bluez_sink.";
+        }
+        else
+        {
+            return null;
+        }
+
+        // Extract profile suffix for sink name
+        // Profile formats:
+        //   "output:analog-stereo" → "analog-stereo"
+        //   "output:analog-stereo+input:analog-stereo" → "analog-stereo" (output portion only)
+        //   "analog-stereo" → "analog-stereo" (no prefix)
+        var profileSuffix = profileName;
+
+        // Remove "output:" prefix if present
+        if (profileSuffix.StartsWith("output:", StringComparison.OrdinalIgnoreCase))
+            profileSuffix = profileSuffix["output:".Length..];
+
+        // Handle combined profiles: strip "+input:..." portion
+        // PulseAudio names sinks based only on the output profile part
+        var plusIndex = profileSuffix.IndexOf("+input:", StringComparison.OrdinalIgnoreCase);
+        if (plusIndex > 0)
+            profileSuffix = profileSuffix[..plusIndex];
+
+        return $"{prefix}{identifier}.{profileSuffix}";
+    }
+
+    /// <summary>
+    /// Determines channel count from profile name.
+    /// </summary>
+    private static int GetChannelsFromProfile(string profileName)
+    {
+        var lower = profileName.ToLowerInvariant();
+        return lower switch
+        {
+            var s when s.Contains("surround-71") => 8,
+            var s when s.Contains("surround-51") => 6,
+            var s when s.Contains("surround-40") => 4,
+            var s when s.Contains("stereo") => 2,
+            var s when s.Contains("mono") => 1,
+            _ => 2 // Default to stereo
+        };
     }
 }

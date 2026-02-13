@@ -101,7 +101,9 @@ public record AudioDevice(
     string? SampleFormat = null,  // PulseAudio sample format, e.g., "s16le", "s24le", "s32le", "float32le"
     int? CardIndex = null,        // ALSA card number this device belongs to (from alsa.card or device.card property, NOT PulseAudio card index)
     string? SinkType = null,      // null for hardware devices, "Combine" or "Remap" for custom sinks
-    CapabilitySource? CapabilitySource = null  // Where capability data came from: Alsa (hardware) or PulseAudioMax (inferred)
+    CapabilitySource? CapabilitySource = null,  // Where capability data came from: Alsa (hardware) or PulseAudioMax (inferred)
+    bool IsOffProfile = false,    // True if card exists but has "off" profile - device will work when profile is activated
+    string? CardName = null       // PulseAudio card name (for off-profile devices to enable profile activation)
 )
 {
     /// <summary>

@@ -314,7 +314,7 @@ public static class DiagnosticsEndpoint
 
             foreach (var device in devices)
             {
-                var assignedPlayer = players.FirstOrDefault(p => p.Device == device.Name);
+                var assignedPlayer = players.FirstOrDefault(p => p.Device == device.Id);
                 var playerInfo = assignedPlayer != null
                     ? $" -> {assignedPlayer.Name} ({assignedPlayer.State})"
                     : "";

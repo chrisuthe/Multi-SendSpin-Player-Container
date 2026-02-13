@@ -908,14 +908,24 @@ public class CustomSinksService : IAsyncDisposable
     /// </summary>
     private AudioDevice? ResolveSinkByIdentifiers(SinkIdentifiersConfig identifiers, List<AudioDevice> devices)
     {
-        // Extract profile suffix from CardProfile (e.g., "output:analog-surround-71" → "analog-surround-71")
+        // Extract profile suffix from CardProfile
+        // e.g., "output:analog-surround-71" → "analog-surround-71"
+        // e.g., "output:analog-stereo+input:analog-stereo" → "analog-stereo" (output portion only)
         string? profileSuffix = null;
         if (!string.IsNullOrEmpty(identifiers.CardProfile))
         {
             profileSuffix = identifiers.CardProfile;
+
+            // Remove "output:" prefix if present
             var colonIdx = profileSuffix.IndexOf(':');
             if (colonIdx >= 0)
                 profileSuffix = profileSuffix.Substring(colonIdx + 1);
+
+            // Handle combined profiles: strip "+input:..." portion
+            // PulseAudio names sinks based only on the output profile part
+            var plusIdx = profileSuffix.IndexOf("+input:", StringComparison.OrdinalIgnoreCase);
+            if (plusIdx > 0)
+                profileSuffix = profileSuffix.Substring(0, plusIdx);
         }
 
         // Priority 1: Bus path (most stable for USB devices)

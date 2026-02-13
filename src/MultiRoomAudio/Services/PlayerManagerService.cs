@@ -105,6 +105,12 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private const int DeviceLossGracePeriodMs = 1500;
 
     /// <summary>
+    /// Lock to serialize sink event processing. Prevents concurrent device loss/reappear checks
+    /// that can cause race conditions when PulseAudio fires multiple events rapidly.
+    /// </summary>
+    private readonly SemaphoreSlim _sinkEventLock = new(1, 1);
+
+    /// <summary>
     /// State for a player waiting for device reconnection.
     /// </summary>
     private record DevicePendingState(
@@ -608,6 +614,18 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// </summary>
     private async Task TryAutostartPlayerAsync(PlayerConfiguration playerConfig, CancellationToken cancellationToken)
     {
+        // Check if player has no device configured - don't start, show Error state
+        if (string.IsNullOrEmpty(playerConfig.Device) && playerConfig.PortAudioDeviceIndex == null)
+        {
+            _logger.LogWarning(
+                "Player {PlayerName} has no audio device configured. " +
+                "Assign a device to start playback.",
+                playerConfig.Name);
+            // Don't queue for reconnection - this is a config issue, not device loss
+            // Player will show in Error state via GetAllPlayers()
+            return;
+        }
+
         _logger.LogDebug(
             "Autostarting player {PlayerName} on device {Device} with server {Server}",
             playerConfig.Name,
@@ -1270,6 +1288,11 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                         state = Models.PlayerState.Reconnecting;
                         errorMessage = $"Reconnecting... (attempt {reconnectState.RetryCount})";
                     }
+                }
+                else if (string.IsNullOrEmpty(config.Device))
+                {
+                    state = Models.PlayerState.Error;
+                    errorMessage = "No audio device configured. Assign a device to start playback.";
                 }
                 else
                 {
@@ -2562,9 +2585,19 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             await _hubContext.BroadcastDeviceListChangedAsync();
 
             // Check if any pending players can now be restarted
+            // Use blocking wait to serialize sink events (don't drop events)
+            // The TryRemove check in CheckDevicePendingPlayersAsync prevents duplicate restarts
             if (!_devicePendingPlayers.IsEmpty)
             {
-                await CheckDevicePendingPlayersAsync();
+                await _sinkEventLock.WaitAsync();
+                try
+                {
+                    await CheckDevicePendingPlayersAsync();
+                }
+                finally
+                {
+                    _sinkEventLock.Release();
+                }
             }
         });
     }
@@ -2583,7 +2616,16 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             await _hubContext.BroadcastDeviceListChangedAsync();
 
             // Check if any active players were using a sink that no longer exists
-            await CheckPlayersForLostDeviceAsync();
+            // Use blocking wait to serialize sink events (don't drop events)
+            await _sinkEventLock.WaitAsync();
+            try
+            {
+                await CheckPlayersForLostDeviceAsync();
+            }
+            finally
+            {
+                _sinkEventLock.Release();
+            }
         });
     }
 
@@ -2664,12 +2706,20 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
                 if (newSinkName != null)
                 {
+                    // Remove from pending queue atomically - only proceed if WE removed it
+                    // This prevents race conditions where multiple sink events trigger
+                    // concurrent restart attempts for the same player
+                    if (!_devicePendingPlayers.TryRemove(name, out _))
+                    {
+                        _logger.LogDebug(
+                            "Player '{Name}' already being restarted by another task, skipping",
+                            name);
+                        continue;
+                    }
+
                     _logger.LogInformation(
                         "Device reappeared for player '{Name}': {SinkName}. Restarting player.",
                         name, newSinkName);
-
-                    // Remove from pending queue before restart
-                    _devicePendingPlayers.TryRemove(name, out _);
 
                     // Update config if sink name changed
                     if (state.Config.Device != newSinkName)
@@ -3639,6 +3689,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         }
 
         _reconnectionSignal.Dispose();
+        _sinkEventLock.Dispose();
         _logger.LogInformation("PlayerManagerService disposed");
     }
 
@@ -3693,6 +3744,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         }
 
         _reconnectionSignal.Dispose();
+        _sinkEventLock.Dispose();
         _logger.LogInformation("PlayerManagerService disposed asynchronously");
     }
 
