@@ -813,13 +813,17 @@ public static class DiagnosticsEndpoint
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
             {
                 // Timeout occurred - kill the process
-                try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+                try
+                { process.Kill(entireProcessTree: true); }
+                catch { /* ignore */ }
                 return $"(command timed out after {CommandTimeout.TotalSeconds}s)";
             }
             catch (OperationCanceledException)
             {
                 // User cancelled - kill the process
-                try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+                try
+                { process.Kill(entireProcessTree: true); }
+                catch { /* ignore */ }
                 throw; // Re-throw to propagate cancellation
             }
         }

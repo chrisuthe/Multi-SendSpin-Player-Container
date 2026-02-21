@@ -86,7 +86,8 @@ public class PulseAudioSubscriptionService : IHostedService, IAsyncDisposable
     {
         lock (_lock)
         {
-            if (_disposed) return;
+            if (_disposed)
+                return;
 
             try
             {

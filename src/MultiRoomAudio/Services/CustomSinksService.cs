@@ -1099,7 +1099,8 @@ public class CustomSinksService : IAsyncDisposable
 
             var match = devices.FirstOrDefault(d =>
             {
-                if (d.Id == null) return false;
+                if (d.Id == null)
+                    return false;
                 var (currentDeviceId, _) = ParseSinkName(d.Id);
                 if (currentDeviceId == null || !currentDeviceId.StartsWith("pci-", StringComparison.OrdinalIgnoreCase))
                     return false;
@@ -1131,7 +1132,8 @@ public class CustomSinksService : IAsyncDisposable
                 // Try to match by VID and similar product name
                 var match = devices.FirstOrDefault(d =>
                 {
-                    if (d.Id == null) return false;
+                    if (d.Id == null)
+                        return false;
                     var (currentDeviceId, _) = ParseSinkName(d.Id);
                     if (currentDeviceId == null || !currentDeviceId.StartsWith("usb-", StringComparison.OrdinalIgnoreCase))
                         return false;

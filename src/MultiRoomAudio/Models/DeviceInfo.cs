@@ -40,7 +40,7 @@ public record DeviceIdentifiers(
     string? VendorId,         // device.vendor.id
     string? ProductId,        // device.product.id
     string? AlsaLongCardName, // alsa.long_card_name - includes USB path info
-    // Bluetooth-specific identifiers
+                              // Bluetooth-specific identifiers
     string? BluetoothMac,     // api.bluez5.address - BT MAC address
     string? BluetoothCodec    // bluetooth.codec - current codec (SBC, AAC, aptX, LDAC)
 );

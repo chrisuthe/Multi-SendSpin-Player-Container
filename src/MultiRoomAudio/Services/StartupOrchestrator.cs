@@ -112,10 +112,14 @@ public class StartupOrchestrator : BackgroundService
         _logger.LogInformation("StartupOrchestrator: shutting down services...");
 
         // Services may not have been resolved yet if shutdown occurs during early startup
-        if (_hidButtons != null) await _hidButtons.DisposeAsync();
-        if (_triggers != null) await _triggers.ShutdownAsync(cancellationToken);
-        if (_playerManager != null) await _playerManager.ShutdownAsync(cancellationToken);
-        if (_customSinks != null) await _customSinks.ShutdownAsync(cancellationToken);
+        if (_hidButtons != null)
+            await _hidButtons.DisposeAsync();
+        if (_triggers != null)
+            await _triggers.ShutdownAsync(cancellationToken);
+        if (_playerManager != null)
+            await _playerManager.ShutdownAsync(cancellationToken);
+        if (_customSinks != null)
+            await _customSinks.ShutdownAsync(cancellationToken);
         // CardProfileService has no shutdown logic
 
         await base.StopAsync(cancellationToken);
