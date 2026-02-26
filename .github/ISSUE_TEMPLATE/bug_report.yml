@@ -118,6 +118,20 @@ body:
       required: true
 
   - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics File
+      description: |
+        In the Multi-Room Audio web UI, open the Help menu (top right) and click **Diagnostics**.
+        Once generated, drag the downloaded file into this field, or paste the contents below.
+      placeholder: |
+        ```
+        Paste diagnostics file contents here, or drag and drop the file above...
+        ```
+    validations:
+      required: true
+
+  - type: textarea
     id: logs
     attributes:
       label: Relevant Logs (optional)
