@@ -41,12 +41,12 @@ panel_title: Multi-Room Audio
 # User-configurable options
 options:
   log_level: info
-  relay_serial_port: null
+  relay_serial_port: ''
   relay_devices: []
 
 schema:
   log_level: list(debug|info|warning|error)
-  relay_serial_port: device(subsystem=tty)?
+  relay_serial_port: device(subsystem=tty)? | null
   relay_devices:
     - str?
 
