@@ -21,7 +21,7 @@
     <PackageReference Include="System.IO.Ports" Version="10.0.2" />
 
     <!-- USB HID support for HID relay boards -->
-    <PackageReference Include="HidSharp" Version="2.1.0" />
+    <PackageReference Include="HidSharp" Version="2.6.4" />
 
     <!-- Configuration -->
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
@@ -37,7 +37,7 @@
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.3" />
 
     <!-- USB HID support for HID relay boards -->
-    <PackageReference Include="HidSharp" Version="2.1.0" />
+    <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
 
 </Project>
