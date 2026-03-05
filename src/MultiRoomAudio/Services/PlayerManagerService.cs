@@ -402,6 +402,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         public EventHandler<GroupState>? GroupStateHandler { get; set; }
         // SDK 5.4.0: Handler for individual player volume/mute commands
         public EventHandler<SdkPlayerState>? PlayerStateHandler { get; set; }
+        // SDK 7.2.1: Handler for server-pushed sync offset calibration
+        public EventHandler<SyncOffsetEventArgs>? SyncOffsetHandler { get; set; }
         // Flag to prevent feedback loops when updating server
         public bool IsUpdatingFromServer { get; set; }
     }
@@ -2129,6 +2131,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.GroupStateHandler = CreateGroupStateHandler(name, context);
         // SDK 5.4.0: PlayerStateChanged for individual player volume/mute commands
         context.PlayerStateHandler = CreatePlayerStateHandler(name, context);
+        // SDK 7.2.1: SyncOffsetApplied for server-pushed static delay calibration
+        context.SyncOffsetHandler = CreateSyncOffsetHandler(name, context);
 
         // Subscribe to events
         context.Client.ConnectionStateChanged += context.ConnectionStateHandler;
@@ -2138,6 +2142,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.Client.GroupStateChanged += context.GroupStateHandler;
         // SDK 5.4.0: Subscribe to PlayerStateChanged
         context.Client.PlayerStateChanged += context.PlayerStateHandler;
+        // SDK 7.2.1: Subscribe to SyncOffsetApplied
+        context.Client.SyncOffsetApplied += context.SyncOffsetHandler;
     }
 
     /// <summary>
@@ -2988,13 +2994,45 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Creates handler for server-pushed sync offset calibration (GroupSync).
+    /// The SDK already applies the offset to ClockSync.StaticDelayMs internally;
+    /// we just persist it and broadcast to UI.
+    /// </summary>
+    /// <remarks>
+    /// SDK 7.2.1 change: SyncOffsetApplied fires when server sends sync offset calibration.
+    /// </remarks>
+    private EventHandler<SyncOffsetEventArgs> CreateSyncOffsetHandler(
+        string name, PlayerContext context)
+    {
+        return (_, args) =>
+        {
+            _logger.LogInformation(
+                "SYNC_OFFSET Player '{Name}': server set static delay to {Offset:+0.0;-0.0}ms (source: {Source})",
+                name, args.OffsetMs, args.Source);
+
+            // Persist the offset so it survives restarts
+            _config.UpdatePlayerField(name, cfg => cfg.DelayMs = (int)Math.Round(args.OffsetMs), save: true);
+
+            // Broadcast to UI so delay offset display updates
+            _ = BroadcastStatusAsync();
+        };
+    }
+
+    /// <summary>
     /// Unsubscribes all event handlers from a player context.
     /// Must be called before disposal to prevent memory leaks and access to disposed objects.
     /// </summary>
     private void UnwireEvents(PlayerContext context)
     {
         // Unsubscribe in reverse order of subscription
-        // SDK 5.4.0: Unsubscribe PlayerStateChanged first (subscribed last)
+        // SDK 7.2.1: Unsubscribe SyncOffsetApplied first (subscribed last)
+        if (context.SyncOffsetHandler != null)
+        {
+            context.Client.SyncOffsetApplied -= context.SyncOffsetHandler;
+            context.SyncOffsetHandler = null;
+        }
+
+        // SDK 5.4.0: Unsubscribe PlayerStateChanged
         if (context.PlayerStateHandler != null)
         {
             context.Client.PlayerStateChanged -= context.PlayerStateHandler;
