@@ -1401,7 +1401,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     // Command MA to update its displayed volume
                     await context.Client.SetVolumeAsync(volume);
                     // SDK 5.4.0 auto-acknowledges, but we still echo state for full sync
-                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
+                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted, context.ClockSync.StaticDelayMs);
                     _logger.LogInformation("VOLUME [Sync] Player '{Name}': sent {Volume}% to MA",
                         name, volume);
                 }
@@ -1457,7 +1457,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             {
                 // Prevent feedback loop with PlayerStateChanged handler
                 context.IsUpdatingFromServer = true;
-                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted);
+                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted, context.ClockSync.StaticDelayMs);
                 context.LastConfirmedMuted = muted;
                 _logger.LogInformation("MUTE [StateEcho] Player '{Name}': synced {State} to server",
                     name, muted ? "muted" : "unmuted");
@@ -1506,7 +1506,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 {
                     context.IsUpdatingFromServer = true;
                     await context.Client.SetVolumeAsync(volume);
-                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
+                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted, context.ClockSync.StaticDelayMs);
                     _logger.LogInformation("VOLUME [Hardware->MA] Player '{Name}': synced {Volume}% to MA",
                         name, volume);
                 }
@@ -1555,7 +1555,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             try
             {
                 context.IsUpdatingFromServer = true;
-                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted);
+                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted, context.ClockSync.StaticDelayMs);
                 context.LastConfirmedMuted = muted;
                 _logger.LogInformation("MUTE [Hardware->MA] Player '{Name}': synced {State} to server",
                     name, muted ? "muted" : "unmuted");
