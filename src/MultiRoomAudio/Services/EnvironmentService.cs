@@ -20,6 +20,7 @@ public class EnvironmentService
     private readonly string _configPath;
     private readonly string _logPath;
     private readonly Dictionary<string, JsonElement>? _haosOptions;
+    private int _bufferSeconds;
 
     public const string EnvStandalone = "standalone";
     public const string EnvHaos = "haos";
@@ -28,6 +29,10 @@ public class EnvironmentService
     private const string HaosSupervisorTokenEnv = "SUPERVISOR_TOKEN";
     private const string MockHardwareEnv = "MOCK_HARDWARE";
     private const string AdvancedFormatsEnv = "ENABLE_ADVANCED_FORMATS";
+    private const string BufferSecondsEnv = "BUFFER_SECONDS";
+    private const int DefaultBufferSeconds = 30;
+    private const int MinBufferSeconds = 5;
+    private const int MaxBufferSeconds = 30;
 
     public EnvironmentService(ILogger<EnvironmentService> logger)
     {
@@ -99,6 +104,10 @@ public class EnvironmentService
         {
             _logger.LogInformation("ENABLE_ADVANCED_FORMATS mode enabled - per-player format selection available");
         }
+
+        // Detect buffer seconds setting
+        _bufferSeconds = DetectBufferSeconds();
+        _logger.LogInformation("Audio buffer size: {BufferSeconds} seconds", _bufferSeconds);
     }
 
     /// <summary>
@@ -117,6 +126,16 @@ public class EnvironmentService
     /// When true, the application exposes per-player format selection UI and API endpoints.
     /// </summary>
     public bool EnableAdvancedFormats => _enableAdvancedFormats;
+
+    /// <summary>
+    /// Audio buffer size in seconds (5-30, step 5). Applies to all players.
+    /// Changing this requires a player restart.
+    /// </summary>
+    public int BufferSeconds
+    {
+        get => _bufferSeconds;
+        set => _bufferSeconds = Math.Clamp(value, MinBufferSeconds, MaxBufferSeconds);
+    }
 
     /// <summary>
     /// Current environment name ("haos" or "standalone").
@@ -148,6 +167,11 @@ public class EnvironmentService
     /// Only used when IsMockHardware is true.
     /// </summary>
     public string MockHardwareConfigPath => Path.Combine(_configPath, "mock_hardware.yaml");
+
+    /// <summary>
+    /// Full path to settings.yaml configuration file (global settings).
+    /// </summary>
+    public string SettingsConfigPath => Path.Combine(_configPath, "settings.yaml");
 
     /// <summary>
     /// Path to log directory.
@@ -419,5 +443,52 @@ public class EnvironmentService
 
         // Default: disabled
         return false;
+    }
+
+    private int DetectBufferSeconds()
+    {
+        // Check environment variable first
+        var bufferSecondsValue = Environment.GetEnvironmentVariable(BufferSecondsEnv);
+        if (!string.IsNullOrEmpty(bufferSecondsValue))
+        {
+            if (int.TryParse(bufferSecondsValue, out var parsed))
+            {
+                var clamped = Math.Clamp(parsed, MinBufferSeconds, MaxBufferSeconds);
+                _logger.LogDebug("{EnvVar} detected: {Value} (clamped to {Clamped})",
+                    BufferSecondsEnv, bufferSecondsValue, clamped);
+                return clamped;
+            }
+            else
+            {
+                _logger.LogWarning("{EnvVar} value '{Value}' is not a valid integer, using default {Default}",
+                    BufferSecondsEnv, bufferSecondsValue, DefaultBufferSeconds);
+            }
+        }
+        else
+        {
+            _logger.LogDebug("{EnvVar} environment variable not set", BufferSecondsEnv);
+        }
+
+        // Check HAOS options
+        if (_isHaos && _haosOptions != null)
+        {
+            if (_haosOptions.TryGetValue("buffer_seconds", out var element))
+            {
+                try
+                {
+                    var haosValue = element.GetInt32();
+                    var clamped = Math.Clamp(haosValue, MinBufferSeconds, MaxBufferSeconds);
+                    _logger.LogDebug("Buffer seconds from HAOS options: {Value} (clamped to {Clamped})",
+                        haosValue, clamped);
+                    return clamped;
+                }
+                catch (InvalidOperationException)
+                {
+                    _logger.LogWarning("HAOS option 'buffer_seconds' is not an integer value");
+                }
+            }
+        }
+
+        return DefaultBufferSeconds;
     }
 }
