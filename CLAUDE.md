@@ -223,6 +223,7 @@ new ErrorResponse(false, "Error message")
 | `SUPERVISOR_TOKEN` | (HAOS only) | Auto-set by Home Assistant supervisor |
 | `MOCK_HARDWARE` | `false` | Enable mock relay boards for testing without hardware |
 | `ENABLE_ADVANCED_FORMATS` | `false` | Show format selection UI (dev-only). All players default to flac-48000 regardless. |
+| `BUFFER_SECONDS` | `30` | Audio buffer size in seconds (5-30, step 5). Lower values reduce RAM on constrained hardware. |
 
 **Audio Configuration Notes:**
 - `PA_SAMPLE_RATE` and `PA_SAMPLE_FORMAT` only apply in standalone Docker mode
