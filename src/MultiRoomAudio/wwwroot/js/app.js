@@ -5649,7 +5649,7 @@ let _bufferPlayerCount = 0;
 
 async function openSystemSettingsModal() {
     try {
-        const resp = await fetch('/api/settings/buffer');
+        const resp = await fetch('./api/settings/buffer');
         if (!resp.ok) throw new Error('Failed to load buffer settings');
         const data = await resp.json();
 
@@ -5712,7 +5712,7 @@ async function saveBufferSettings() {
     const msgEl = document.getElementById('bufferSaveMessage');
 
     try {
-        const resp = await fetch('/api/settings/buffer', {
+        const resp = await fetch('./api/settings/buffer', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bufferSeconds: seconds })
