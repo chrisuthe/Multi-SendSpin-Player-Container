@@ -768,34 +768,16 @@ const Wizard = {
                                     </div>
                                     <div class="col-md-6">
                                         <div class="mb-3">
-                                            <label class="form-label">Left Channel</label>
-                                            <div class="d-flex align-items-center">
-                                                <select class="form-select" id="wizardRemapLeft">
-                                                    <option value="front-left">Front Left</option>
-                                                    <option value="front-right">Front Right</option>
-                                                </select>
-                                                <button class="btn btn-outline-primary btn-sm ms-2"
-                                                        id="wizardRemapLeftTestBtn"
-                                                        onclick="Wizard.playRemapChannelTestTone('left')"
-                                                        title="Play test tone">
-                                                    <i class="fas fa-volume-up"></i>
-                                                </button>
+                                            <label class="form-label">Output Mode</label>
+                                            <div class="btn-group w-100 mb-3" role="group">
+                                                <input type="radio" class="btn-check" name="wizardOutputMode" id="wizardOutputModeMono" value="mono" onchange="Wizard.updateRemapChannels()">
+                                                <label class="btn btn-outline-primary" for="wizardOutputModeMono">Mono</label>
+                                                <input type="radio" class="btn-check" name="wizardOutputMode" id="wizardOutputModeStereo" value="stereo" checked onchange="Wizard.updateRemapChannels()">
+                                                <label class="btn btn-outline-primary" for="wizardOutputModeStereo">Stereo</label>
                                             </div>
                                         </div>
-                                        <div class="mb-3">
-                                            <label class="form-label">Right Channel</label>
-                                            <div class="d-flex align-items-center">
-                                                <select class="form-select" id="wizardRemapRight">
-                                                    <option value="front-left">Front Left</option>
-                                                    <option value="front-right" selected>Front Right</option>
-                                                </select>
-                                                <button class="btn btn-outline-primary btn-sm ms-2"
-                                                        id="wizardRemapRightTestBtn"
-                                                        onclick="Wizard.playRemapChannelTestTone('right')"
-                                                        title="Play test tone">
-                                                    <i class="fas fa-volume-up"></i>
-                                                </button>
-                                            </div>
+                                        <div id="wizardChannelPicker">
+                                            <!-- Populated dynamically by updateRemapChannels() -->
                                         </div>
                                     </div>
                                 </div>
@@ -820,14 +802,14 @@ const Wizard = {
         `;
     },
 
-    // Update channel options based on selected master device
+    // Update channel options based on selected master device and output mode
     updateRemapChannels() {
         const masterSelect = document.getElementById('wizardRemapMaster');
-        const leftSelect = document.getElementById('wizardRemapLeft');
-        const rightSelect = document.getElementById('wizardRemapRight');
+        const channelPicker = document.getElementById('wizardChannelPicker');
 
-        if (!masterSelect || !leftSelect || !rightSelect) return;
+        if (!masterSelect || !channelPicker) return;
 
+        const isMono = document.getElementById('wizardOutputModeMono')?.checked;
         const selectedOption = masterSelect.selectedOptions[0];
         const channelCount = parseInt(selectedOption?.dataset?.channels || '2');
 
@@ -865,12 +847,58 @@ const Wizard = {
             `<option value="${ch.value}">${ch.label}</option>`
         ).join('');
 
-        leftSelect.innerHTML = optionsHtml;
-        rightSelect.innerHTML = optionsHtml;
-
-        // Set sensible defaults
-        leftSelect.value = 'front-left';
-        rightSelect.value = 'front-right';
+        if (isMono) {
+            channelPicker.innerHTML = `
+                <div class="mb-3">
+                    <label class="form-label">Source Channel</label>
+                    <div class="d-flex align-items-center">
+                        <select class="form-select" id="wizardRemapMono">
+                            ${optionsHtml}
+                        </select>
+                        <button class="btn btn-outline-primary btn-sm ms-2"
+                                id="wizardRemapMonoTestBtn"
+                                onclick="Wizard.playRemapChannelTestTone('mono')"
+                                title="Play test tone">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('wizardRemapMono').value = 'front-left';
+        } else {
+            channelPicker.innerHTML = `
+                <div class="mb-3">
+                    <label class="form-label">Left Channel</label>
+                    <div class="d-flex align-items-center">
+                        <select class="form-select" id="wizardRemapLeft">
+                            ${optionsHtml}
+                        </select>
+                        <button class="btn btn-outline-primary btn-sm ms-2"
+                                id="wizardRemapLeftTestBtn"
+                                onclick="Wizard.playRemapChannelTestTone('left')"
+                                title="Play test tone">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Right Channel</label>
+                    <div class="d-flex align-items-center">
+                        <select class="form-select" id="wizardRemapRight">
+                            ${optionsHtml}
+                        </select>
+                        <button class="btn btn-outline-primary btn-sm ms-2"
+                                id="wizardRemapRightTestBtn"
+                                onclick="Wizard.playRemapChannelTestTone('right')"
+                                title="Play test tone">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('wizardRemapLeft').value = 'front-left';
+            document.getElementById('wizardRemapRight').value = 'front-right';
+        }
     },
 
     // Create a combine sink
@@ -958,8 +986,6 @@ const Wizard = {
         const nameInput = document.getElementById('wizardRemapName');
         const descInput = document.getElementById('wizardRemapDesc');
         const masterSelect = document.getElementById('wizardRemapMaster');
-        const leftSelect = document.getElementById('wizardRemapLeft');
-        const rightSelect = document.getElementById('wizardRemapRight');
         const errorDiv = document.getElementById('wizardRemapError');
         const successDiv = document.getElementById('wizardRemapSuccess');
 
@@ -970,8 +996,7 @@ const Wizard = {
         const name = nameInput.value.trim();
         const description = descInput.value.trim();
         const masterSink = masterSelect.value;
-        const leftChannel = leftSelect.value;
-        const rightChannel = rightSelect.value;
+        const isMono = document.getElementById('wizardOutputModeMono')?.checked;
 
         // Validation
         if (!name) {
@@ -994,6 +1019,23 @@ const Wizard = {
             return;
         }
 
+        let channels, channelMappings;
+        if (isMono) {
+            const monoChannel = document.getElementById('wizardRemapMono').value;
+            channels = 1;
+            channelMappings = [
+                { outputChannel: 'mono', masterChannel: monoChannel }
+            ];
+        } else {
+            const leftChannel = document.getElementById('wizardRemapLeft').value;
+            const rightChannel = document.getElementById('wizardRemapRight').value;
+            channels = 2;
+            channelMappings = [
+                { outputChannel: 'front-left', masterChannel: leftChannel },
+                { outputChannel: 'front-right', masterChannel: rightChannel }
+            ];
+        }
+
         try {
             const response = await fetch('./api/sinks/remap', {
                 method: 'POST',
@@ -1002,11 +1044,9 @@ const Wizard = {
                     name,
                     description: description || null,
                     masterSink,
-                    channels: 2,
-                    channelMappings: [
-                        { outputChannel: 'front-left', masterChannel: leftChannel },
-                        { outputChannel: 'front-right', masterChannel: rightChannel }
-                    ]
+                    channels,
+                    channelMappings,
+                    remix: isMono
                 })
             });
 
@@ -1024,7 +1064,7 @@ const Wizard = {
                 description: description,
                 slaves: [],
                 masterSink: masterSink,
-                maxChannels: 2,
+                maxChannels: isMono ? 1 : 2,
                 defaultSampleRate: 48000
             });
 
@@ -1325,8 +1365,14 @@ const Wizard = {
     // Play test tone for a specific channel in wizard remap sink
     async playRemapChannelTestTone(channel) {
         const masterSelect = document.getElementById('wizardRemapMaster');
-        const channelSelect = document.getElementById(channel === 'left' ? 'wizardRemapLeft' : 'wizardRemapRight');
-        const btn = document.getElementById(channel === 'left' ? 'wizardRemapLeftTestBtn' : 'wizardRemapRightTestBtn');
+        let channelSelect, btn;
+        if (channel === 'mono') {
+            channelSelect = document.getElementById('wizardRemapMono');
+            btn = document.getElementById('wizardRemapMonoTestBtn');
+        } else {
+            channelSelect = document.getElementById(channel === 'left' ? 'wizardRemapLeft' : 'wizardRemapRight');
+            btn = document.getElementById(channel === 'left' ? 'wizardRemapLeftTestBtn' : 'wizardRemapRightTestBtn');
+        }
 
         if (!masterSelect.value) {
             showAlert('Please select a master device first', 'warning');
