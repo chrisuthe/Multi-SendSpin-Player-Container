@@ -143,6 +143,14 @@ public class PlayerConfiguration
 }
 
 /// <summary>
+/// Global application settings persisted in settings.yaml.
+/// </summary>
+public class GlobalSettings
+{
+    public int BufferSeconds { get; set; } = 30;
+}
+
+/// <summary>
 /// Manages player configuration persistence with YAML storage.
 /// Provides a clean interface for configuration operations.
 /// </summary>
@@ -158,6 +166,7 @@ public class ConfigurationService
 
     private Dictionary<string, PlayerConfiguration> _players = new();
     private Dictionary<string, DeviceConfiguration> _devices = new();
+    private GlobalSettings _globalSettings = new();
 
     public ConfigurationService(
         ILogger<ConfigurationService> logger,
@@ -195,6 +204,11 @@ public class ConfigurationService
     /// All configured devices (with aliases and stable identifiers).
     /// </summary>
     public IReadOnlyDictionary<string, DeviceConfiguration> Devices => _devices;
+
+    /// <summary>
+    /// Global application settings.
+    /// </summary>
+    public GlobalSettings GlobalSettings => _globalSettings;
 
     /// <summary>
     /// Check if any players are configured.
@@ -651,6 +665,62 @@ public class ConfigurationService
         if (needsSave)
         {
             SaveDevices();
+        }
+    }
+
+    /// <summary>
+    /// Load global settings from YAML file.
+    /// </summary>
+    public GlobalSettings LoadSettings(string settingsPath)
+    {
+        if (!File.Exists(settingsPath))
+        {
+            _logger.LogDebug("No settings.yaml found at {Path}, using defaults", settingsPath);
+            _globalSettings = new GlobalSettings();
+            return _globalSettings;
+        }
+
+        try
+        {
+            var yaml = File.ReadAllText(settingsPath);
+            if (string.IsNullOrWhiteSpace(yaml))
+            {
+                _globalSettings = new GlobalSettings();
+                return _globalSettings;
+            }
+            _globalSettings = _deserializer.Deserialize<GlobalSettings>(yaml) ?? new GlobalSettings();
+            _logger.LogInformation("Loaded global settings from {Path}: BufferSeconds={BufferSeconds}",
+                settingsPath, _globalSettings.BufferSeconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load settings from {Path}, using defaults", settingsPath);
+            _globalSettings = new GlobalSettings();
+        }
+
+        return _globalSettings;
+    }
+
+    /// <summary>
+    /// Save global settings to YAML file.
+    /// </summary>
+    public void SaveSettings(string settingsPath, GlobalSettings settings)
+    {
+        try
+        {
+            var yaml = _serializer.Serialize(settings);
+            var dir = Path.GetDirectoryName(settingsPath);
+            if (dir != null && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+            File.WriteAllText(settingsPath, yaml);
+            _globalSettings = settings;
+            _logger.LogInformation("Saved global settings to {Path}: BufferSeconds={BufferSeconds}",
+                settingsPath, settings.BufferSeconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save settings to {Path}", settingsPath);
+            throw;
         }
     }
 

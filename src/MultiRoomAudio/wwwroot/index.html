@@ -61,6 +61,9 @@
                             <li><a class="dropdown-item" href="#" onclick="openTriggersModal(); return false;">
                                 <i class="fas fa-bolt me-2"></i>12V Triggers
                             </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="openSystemSettingsModal(); return false;">
+                                <i class="fas fa-sliders-h me-2"></i>System
+                            </a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="#" onclick="runSetupWizard(); return false;">
                                 <i class="fas fa-magic me-2"></i>Run Setup Wizard
@@ -769,6 +772,49 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" id="editBoardSaveBtn">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Settings Modal -->
+    <div class="modal fade" id="systemSettingsModal" tabindex="-1" aria-labelledby="systemSettingsModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="systemSettingsModalLabel">System Settings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <h6>Audio Buffer Size</h6>
+                    <div class="mb-3">
+                        <label for="bufferSlider" class="form-label">
+                            Buffer: <span id="bufferSliderValue">30</span> seconds
+                        </label>
+                        <input type="range" class="form-range" id="bufferSlider"
+                               min="5" max="30" step="5" value="30"
+                               oninput="updateBufferMemoryTable()">
+                    </div>
+                    <div class="small text-muted mb-2">
+                        Audio is buffered as decoded PCM float32 regardless of the codec used
+                        (FLAC, Opus, PCM). Memory usage depends on sample rate, not codec.
+                    </div>
+                    <table class="table table-sm table-bordered" id="bufferMemoryTable">
+                        <thead>
+                            <tr>
+                                <th>Sample Rate</th>
+                                <th>Per Player</th>
+                                <th id="bufferMemoryTotalHeader">Total (0 players)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bufferMemoryTableBody">
+                        </tbody>
+                    </table>
+                    <div id="bufferSaveMessage" class="small" style="display:none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveBufferSettings()">Save</button>
                 </div>
             </div>
         </div>

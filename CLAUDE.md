@@ -27,7 +27,7 @@ Transform a single Docker host with multiple USB audio devices into a multi-room
 - **Reference Add-ons:**
   - [home-assistant/addons/vlc](https://github.com/home-assistant/addons/tree/master/vlc) - Official VLC add-on (audio player pattern)
 - **SDK Documentation:**
-  - SendSpin.SDK v6.1.1 - Sendspin protocol handling
+  - SendSpin.SDK v7.2.1 - Sendspin protocol handling
 
 ---
 
@@ -223,6 +223,7 @@ new ErrorResponse(false, "Error message")
 | `SUPERVISOR_TOKEN` | (HAOS only) | Auto-set by Home Assistant supervisor |
 | `MOCK_HARDWARE` | `false` | Enable mock relay boards for testing without hardware |
 | `ENABLE_ADVANCED_FORMATS` | `false` | Show format selection UI (dev-only). All players default to flac-48000 regardless. |
+| `BUFFER_SECONDS` | `30` | Audio buffer size in seconds (5-30, step 5). Lower values reduce RAM on constrained hardware. |
 
 **Audio Configuration Notes:**
 - `PA_SAMPLE_RATE` and `PA_SAMPLE_FORMAT` only apply in standalone Docker mode
@@ -270,7 +271,7 @@ squeezelite-docker/
 ## NuGet Packages
 
 ```xml
-<PackageReference Include="SendSpin.SDK" Version="6.1.1" />
+<PackageReference Include="SendSpin.SDK" Version="7.2.1" />
 <PackageReference Include="YamlDotNet" Version="16.3.0" />
 <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
 <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.22" />

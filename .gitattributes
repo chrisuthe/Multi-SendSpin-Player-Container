@@ -4,9 +4,11 @@
 # Force Unix line endings for shell scripts
 *.sh text eol=lf
 
-# Force Unix line endings for Docker files
+# Force Unix line endings for Docker files and Linux config
 Dockerfile* text eol=lf
 docker-compose*.yml text eol=lf
+*.conf text eol=lf
+*.pa text eol=lf
 
 # Windows files
 *.bat text eol=crlf

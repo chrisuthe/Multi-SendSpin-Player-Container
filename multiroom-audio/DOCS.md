@@ -1,29 +1,16 @@
 # Multi-Room Audio Controller
 
 <!-- VERSION_INFO_START -->
-## Latest Release: 5.0.0
+## Latest Release: 5.0.1
 
 
 
-### Highlights
-- **USB Device Hotplug** - Auto-detect USB audio device disconnect/reconnect with grace period for bus glitches
-- **Auto-Resume Playback** - Players automatically resume after device reconnection
-- **12V Trigger Relay Control** - Control amplifier power via FTDI, USB HID, and Modbus/CH340 relay boards
-- **LCUS Relay Board Support** - Added LCUS relay boards alongside existing FTDI, HID, and Modbus boards
-- **Mobile-Responsive UI** - Touch-friendly sliders, responsive layout, and Bootstrap Toast notifications
-- **USB Audio HID Buttons** - Hardware volume/mute button support for USB audio devices
-- **Bluetooth (BlueZ) Support** - Comprehensive card/sink matching for Bluetooth audio devices
-- **Player Mute Control** - Bidirectional mute sync with Music Assistant
-- **Audio Format Selection** - Per-player audio format configuration (flac-48000 default)
-- **SendSpin.SDK 6.1.1** - Major SDK upgrade with improved sync and volume handling
+### Fixed
+- Fix "Missing required option 'relay_serial_port'" error preventing add-on startup in Home Assistant
+- Remove unused `relay_serial_port` and `relay_devices` add-on options (relay boards are auto-discovered via USB)
 
-### Added
-- USB audio device hotplug detection with grace period for bus glitches
-- Auto-resume playback after device reconnection with configurable option
-- SignalR notifications for device hotplug events
-- 12V trigger relay control for amplifier zones (FTDI, USB HID, Modbus/CH340, LCUS boards)
-- Multi-board trigger support with startup/shutdown behavior configuration
-- USB audio HID button support for hardware volume/mute controls
+### Changed
+- Updated documentation to reflect automatic relay board discovery
 
 [View full changelog](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/CHANGELOG.md)
 <!-- VERSION_INFO_END -->

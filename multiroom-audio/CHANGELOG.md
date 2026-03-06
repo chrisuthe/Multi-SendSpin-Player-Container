@@ -1,5 +1,16 @@
 # Changelog
 
+## [5.0.1] - Relay Configuration Fix
+
+### Fixed
+- Fix "Missing required option 'relay_serial_port'" error preventing add-on startup in Home Assistant
+- Remove unused `relay_serial_port` and `relay_devices` add-on options (relay boards are auto-discovered via USB)
+
+### Changed
+- Updated documentation to reflect automatic relay board discovery
+
+---
+
 ## [5.0.0] - USB Device Management, 12V Triggers & Mobile UI
 
 ### Highlights

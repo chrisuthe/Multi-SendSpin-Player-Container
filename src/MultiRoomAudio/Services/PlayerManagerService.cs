@@ -138,12 +138,14 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// Local circular buffer capacity for decompressed PCM audio (in milliseconds).
     ///
     /// This is the TimedAudioBuffer size - how much decoded audio we can hold locally.
-    /// Must be large enough to handle network jitter and decode timing variations.
+    /// Initialized from EnvironmentService.BufferSeconds (default 30 seconds). Provides
+    /// uninterrupted playback during network hiccups and lightweight reconnects. At 48kHz
+    /// stereo float32, 30s is approximately 11MB per player.
     ///
     /// Note: This is DIFFERENT from ServerAnnouncedBufferCapacityBytes which controls
     /// how far ahead the server sends compressed audio.
     /// </summary>
-    private const int LocalBufferCapacityMs = 8000;
+    private readonly int _localBufferCapacityMs;
 
     /// <summary>
     /// Target buffer level for playback readiness (in milliseconds).
@@ -152,7 +154,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// Lower values = faster playback start but more sensitive to jitter.
     ///
     /// This is NOT a buffer capacity - it's a threshold for when to START playing.
-    /// The actual buffer can hold much more (see LocalBufferCapacityMs).
+    /// The actual buffer can hold much more (see _localBufferCapacityMs).
     ///
     /// With SDK's HasMinimalSync (2 clock measurements), typical startup is 300-500ms.
     /// </summary>
@@ -227,6 +229,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// Maximum number of reconnection attempts before giving up (0 = unlimited).
     /// </summary>
     private const int MaxReconnectAttempts = 0; // Unlimited - keep trying forever
+
+    /// <summary>
+    /// Maximum time to attempt lightweight reconnect before falling back to full teardown.
+    /// During lightweight reconnect, the pipeline/buffer/player stay alive so audio
+    /// continues playing from the 30s buffer while the WebSocket reconnects.
+    /// </summary>
+    private static readonly TimeSpan LightweightReconnectTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Grace period after connection during which volume updates from MA are ignored.
@@ -383,6 +392,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         public AudioDevice? CachedDevice { get; set; }
         public string? ErrorMessage { get; set; }
         public DateTime? ConnectedAt { get; set; }
+        public DateTime? DisconnectedAt { get; set; }  // For lightweight reconnect window tracking
         public int InitialVolume { get; init; } // Store initial volume to detect resets
         public long SamplesPlayed { get; set; }
         public bool? LastConfirmedMuted { get; set; } // Track last mute state echoed to server
@@ -400,6 +410,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         public EventHandler<GroupState>? GroupStateHandler { get; set; }
         // SDK 5.4.0: Handler for individual player volume/mute commands
         public EventHandler<SdkPlayerState>? PlayerStateHandler { get; set; }
+        // SDK 7.2.1: Handler for server-pushed sync offset calibration
+        public EventHandler<SyncOffsetEventArgs>? SyncOffsetHandler { get; set; }
+        // SDK 7.2.1: Handler for server-cleared artwork
+        public EventHandler? ArtworkClearedHandler { get; set; }
         // Flag to prevent feedback loops when updating server
         public bool IsUpdatingFromServer { get; set; }
     }
@@ -453,6 +467,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _serviceProvider = serviceProvider;
         _versionService = versionService;
         _subscriptionService = subscriptionService;
+        _localBufferCapacityMs = environment.BufferSeconds * 1000;
+        _logger.LogInformation("Audio buffer capacity: {BufferMs}ms ({BufferSeconds}s)",
+            _localBufferCapacityMs, environment.BufferSeconds);
         _serverDiscovery = new MdnsServerDiscovery(
             loggerFactory.CreateLogger<MdnsServerDiscovery>());
 
@@ -952,7 +969,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 var buffer = new TimedAudioBuffer(
                     format,
                     sync,
-                    bufferCapacityMs: LocalBufferCapacityMs,
+                    bufferCapacityMs: _localBufferCapacityMs,
                     syncOptions: PulseAudioSyncOptions);
                 buffer.TargetBufferMilliseconds = PlaybackStartThresholdMs;
                 return buffer;
@@ -1399,7 +1416,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     // Command MA to update its displayed volume
                     await context.Client.SetVolumeAsync(volume);
                     // SDK 5.4.0 auto-acknowledges, but we still echo state for full sync
-                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
+                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted, context.ClockSync.StaticDelayMs);
                     _logger.LogInformation("VOLUME [Sync] Player '{Name}': sent {Volume}% to MA",
                         name, volume);
                 }
@@ -1455,7 +1472,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             {
                 // Prevent feedback loop with PlayerStateChanged handler
                 context.IsUpdatingFromServer = true;
-                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted);
+                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted, context.ClockSync.StaticDelayMs);
                 context.LastConfirmedMuted = muted;
                 _logger.LogInformation("MUTE [StateEcho] Player '{Name}': synced {State} to server",
                     name, muted ? "muted" : "unmuted");
@@ -1504,7 +1521,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 {
                     context.IsUpdatingFromServer = true;
                     await context.Client.SetVolumeAsync(volume);
-                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted);
+                    await context.Client.SendPlayerStateAsync(volume, context.Player.IsMuted, context.ClockSync.StaticDelayMs);
                     _logger.LogInformation("VOLUME [Hardware->MA] Player '{Name}': synced {Volume}% to MA",
                         name, volume);
                 }
@@ -1553,7 +1570,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             try
             {
                 context.IsUpdatingFromServer = true;
-                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted);
+                await context.Client.SendPlayerStateAsync(context.Config.Volume, muted, context.ClockSync.StaticDelayMs);
                 context.LastConfirmedMuted = muted;
                 _logger.LogInformation("MUTE [Hardware->MA] Player '{Name}': synced {State} to server",
                     name, muted ? "muted" : "unmuted");
@@ -2127,6 +2144,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.GroupStateHandler = CreateGroupStateHandler(name, context);
         // SDK 5.4.0: PlayerStateChanged for individual player volume/mute commands
         context.PlayerStateHandler = CreatePlayerStateHandler(name, context);
+        // SDK 7.2.1: SyncOffsetApplied for server-pushed static delay calibration
+        context.SyncOffsetHandler = CreateSyncOffsetHandler(name, context);
+        // SDK 7.2.1: ArtworkCleared for clearing stale album art
+        context.ArtworkClearedHandler = CreateArtworkClearedHandler(name, context);
 
         // Subscribe to events
         context.Client.ConnectionStateChanged += context.ConnectionStateHandler;
@@ -2136,6 +2157,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.Client.GroupStateChanged += context.GroupStateHandler;
         // SDK 5.4.0: Subscribe to PlayerStateChanged
         context.Client.PlayerStateChanged += context.PlayerStateHandler;
+        // SDK 7.2.1: Subscribe to SyncOffsetApplied
+        context.Client.SyncOffsetApplied += context.SyncOffsetHandler;
+        // SDK 7.2.1: Subscribe to ArtworkCleared
+        context.Client.ArtworkCleared += context.ArtworkClearedHandler;
     }
 
     /// <summary>
@@ -2167,20 +2192,19 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             if (args.NewState == ConnectionState.Connected)
             {
                 context.ConnectedAt = DateTime.UtcNow;
+                context.DisconnectedAt = null;  // Clear lightweight reconnect state
                 _logger.LogInformation("VOLUME [GracePeriod] Player '{Name}': grace period started for {Duration}s",
                     name, VolumeGracePeriod.TotalSeconds);
                 _ = PushVolumeToServerAsync(name, context);
             }
 
-            // Handle disconnection - queue for reconnection if appropriate
+            // Handle disconnection - attempt lightweight reconnect first, fall back to full teardown
             if (args.NewState == ConnectionState.Disconnected &&
                 previousState != Models.PlayerState.Stopped &&  // Not user-stopped
                 previousState != Models.PlayerState.Error &&    // Not already errored
                 !_pendingReconnections.ContainsKey(name) &&     // Not already pending server reconnection
                 !_devicePendingPlayers.ContainsKey(name))       // Not waiting for device reconnection
             {
-                _logger.LogWarning("Player '{Name}' disconnected unexpectedly, queuing for reconnection", name);
-
                 // Get the persisted configuration for reconnection
                 var persistedConfig = _config.Players.TryGetValue(name, out var cfg) ? cfg : null;
                 if (persistedConfig == null)
@@ -2189,16 +2213,28 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     return;
                 }
 
-                // Fire and forget the reconnection setup (can't await in event handler)
-                FireAndForget(async () =>
+                // First disconnect in this window? Start lightweight reconnect
+                if (context.DisconnectedAt == null)
                 {
-                    // Small delay to let disposal complete
-                    await Task.Delay(100);
+                    context.DisconnectedAt = DateTime.UtcNow;
+                    context.State = Models.PlayerState.Reconnecting;
+                    context.ErrorMessage = "Reconnecting...";
 
-                    // Remove the disconnected player and queue for reconnection
-                    await RemoveAndDisposePlayerAsync(name);
-                    QueueForReconnection(persistedConfig);
-                }, $"Reconnection setup for '{name}'", _logger);
+                    _logger.LogInformation(
+                        "Player '{Name}' disconnected, attempting lightweight reconnect (60s window, audio continues from buffer)",
+                        name);
+
+                    FireAndForget(async () =>
+                    {
+                        await AttemptLightweightReconnectAsync(name, context, persistedConfig);
+                    }, $"Lightweight reconnect for '{name}'", _logger);
+                }
+                else
+                {
+                    // This fires if the lightweight reconnect itself disconnected again
+                    // (e.g., handshake timeout). AttemptLightweightReconnectAsync's retry loop handles this.
+                    _logger.LogDebug("Player '{Name}' disconnected during lightweight reconnect window, retry loop will handle", name);
+                }
             }
 
             // Broadcast status update on connection state change
@@ -2986,13 +3022,74 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Creates handler for server-pushed sync offset calibration (GroupSync).
+    /// The SDK already applies the offset to ClockSync.StaticDelayMs internally;
+    /// we just persist it and broadcast to UI.
+    /// </summary>
+    /// <remarks>
+    /// SDK 7.2.1 change: SyncOffsetApplied fires when server sends sync offset calibration.
+    /// </remarks>
+    private EventHandler<SyncOffsetEventArgs> CreateSyncOffsetHandler(
+        string name, PlayerContext context)
+    {
+        return (_, args) =>
+        {
+            _logger.LogInformation(
+                "SYNC_OFFSET Player '{Name}': server set static delay to {Offset:+0.0;-0.0}ms (source: {Source})",
+                name, args.OffsetMs, args.Source);
+
+            // Persist the offset so it survives restarts
+            _config.UpdatePlayerField(name, cfg => cfg.DelayMs = (int)Math.Round(args.OffsetMs), save: true);
+
+            // Broadcast to UI so delay offset display updates
+            _ = BroadcastStatusAsync();
+        };
+    }
+
+    /// <summary>
+    /// Creates handler for server-cleared artwork.
+    /// The SDK already sets artwork URL to null internally;
+    /// we just broadcast to UI so stale album art is cleared.
+    /// </summary>
+    /// <remarks>
+    /// SDK 7.2.1 change: ArtworkCleared fires when server sends empty artwork.
+    /// </remarks>
+    private EventHandler CreateArtworkClearedHandler(
+        string name, PlayerContext context)
+    {
+        return (_, _) =>
+        {
+            _logger.LogDebug(
+                "Player '{Name}': artwork cleared by server",
+                name);
+
+            // Broadcast to UI so album art display clears
+            _ = BroadcastStatusAsync();
+        };
+    }
+
+    /// <summary>
     /// Unsubscribes all event handlers from a player context.
     /// Must be called before disposal to prevent memory leaks and access to disposed objects.
     /// </summary>
     private void UnwireEvents(PlayerContext context)
     {
         // Unsubscribe in reverse order of subscription
-        // SDK 5.4.0: Unsubscribe PlayerStateChanged first (subscribed last)
+        // SDK 7.2.1: Unsubscribe ArtworkCleared first (subscribed last)
+        if (context.ArtworkClearedHandler != null)
+        {
+            context.Client.ArtworkCleared -= context.ArtworkClearedHandler;
+            context.ArtworkClearedHandler = null;
+        }
+
+        // SDK 7.2.1: Unsubscribe SyncOffsetApplied
+        if (context.SyncOffsetHandler != null)
+        {
+            context.Client.SyncOffsetApplied -= context.SyncOffsetHandler;
+            context.SyncOffsetHandler = null;
+        }
+
+        // SDK 5.4.0: Unsubscribe PlayerStateChanged
         if (context.PlayerStateHandler != null)
         {
             context.Client.PlayerStateChanged -= context.PlayerStateHandler;
@@ -3314,6 +3411,124 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     }
 
     #region Reconnection Methods
+
+    /// <summary>
+    /// Attempts lightweight reconnect by reusing existing SDK components.
+    /// Audio continues playing from the 30s buffer while the WebSocket reconnects.
+    /// Falls back to full teardown if the 60s window expires.
+    /// </summary>
+    private async Task AttemptLightweightReconnectAsync(
+        string name, PlayerContext context, PlayerConfiguration config)
+    {
+        var attempt = 0;
+
+        while (context.DisconnectedAt != null &&
+               DateTime.UtcNow - context.DisconnectedAt.Value <= LightweightReconnectTimeout &&
+               !context.Cts.Token.IsCancellationRequested)
+        {
+            attempt++;
+
+            try
+            {
+                // Resolve server URI
+                Uri? serverUri = null;
+                if (!string.IsNullOrEmpty(config.Server))
+                {
+                    serverUri = new Uri(config.Server);
+                }
+                else
+                {
+                    try
+                    {
+                        serverUri = await GetOrDiscoverServerAsync(context.Cts.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Player '{Name}': mDNS discovery failed during lightweight reconnect", name);
+                    }
+                }
+
+                if (serverUri == null)
+                {
+                    _logger.LogDebug("Player '{Name}': no server URI found, will retry", name);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Player '{Name}': lightweight reconnect attempt {Attempt} to {Uri}",
+                        name, attempt, serverUri);
+
+                    // Reuse existing client — ConnectAsync creates new WebSocket, re-handshakes,
+                    // SDK resets clock sync and calls Pipeline.NotifyReconnect() automatically
+                    await context.Client.ConnectAsync(serverUri, context.Cts.Token);
+
+                    // Success — clear disconnect timestamp
+                    context.DisconnectedAt = null;
+                    context.ConnectedAt = DateTime.UtcNow;
+                    context.ConnectedAddress = $"{serverUri.Host}:{serverUri.Port}";
+                    context.ServerName = context.Client.ServerName;
+                    context.ErrorMessage = null;
+
+                    _logger.LogInformation(
+                        "Player '{Name}': lightweight reconnect succeeded after {Attempt} attempt(s), pipeline preserved",
+                        name, attempt);
+
+                    _ = BroadcastStatusAsync();
+                    return;
+                }
+            }
+            catch (OperationCanceledException) when (context.Cts.Token.IsCancellationRequested)
+            {
+                _logger.LogDebug("Player '{Name}': lightweight reconnect cancelled", name);
+                return;
+            }
+            catch (Exception ex)
+            {
+                var elapsed = DateTime.UtcNow - context.DisconnectedAt!.Value;
+                var remaining = LightweightReconnectTimeout - elapsed;
+
+                _logger.LogWarning(
+                    "Player '{Name}': lightweight reconnect attempt {Attempt} failed ({Remaining:F0}s remaining): {Message}",
+                    name, attempt, remaining.TotalSeconds, ex.Message);
+
+                if (remaining <= TimeSpan.Zero)
+                    break;
+            }
+
+            // Exponential backoff: 1s, 2s, 4s, 8s... capped at 15s
+            var delay = TimeSpan.FromSeconds(Math.Min(Math.Pow(2, attempt - 1), 15));
+            var timeRemaining = LightweightReconnectTimeout - (DateTime.UtcNow - context.DisconnectedAt!.Value);
+            if (delay > timeRemaining)
+                delay = timeRemaining > TimeSpan.Zero ? timeRemaining : TimeSpan.Zero;
+
+            if (delay > TimeSpan.Zero)
+            {
+                try
+                {
+                    await Task.Delay(delay, context.Cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+
+        // Lightweight window expired — fall back to full teardown
+        if (context.DisconnectedAt != null)
+        {
+            _logger.LogWarning(
+                "Player '{Name}': lightweight reconnect window expired after {Attempt} attempts, falling back to full teardown",
+                name, attempt);
+
+            context.DisconnectedAt = null;
+
+            // Small delay to let any pending operations complete
+            await Task.Delay(100);
+            await RemoveAndDisposePlayerAsync(name);
+            QueueForReconnection(config);
+        }
+    }
 
     /// <summary>
     /// Queues a player for automatic reconnection.

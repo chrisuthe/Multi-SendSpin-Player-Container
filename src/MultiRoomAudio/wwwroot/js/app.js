@@ -5642,3 +5642,94 @@ async function reconnectTriggerBoard() {
         showAlert(`Failed to reconnect: ${error.message}`, 'danger');
     }
 }
+
+// ── System Settings ──────────────────────────────────────────────
+
+let _bufferPlayerCount = 0;
+
+async function openSystemSettingsModal() {
+    try {
+        const resp = await fetch('/api/settings/buffer');
+        if (!resp.ok) throw new Error('Failed to load buffer settings');
+        const data = await resp.json();
+
+        _bufferPlayerCount = data.playerCount;
+        document.getElementById('bufferSlider').value = data.bufferSeconds;
+        updateBufferMemoryTable();
+
+        const modal = new bootstrap.Modal(document.getElementById('systemSettingsModal'));
+        modal.show();
+    } catch (err) {
+        console.error('Failed to open system settings:', err);
+    }
+}
+
+function updateBufferMemoryTable() {
+    const slider = document.getElementById('bufferSlider');
+    const seconds = parseInt(slider.value, 10);
+    document.getElementById('bufferSliderValue').textContent = seconds;
+
+    const rates = [
+        { rate: 48000, label: '48 kHz' },
+        { rate: 96000, label: '96 kHz' },
+        { rate: 192000, label: '192 kHz' }
+    ];
+
+    const tbody = document.getElementById('bufferMemoryTableBody');
+    while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
+    }
+
+    for (const { rate, label } of rates) {
+        const perPlayer = (seconds * rate * 2 * 4 / 1048576).toFixed(1);
+        const total = (perPlayer * _bufferPlayerCount).toFixed(1);
+
+        const tr = document.createElement('tr');
+
+        const tdRate = document.createElement('td');
+        tdRate.textContent = label;
+        tr.appendChild(tdRate);
+
+        const tdPer = document.createElement('td');
+        tdPer.textContent = perPlayer + ' MB';
+        tr.appendChild(tdPer);
+
+        const tdTotal = document.createElement('td');
+        tdTotal.textContent = total + ' MB';
+        tr.appendChild(tdTotal);
+
+        tbody.appendChild(tr);
+    }
+
+    const header = document.getElementById('bufferMemoryTotalHeader');
+    header.textContent = 'Total (' + _bufferPlayerCount + ' player' + (_bufferPlayerCount !== 1 ? 's' : '') + ')';
+
+    document.getElementById('bufferSaveMessage').style.display = 'none';
+}
+
+async function saveBufferSettings() {
+    const seconds = parseInt(document.getElementById('bufferSlider').value, 10);
+    const msgEl = document.getElementById('bufferSaveMessage');
+
+    try {
+        const resp = await fetch('/api/settings/buffer', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bufferSeconds: seconds })
+        });
+        const data = await resp.json();
+
+        if (resp.ok && data.success) {
+            msgEl.className = 'small text-success';
+            msgEl.textContent = data.message;
+        } else {
+            msgEl.className = 'small text-danger';
+            msgEl.textContent = data.message || 'Failed to save.';
+        }
+    } catch (err) {
+        msgEl.className = 'small text-danger';
+        msgEl.textContent = 'Error saving settings: ' + err.message;
+    }
+
+    msgEl.style.display = 'block';
+}
