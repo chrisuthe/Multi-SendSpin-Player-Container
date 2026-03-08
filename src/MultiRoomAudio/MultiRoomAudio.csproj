@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <!-- Core SDK for Sendspin protocol -->
-    <PackageReference Include="SendSpin.SDK" Version="6.3.5" />
+    <PackageReference Include="SendSpin.SDK" Version="7.3.0" />
     <PackageReference Include="System.IO.Ports" Version="10.0.2" />
 
     <!-- USB HID support for HID relay boards -->
