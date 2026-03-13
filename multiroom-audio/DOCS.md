@@ -1,16 +1,26 @@
 # Multi-Room Audio Controller
 
 <!-- VERSION_INFO_START -->
-## Latest Release: 5.0.1
+## Latest Release: 5.1.0
 
+### Highlights
+- **SendSpin SDK 7.3.0** — NativeAOT, static delay reporting, reconnect resilience, FLAC 32-bit fix, simplified sync deadband
+- **Configurable Audio Buffer** — New System Settings UI with 5-30s buffer slider and per-player memory estimates
+- **Hybrid Reconnection** — Lightweight reconnect for ≤60s disconnections keeps audio playing from buffer
+- **Wizard Mono Output** — Remap sink creation now supports mono/stereo toggle
 
+### Added
+- `BUFFER_SECONDS` environment variable (5-30, default 30) for audio buffer sizing
+- `GET/PUT /api/settings/buffer` endpoint with memory usage estimates
+- System Settings modal with buffer slider and memory table
+- Server-pushed sync offset calibration (SyncOffsetApplied event)
+- Artwork cleared event to remove stale album art
+- Static delay reporting in all player state updates
 
 ### Fixed
-- Fix "Missing required option 'relay_serial_port'" error preventing add-on startup in Home Assistant
-- Remove unused `relay_serial_port` and `relay_devices` add-on options (relay boards are auto-discovered via USB)
-
-### Changed
-- Updated documentation to reflect automatic relay board discovery
+- Buffer settings fetch paths for HA ingress (relative paths)
+- PulseAudio config CRLF line endings causing parse failures
+- Duplicate HidSharp package reference
 
 [View full changelog](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/CHANGELOG.md)
 <!-- VERSION_INFO_END -->

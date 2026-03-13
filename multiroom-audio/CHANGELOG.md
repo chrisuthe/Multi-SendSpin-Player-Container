@@ -1,5 +1,39 @@
 # Changelog
 
+## [5.1.0] - SDK Upgrade, Configurable Buffer & Hybrid Reconnection
+
+### Highlights
+- **SendSpin SDK 7.3.0** — NativeAOT support, static delay reporting, reconnect resilience, FLAC 32-bit fix, buffer overrun sync fix, simplified sync deadband, mDNS input sanitization
+- **Configurable Audio Buffer** — Global setting (5-30 seconds) with System Settings UI showing per-player memory estimates
+- **Hybrid Reconnection** — Lightweight reconnect for ≤60s disconnections keeps audio playing from buffer while WebSocket reconnects
+- **Wizard Mono Output** — Remap sink creation now supports mono/stereo toggle
+
+### Added
+- `BUFFER_SECONDS` environment variable / HAOS option (5-30s, step 5, default 30s)
+- `GET/PUT /api/settings/buffer` endpoint with memory usage estimates per sample rate
+- System Settings modal with buffer size slider and per-player memory table
+- Settings persistence via `settings.yaml` through ConfigurationService
+- Server-pushed sync offset calibration via SyncOffsetApplied event
+- ArtworkCleared event to clear stale album art when server signals no artwork
+- Static delay (staticDelayMs) reported in all SendPlayerStateAsync calls for GroupSync
+- Lightweight reconnect with exponential backoff (1s, 2s, 4s... capped at 15s)
+- Full teardown fallback after 60s lightweight reconnect window expires
+- DisconnectedAt tracking for reconnect window management
+- `.gitattributes` rules for `.conf` and `.pa` files to enforce LF line endings
+
+### Fixed
+- TTS buffer overflow causing truncated messages (buffer increased from 8s to 30s)
+- Buffer settings fetch paths for HA ingress (changed to relative `./api/` paths)
+- PulseAudio config files using CRLF line endings causing "Missing '='" parse errors
+- Duplicate HidSharp package reference removed
+
+### Changed
+- SendSpin SDK upgraded from 6.3.5 to 7.3.0
+- Local audio buffer default increased from 8 seconds to 30 seconds (~11MB per player at 48kHz)
+- Buffer capacity now configurable at runtime via System Settings UI
+
+---
+
 ## [5.0.1] - Relay Configuration Fix
 
 ### Fixed
