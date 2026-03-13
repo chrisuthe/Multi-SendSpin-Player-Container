@@ -161,7 +161,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build image (cache warm)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -199,7 +199,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Push to Docker Hub
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -236,7 +236,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Push to GHCR
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -273,7 +273,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Push to HASSIO (GHCR)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -314,7 +314,7 @@ jobs:
         run: echo "sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Push to HASSIO dev image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -333,7 +333,7 @@ jobs:
       # Push to separate HASSIO dev image (HAOS doesn't allow tags in image field)
       - name: Push to HASSIO dev image
         if: github.ref == 'refs/heads/dev'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
