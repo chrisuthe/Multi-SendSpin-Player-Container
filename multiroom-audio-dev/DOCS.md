@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-df5701f
+## Development Build: sha-c092dab
 
 **Current Dev Build Changes** (recent)
 
+- release: prepare v5.1.0
 - Merge branch 'main' into dev
 - Merge pull request #204 from chrisuthe/dependabot/github_actions/docker/build-push-action-7
 - Merge pull request #205 from chrisuthe/dependabot/github_actions/docker/login-action-4
@@ -14,7 +15,6 @@
 - Bump docker/setup-buildx-action from 3 to 4
 - Merge pull request #201 from chrisuthe/dependabot/github_actions/docker/setup-qemu-action-4
 - Bump docker/login-action from 3 to 4
-- Bump docker/build-push-action from 6 to 7
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
