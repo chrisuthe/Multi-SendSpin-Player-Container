@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-bf1eb98
+## Development Build: sha-df5701f
 
 **Current Dev Build Changes** (recent)
 
-- Merge pull request #200 from chrisuthe/chore/SDK-Update-730
-- chore: upgrade SendSpin.SDK 7.2.1 -> 7.3.0
-- Merge pull request #199 from scyto/dev
-- feat: add mono output mode to wizard remap sink UI (#140)
-- Merge pull request #198 from scyto/bug/fix-ingress-buffer-fetch
-- fix: use relative paths for buffer settings fetch calls
-- Merge pull request #197 from chrisuthe/task/feat-adjustable-buffer
-- fix: convert PulseAudio config files to LF line endings
-- docs: add BUFFER_SECONDS to environment variables table
-- feat: add System Settings modal with buffer size slider
+- Merge branch 'main' into dev
+- Merge pull request #204 from chrisuthe/dependabot/github_actions/docker/build-push-action-7
+- Merge pull request #205 from chrisuthe/dependabot/github_actions/docker/login-action-4
+- Merge pull request #203 from chrisuthe/dependabot/github_actions/docker/setup-buildx-action-4
+- Merge pull request #186 from chrisuthe/dependabot/nuget/src/MultiRoomAudio/System.IO.Ports-10.0.3
+- Merge pull request #202 from chrisuthe/dependabot/github_actions/docker/metadata-action-6
+- Bump docker/setup-buildx-action from 3 to 4
+- Merge pull request #201 from chrisuthe/dependabot/github_actions/docker/setup-qemu-action-4
+- Bump docker/login-action from 3 to 4
+- Bump docker/build-push-action from 6 to 7
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
