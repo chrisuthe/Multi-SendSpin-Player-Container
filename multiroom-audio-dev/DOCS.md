@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-5b81d9c
+## Development Build: sha-bf1eb98
 
 **Current Dev Build Changes** (recent)
 
-- Remove duplicate HidSharp package reference
-- Merge pull request #191 from chrisuthe/claude/fix-relay-serial-port-fRVse
-- Merge remote-tracking branch 'origin/main' into dev
-- Merge pull request #189 from chrisuthe/scyto-patch-1
-- Remove relay options from config.yaml
-- Merge pull request #188 from chrisuthe/claude/fix-relay-serial-port-fRVse
-- Remove unused relay_serial_port and relay_devices from HAOS add-on config
-- Restore multiroom-audio/config.yaml to commit 5d448b53be765dec665f624e198e825ec0608a97
-- Revert multiroom-audio/config.yaml to the state before commit af1f957711952b872169c6615d890dd2877ae4f3
-- Revert commit af1f957711952b872169c6615d890dd2877ae4f3
+- Merge pull request #200 from chrisuthe/chore/SDK-Update-730
+- chore: upgrade SendSpin.SDK 7.2.1 -> 7.3.0
+- Merge pull request #199 from scyto/dev
+- feat: add mono output mode to wizard remap sink UI (#140)
+- Merge pull request #198 from scyto/bug/fix-ingress-buffer-fetch
+- fix: use relative paths for buffer settings fetch calls
+- Merge pull request #197 from chrisuthe/task/feat-adjustable-buffer
+- fix: convert PulseAudio config files to LF line endings
+- docs: add BUFFER_SECONDS to environment variables table
+- feat: add System Settings modal with buffer size slider
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
