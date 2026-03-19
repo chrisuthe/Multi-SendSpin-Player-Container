@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
-using MultiRoomAudio.Models;
-using MultiRoomAudio.Services;
+using MultiRoomAudio.Models.LogModels;
+using MultiRoomAudio.Services.Logging;
 
 namespace MultiRoomAudio.Hubs;
 
@@ -73,21 +73,5 @@ public class LogStreamHub : Hub
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"category:{category}");
         }
-    }
-}
-
-/// <summary>
-/// Extension methods for broadcasting log entries.
-/// </summary>
-public static class LogStreamHubExtensions
-{
-    /// <summary>
-    /// Broadcasts a log entry to all connected clients in the "all" group.
-    /// </summary>
-    public static async Task BroadcastLogEntryAsync(
-        this IHubContext<LogStreamHub> hubContext,
-        LogEntryDto entry)
-    {
-        await hubContext.Clients.Group("all").SendAsync("LogEntry", entry);
     }
 }

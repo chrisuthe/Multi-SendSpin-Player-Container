@@ -1,4 +1,4 @@
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
 using Sendspin.SDK.Audio;
 
 namespace MultiRoomAudio.Audio;

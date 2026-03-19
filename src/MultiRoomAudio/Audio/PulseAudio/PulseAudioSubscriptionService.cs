@@ -1,14 +1,6 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using static MultiRoomAudio.Audio.PulseAudio.PulseAudioNative;
 
 namespace MultiRoomAudio.Audio.PulseAudio;
-
-/// <summary>
-/// Event args for sink appearance/disappearance events.
-/// </summary>
-/// <param name="Index">PulseAudio sink index.</param>
-public record SinkEventArgs(uint Index);
 
 /// <summary>
 /// Singleton service that subscribes to PulseAudio sink events.

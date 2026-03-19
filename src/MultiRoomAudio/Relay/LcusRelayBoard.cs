@@ -1,7 +1,6 @@
 using System.IO.Ports;
-using System.Security.Cryptography;
-using System.Text;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.TriggerModels;
+using MultiRoomAudio.Relay.Ch340;
 
 namespace MultiRoomAudio.Relay;
 

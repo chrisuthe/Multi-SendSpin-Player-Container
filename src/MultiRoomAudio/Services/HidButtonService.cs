@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.HideButton;
+using MultiRoomAudio.Models.PlayerStatus;
+using MultiRoomAudio.Services.Configuration;
 
 namespace MultiRoomAudio.Services;
 
@@ -141,8 +144,8 @@ public class HidButtonService : IAsyncDisposable
             var allPlayers = playerManager.GetAllPlayers();
             var activePlayer = allPlayers.Players.FirstOrDefault(p =>
                 p.Device?.Equals(sinkName, StringComparison.OrdinalIgnoreCase) == true &&
-                p.State != Models.PlayerState.Stopped &&
-                p.State != Models.PlayerState.Error);
+                p.State != PlayerState.Stopped &&
+                p.State != PlayerState.Error);
 
             if (activePlayer != null)
             {

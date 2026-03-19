@@ -1,3 +1,5 @@
+using MultiRoomAudio.Services.StartupProgress;
+
 namespace MultiRoomAudio.Services;
 
 /// <summary>

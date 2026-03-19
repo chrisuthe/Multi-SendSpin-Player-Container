@@ -1,11 +1,15 @@
 using System.Collections.Concurrent;
-using Microsoft.Extensions.DependencyInjection;
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Exceptions;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.CardModels;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.SinkModels;
+using MultiRoomAudio.Services.Configuration;
 using MultiRoomAudio.Utilities;
+using MultiRoomAudio.Utilities.Pa;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using PaModuleRunner = MultiRoomAudio.Utilities.Pa.PaModuleRunner;
 
 namespace MultiRoomAudio.Services;
 

@@ -1,15 +1,7 @@
 using System.Text.RegularExpressions;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
 
 namespace MultiRoomAudio.Audio;
-
-/// <summary>
-/// Device capabilities with source information.
-/// </summary>
-public record DeviceCapabilitiesWithSource(
-    DeviceCapabilities Capabilities,
-    CapabilitySource Source
-);
 
 /// <summary>
 /// Service for querying ALSA hardware capabilities from /proc/asound.

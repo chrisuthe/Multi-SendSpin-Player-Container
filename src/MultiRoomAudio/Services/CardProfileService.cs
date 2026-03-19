@@ -1,7 +1,8 @@
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Audio.Mock;
 using MultiRoomAudio.Audio.PulseAudio;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.CardModels;
+using MultiRoomAudio.Services.Configuration;
 using MultiRoomAudio.Utilities;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;

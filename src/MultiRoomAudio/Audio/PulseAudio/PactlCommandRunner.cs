@@ -4,17 +4,6 @@ using System.Text.RegularExpressions;
 namespace MultiRoomAudio.Audio.PulseAudio;
 
 /// <summary>
-/// Result of a pactl command execution.
-/// </summary>
-public record PactlResult(int ExitCode, string Output, string Error)
-{
-    /// <summary>
-    /// Whether the command succeeded (exit code 0).
-    /// </summary>
-    public bool Success => ExitCode == 0;
-}
-
-/// <summary>
 /// Shared utility for running PulseAudio (pactl) commands with retry logic and proper error handling.
 /// Centralizes command execution to ensure consistent behavior across all PulseAudio-related code.
 /// </summary>

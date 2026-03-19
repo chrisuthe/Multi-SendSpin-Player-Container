@@ -1,5 +1,6 @@
 using MultiRoomAudio.Audio.PulseAudio;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.PlayerStatus;
 using MultiRoomAudio.Services;
 
 namespace MultiRoomAudio.Controllers;

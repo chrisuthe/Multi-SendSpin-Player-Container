@@ -1,4 +1,5 @@
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.MockHardwareModels;
+using MultiRoomAudio.Models.TriggerModels;
 using MultiRoomAudio.Services;
 
 namespace MultiRoomAudio.Relay;

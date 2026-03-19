@@ -4,9 +4,16 @@ using MultiRoomAudio.Audio;
 using MultiRoomAudio.Controllers;
 using MultiRoomAudio.Hubs;
 using MultiRoomAudio.Logging;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.LogModels;
 using MultiRoomAudio.Services;
+using MultiRoomAudio.Services.Configuration;
+using MultiRoomAudio.Services.Logging;
+using MultiRoomAudio.Services.Onboarding;
+using MultiRoomAudio.Services.StartupProgress;
 using MultiRoomAudio.Utilities;
+using MultiRoomAudio.Utilities.Pa;
+using DefaultPaParser = MultiRoomAudio.Utilities.Pa.DefaultPaParser;
+using PaModuleRunner = MultiRoomAudio.Utilities.Pa.PaModuleRunner;
 
 // Application version from build environment (set by Docker build args)
 var appVersion = Environment.GetEnvironmentVariable("APP_VERSION") ?? "dev";
@@ -143,14 +150,14 @@ if (isMockHardware)
     // Mock hardware configuration service - loads from mock_hardware.yaml if present
     builder.Services.AddSingleton<MultiRoomAudio.Services.MockHardwareConfigService>();
 
-    builder.Services.AddSingleton<MultiRoomAudio.Utilities.IPaModuleRunner, MultiRoomAudio.Audio.Mock.MockPaModuleRunner>();
+    builder.Services.AddSingleton<IPaModuleRunner, MultiRoomAudio.Audio.Mock.MockPaModuleRunner>();
     // Relay hardware abstractions - mock implementations
     builder.Services.AddSingleton<MultiRoomAudio.Relay.IRelayDeviceEnumerator, MultiRoomAudio.Relay.MockRelayDeviceEnumerator>();
     builder.Services.AddSingleton<MultiRoomAudio.Relay.IRelayBoardFactory, MultiRoomAudio.Relay.MockRelayBoardFactory>();
 }
 else
 {
-    builder.Services.AddSingleton<MultiRoomAudio.Utilities.IPaModuleRunner, MultiRoomAudio.Utilities.PaModuleRunner>();
+    builder.Services.AddSingleton<IPaModuleRunner, PaModuleRunner>();
     // Relay hardware abstractions - real implementations
     builder.Services.AddSingleton<MultiRoomAudio.Relay.IRelayDeviceEnumerator, MultiRoomAudio.Relay.RealRelayDeviceEnumerator>();
     builder.Services.AddSingleton<MultiRoomAudio.Relay.IRelayBoardFactory, MultiRoomAudio.Relay.RealRelayBoardFactory>();

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.CardModels;
+using MultiRoomAudio.Models.DeviceInfo;
 
 // DeviceIdentifiers is used for card identifier extraction
 

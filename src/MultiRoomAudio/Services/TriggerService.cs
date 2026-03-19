@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
-using System.Timers;
 using Microsoft.AspNetCore.SignalR;
 using MultiRoomAudio.Hubs;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.TriggerModels;
 using MultiRoomAudio.Relay;
+using MultiRoomAudio.Relay.Hid;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using Timer = System.Timers.Timer;

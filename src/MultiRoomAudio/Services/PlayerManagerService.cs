@@ -5,7 +5,11 @@ using MultiRoomAudio.Audio;
 using MultiRoomAudio.Audio.PulseAudio;
 using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Hubs;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.PlayerConfig;
+using MultiRoomAudio.Models.PlayerStats;
+using MultiRoomAudio.Models.PlayerStatus;
+using MultiRoomAudio.Services.Configuration;
 using MultiRoomAudio.Utilities;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Client;
@@ -14,6 +18,7 @@ using Sendspin.SDK.Discovery;
 using Sendspin.SDK.Models;
 using Sendspin.SDK.Synchronization;
 using static MultiRoomAudio.Utilities.BackgroundTaskExecutor;
+using PlayerState = MultiRoomAudio.Models.PlayerStatus.PlayerState;
 // Alias to disambiguate from MultiRoomAudio.Models.PlayerState (lifecycle enum)
 using SdkPlayerState = Sendspin.SDK.Models.PlayerState;
 
@@ -253,13 +258,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="state">The player state to check.</param>
     /// <returns>True if the player is in an active state.</returns>
-    private static bool IsPlayerInActiveState(Models.PlayerState state)
+    private static bool IsPlayerInActiveState(PlayerState state)
     {
-        return state == Models.PlayerState.Starting ||
-               state == Models.PlayerState.Connecting ||
-               state == Models.PlayerState.Connected ||
-               state == Models.PlayerState.Playing ||
-               state == Models.PlayerState.Buffering;
+        return state == PlayerState.Starting ||
+               state == PlayerState.Connecting ||
+               state == PlayerState.Connected ||
+               state == PlayerState.Playing ||
+               state == PlayerState.Buffering;
     }
 
     /// <summary>
@@ -388,7 +393,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         DeviceCapabilities? DeviceCapabilities = null
     )
     {
-        public Models.PlayerState State { get; set; } = Models.PlayerState.Created;
+        public PlayerState State { get; set; } = PlayerState.Created;
         public AudioDevice? CachedDevice { get; set; }
         public string? ErrorMessage { get; set; }
         public DateTime? ConnectedAt { get; set; }
@@ -722,7 +727,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             if (_players.TryGetValue(playerConfig.Name, out var context))
             {
                 // Queue for reconnection if player is in error state and never connected
-                if (context.State == Models.PlayerState.Error && context.ConnectedAt == null)
+                if (context.State == PlayerState.Error && context.ConnectedAt == null)
                 {
                     var isMdnsOnly = string.IsNullOrEmpty(playerConfig.Server);
                     _logger.LogWarning(
@@ -872,7 +877,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 cts,
                 components.DeviceCapabilities)
             {
-                State = Models.PlayerState.Created,
+                State = PlayerState.Created,
                 InitialVolume = request.Volume,
                 CachedDevice = cachedDevice
             };
@@ -1206,30 +1211,30 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         var isPendingReconnection = _pendingReconnections.TryGetValue(name, out var reconnectState);
         var isDevicePending = _devicePendingPlayers.TryGetValue(name, out var deviceState);
 
-        Models.PlayerState state;
+        PlayerState state;
         string errorMessage;
 
         if (isDevicePending)
         {
-            state = Models.PlayerState.WaitingForDevice;
+            state = PlayerState.WaitingForDevice;
             errorMessage = "Waiting for audio device to reconnect...";
         }
         else if (isPendingReconnection && !reconnectState!.WasUserStopped)
         {
             if (reconnectState.MdnsOnly)
             {
-                state = Models.PlayerState.WaitingForServer;
+                state = PlayerState.WaitingForServer;
                 errorMessage = "Waiting for mDNS discovery...";
             }
             else
             {
-                state = Models.PlayerState.Reconnecting;
+                state = PlayerState.Reconnecting;
                 errorMessage = $"Reconnecting... (attempt {reconnectState.RetryCount})";
             }
         }
         else
         {
-            state = Models.PlayerState.Error;
+            state = PlayerState.Error;
             errorMessage = "Player not running. Device may be unavailable or misconfigured.";
         }
 
@@ -1286,35 +1291,35 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 var isPendingReconnection = _pendingReconnections.TryGetValue(name, out var reconnectState);
                 var isDevicePending = _devicePendingPlayers.ContainsKey(name);
 
-                Models.PlayerState state;
+                PlayerState state;
                 string errorMessage;
 
                 if (isDevicePending)
                 {
-                    state = Models.PlayerState.WaitingForDevice;
+                    state = PlayerState.WaitingForDevice;
                     errorMessage = "Waiting for audio device to reconnect...";
                 }
                 else if (isPendingReconnection && !reconnectState!.WasUserStopped)
                 {
                     if (reconnectState.MdnsOnly)
                     {
-                        state = Models.PlayerState.WaitingForServer;
+                        state = PlayerState.WaitingForServer;
                         errorMessage = "Waiting for mDNS discovery...";
                     }
                     else
                     {
-                        state = Models.PlayerState.Reconnecting;
+                        state = PlayerState.Reconnecting;
                         errorMessage = $"Reconnecting... (attempt {reconnectState.RetryCount})";
                     }
                 }
                 else if (string.IsNullOrEmpty(config.Device))
                 {
-                    state = Models.PlayerState.Error;
+                    state = PlayerState.Error;
                     errorMessage = "No audio device configured. Assign a device to start playback.";
                 }
                 else
                 {
-                    state = Models.PlayerState.Error;
+                    state = PlayerState.Error;
                     errorMessage = "Player not running. Device may be unavailable or misconfigured.";
                 }
 
@@ -1631,9 +1636,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             return null;
 
         // If already running, just return current state
-        if (context.State == Models.PlayerState.Playing || context.State == Models.PlayerState.Connected ||
-            context.State == Models.PlayerState.Buffering || context.State == Models.PlayerState.Connecting ||
-            context.State == Models.PlayerState.Starting)
+        if (context.State == PlayerState.Playing || context.State == PlayerState.Connected ||
+            context.State == PlayerState.Buffering || context.State == PlayerState.Connecting ||
+            context.State == PlayerState.Starting)
         {
             _logger.LogDebug("Player '{Name}' is already running (state={State})", name, context.State);
             return CreateResponse(name, context);
@@ -1664,7 +1669,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         }
 
         // Already stopped?
-        if (context.State == Models.PlayerState.Stopped)
+        if (context.State == PlayerState.Stopped)
         {
             _logger.LogDebug("Player '{Name}' is already stopped", name);
             return true;
@@ -1683,7 +1688,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         try
         {
             context.Cts.Cancel();
-            context.State = Models.PlayerState.Stopped;
+            context.State = PlayerState.Stopped;
 
             // Stop pipeline and disconnect, but don't remove from dictionary
             try
@@ -1714,7 +1719,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error stopping player '{Name}'", name);
-            context.State = Models.PlayerState.Error;
+            context.State = PlayerState.Error;
             context.ErrorMessage = ex.Message;
 
             _ = BroadcastStatusAsync();
@@ -1968,7 +1973,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             // This should not normally be reached since ConnectPlayerAsync has its own error handling,
             // but we catch here as a safety net to ensure no exceptions are lost
             _logger.LogError(ex, "Unhandled exception during player '{Name}' connection", name);
-            context.State = Models.PlayerState.Error;
+            context.State = PlayerState.Error;
             context.ErrorMessage = ex.Message;
             _ = BroadcastStatusAsync();
         }
@@ -2034,7 +2039,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     {
         try
         {
-            context.State = Models.PlayerState.Starting;
+            context.State = PlayerState.Starting;
             _ = BroadcastStatusAsync();
 
             // Discover server if URL not provided
@@ -2050,12 +2055,12 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             }
 
             // Connect
-            context.State = Models.PlayerState.Connecting;
+            context.State = PlayerState.Connecting;
             _ = BroadcastStatusAsync();
 
             await context.Client.ConnectAsync(serverUri!, ct);
 
-            context.State = Models.PlayerState.Connected;
+            context.State = PlayerState.Connected;
             context.ConnectedAt = DateTime.UtcNow;
 
             // Capture server info (one-time, not in audio hot path)
@@ -2086,7 +2091,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             }
             _logger.LogDebug(ex, "Player '{Name}' connection failure details", name);
 
-            context.State = Models.PlayerState.Error;
+            context.State = PlayerState.Error;
             context.ErrorMessage = ex.Message;
             _ = BroadcastStatusAsync();
 
@@ -2178,11 +2183,11 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
             context.State = args.NewState switch
             {
-                ConnectionState.Connected => Models.PlayerState.Connected,
-                ConnectionState.Connecting => Models.PlayerState.Connecting,
-                ConnectionState.Handshaking => Models.PlayerState.Connecting,
-                ConnectionState.Reconnecting => Models.PlayerState.Reconnecting,
-                ConnectionState.Disconnected => Models.PlayerState.Stopped,
+                ConnectionState.Connected => PlayerState.Connected,
+                ConnectionState.Connecting => PlayerState.Connecting,
+                ConnectionState.Handshaking => PlayerState.Connecting,
+                ConnectionState.Reconnecting => PlayerState.Reconnecting,
+                ConnectionState.Disconnected => PlayerState.Stopped,
                 ConnectionState.Disconnecting => context.State, // Brief transition, keep current
                 _ => context.State
             };
@@ -2200,8 +2205,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
             // Handle disconnection - attempt lightweight reconnect first, fall back to full teardown
             if (args.NewState == ConnectionState.Disconnected &&
-                previousState != Models.PlayerState.Stopped &&  // Not user-stopped
-                previousState != Models.PlayerState.Error &&    // Not already errored
+                previousState != PlayerState.Stopped &&  // Not user-stopped
+                previousState != PlayerState.Error &&    // Not already errored
                 !_pendingReconnections.ContainsKey(name) &&     // Not already pending server reconnection
                 !_devicePendingPlayers.ContainsKey(name))       // Not waiting for device reconnection
             {
@@ -2217,7 +2222,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 if (context.DisconnectedAt == null)
                 {
                     context.DisconnectedAt = DateTime.UtcNow;
-                    context.State = Models.PlayerState.Reconnecting;
+                    context.State = PlayerState.Reconnecting;
                     context.ErrorMessage = "Reconnecting...";
 
                     _logger.LogInformation(
@@ -2259,7 +2264,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
             if (state == AudioPipelineState.Playing)
             {
-                context.State = Models.PlayerState.Playing;
+                context.State = PlayerState.Playing;
 
                 // Refresh cached device info now that PulseAudio has negotiated the actual
                 // hardware format. On first play after cold start, the sink may switch from
@@ -2288,17 +2293,17 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 }
             }
             else if (state == AudioPipelineState.Buffering)
-                context.State = Models.PlayerState.Buffering;
+                context.State = PlayerState.Buffering;
             else if (state == AudioPipelineState.Idle)
-                context.State = Models.PlayerState.Connected;
+                context.State = PlayerState.Connected;
             else if (stateStr is "Starting")
             {
-                context.State = Models.PlayerState.Starting;
+                context.State = PlayerState.Starting;
                 _logger.LogInformation("Player '{Name}' pipeline is starting", name);
             }
             else if (stateStr is "Stopping")
             {
-                context.State = Models.PlayerState.Connected;
+                context.State = PlayerState.Connected;
                 _logger.LogInformation("Player '{Name}' pipeline is stopping", name);
             }
             else if (stateStr is "Dropping" or "Disconnecting")
@@ -2315,9 +2320,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             // Activate when transitioning TO an active state (Playing/Buffering) from inactive
             // Deactivate when transitioning TO a stopped state (Idle/Stopping) from active
             var isActiveState = state == AudioPipelineState.Playing || state == AudioPipelineState.Buffering;
-            var wasInactiveState = previousState != Models.PlayerState.Playing && previousState != Models.PlayerState.Buffering;
+            var wasInactiveState = previousState != PlayerState.Playing && previousState != PlayerState.Buffering;
             var isStoppedState = state == AudioPipelineState.Idle || stateStr is "Stopping";
-            var wasActiveState = previousState == Models.PlayerState.Playing || previousState == Models.PlayerState.Buffering;
+            var wasActiveState = previousState == PlayerState.Playing || previousState == PlayerState.Buffering;
 
             if (isActiveState && wasInactiveState)
             {
@@ -2517,8 +2522,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     {
         // Check if player is still in a recoverable state
         // If already stopped or queued for reconnection, skip recovery
-        if (context.State == Models.PlayerState.Stopped ||
-            context.State == Models.PlayerState.Error ||
+        if (context.State == PlayerState.Stopped ||
+            context.State == PlayerState.Error ||
             _devicePendingPlayers.ContainsKey(name))
         {
             _logger.LogDebug("Player '{Name}' already stopped or queued, skipping stream recovery", name);
@@ -2585,8 +2590,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         }
 
         // Check if player was playing before device loss (capture before we set state to Stopped)
-        var wasPlaying = context.State == Models.PlayerState.Playing ||
-                         context.State == Models.PlayerState.Buffering;
+        var wasPlaying = context.State == PlayerState.Playing ||
+                         context.State == PlayerState.Buffering;
 
         // IMPORTANT: Add to device-pending queue FIRST, before any operations that might
         // trigger other handlers. This prevents the connection state handler from
@@ -2607,7 +2612,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
         // Update player state for UI - show as Stopped with error message
         // (not Reconnecting - we're waiting for the physical device, not the server)
-        context.State = Models.PlayerState.Stopped;
+        context.State = PlayerState.Stopped;
         context.ErrorMessage = "Audio device disconnected. Will auto-restart when device is reconnected.";
 
         // Stop the player properly
@@ -2710,8 +2715,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 break;
 
             // Skip players already in error/stopped state or already pending device reconnection
-            if (context.State == Models.PlayerState.Error ||
-                context.State == Models.PlayerState.Stopped ||
+            if (context.State == PlayerState.Error ||
+                context.State == PlayerState.Stopped ||
                 _devicePendingPlayers.ContainsKey(name) ||
                 _deviceLossGracePeriods.ContainsKey(name))
             {
@@ -3137,13 +3142,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         // During reconnection, override transitional/error states so the UI doesn't flicker
         var displayState = context.State;
         if (isPendingReconnection && !reconnectState!.WasUserStopped &&
-            displayState is Models.PlayerState.Starting or Models.PlayerState.Connecting
-                        or Models.PlayerState.Created or Models.PlayerState.Error
-                        or Models.PlayerState.Stopped)
+            displayState is PlayerState.Starting or PlayerState.Connecting
+                        or PlayerState.Created or PlayerState.Error
+                        or PlayerState.Stopped)
         {
             displayState = reconnectState.MdnsOnly
-                ? Models.PlayerState.WaitingForServer
-                : Models.PlayerState.Reconnecting;
+                ? PlayerState.WaitingForServer
+                : PlayerState.Reconnecting;
         }
 
         // Get startup volume from persisted config (not runtime config which changes with MA)
@@ -3166,7 +3171,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             OutputLatencyMs: context.Player.OutputLatencyMs,
             CreatedAt: context.CreatedAt,
             ConnectedAt: context.ConnectedAt,
-            ErrorMessage: displayState is Models.PlayerState.Reconnecting or Models.PlayerState.WaitingForServer
+            ErrorMessage: displayState is PlayerState.Reconnecting or PlayerState.WaitingForServer
                 ? null : context.ErrorMessage,
             IsClockSynced: context.Client.IsClockSynced,
             Metrics: bufferStats != null ? new PlayerMetrics(
@@ -3336,7 +3341,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             return;
 
         // Prevent re-entrancy if already stopping
-        if (context.State == Models.PlayerState.Error || context.State == Models.PlayerState.Stopped)
+        if (context.State == PlayerState.Error || context.State == PlayerState.Stopped)
         {
             _logger.LogDebug("Player '{Name}' already in {State} state, skipping internal stop", name, context.State);
             return;
@@ -3350,7 +3355,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         try
         {
             // Update state to error first
-            context.State = Models.PlayerState.Error;
+            context.State = PlayerState.Error;
             context.ErrorMessage = reason;
 
             // Stop the pipeline gracefully
@@ -3868,10 +3873,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             if (!_players.TryGetValue(name, out var ctx))
                 return false; // Player was removed (disposed during connection)
 
-            if (ctx.State is Models.PlayerState.Connected or Models.PlayerState.Playing or Models.PlayerState.Buffering)
+            if (ctx.State is PlayerState.Connected or PlayerState.Playing or PlayerState.Buffering)
                 return true;
 
-            if (ctx.State is Models.PlayerState.Error or Models.PlayerState.Stopped)
+            if (ctx.State is PlayerState.Error or PlayerState.Stopped)
                 return false;
         }
 

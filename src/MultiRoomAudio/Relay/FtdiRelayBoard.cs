@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.TriggerModels;
 
 namespace MultiRoomAudio.Relay;
 

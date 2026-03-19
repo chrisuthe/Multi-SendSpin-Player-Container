@@ -1,4 +1,5 @@
 using MultiRoomAudio.Services;
+using MultiRoomAudio.Services.Configuration;
 
 namespace MultiRoomAudio.Controllers;
 
@@ -67,5 +68,3 @@ public static class SettingsEndpoint
         return Math.Round((double)bufferSeconds * sampleRate * 2 * 4 / 1_048_576, 1);
     }
 }
-
-public record BufferUpdateRequest(int BufferSeconds);

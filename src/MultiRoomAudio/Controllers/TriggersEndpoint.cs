@@ -1,6 +1,7 @@
 using System.Web;
 using Microsoft.AspNetCore.Mvc;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.TriggerModels;
 using MultiRoomAudio.Services;
 
 namespace MultiRoomAudio.Controllers;

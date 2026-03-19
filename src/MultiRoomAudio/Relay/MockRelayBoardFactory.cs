@@ -1,4 +1,4 @@
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.TriggerModels;
 
 namespace MultiRoomAudio.Relay;
 

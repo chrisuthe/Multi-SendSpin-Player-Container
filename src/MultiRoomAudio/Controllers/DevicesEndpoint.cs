@@ -1,7 +1,8 @@
-using System.ComponentModel.DataAnnotations;
 using MultiRoomAudio.Audio;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.HideButton;
 using MultiRoomAudio.Services;
+using MultiRoomAudio.Services.Configuration;
 using MultiRoomAudio.Utilities;
 
 namespace MultiRoomAudio.Controllers;
@@ -417,21 +418,3 @@ public static class DevicesEndpoint
         .WithDescription("Enable or disable HID button support for a device (hardware volume/mute buttons)");
     }
 }
-
-/// <summary>
-/// Request to set a device alias.
-/// </summary>
-public record DeviceAliasRequest(string? Alias);
-
-/// <summary>
-/// Request to set device hidden status.
-/// </summary>
-public record DeviceHiddenRequest(bool Hidden);
-
-/// <summary>
-/// Request to set device maximum volume limit.
-/// </summary>
-/// <param name="MaxVolume">Maximum volume limit (0-100), or null to clear the limit.</param>
-public record DeviceMaxVolumeRequest(
-    [property: Range(0, 100, ErrorMessage = "MaxVolume must be between 0 and 100.")]
-    int? MaxVolume);

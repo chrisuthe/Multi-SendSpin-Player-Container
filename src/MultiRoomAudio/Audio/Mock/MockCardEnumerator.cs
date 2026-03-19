@@ -1,4 +1,6 @@
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.CardModels;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.MockHardwareModels;
 using MultiRoomAudio.Services;
 
 namespace MultiRoomAudio.Audio.Mock;

@@ -3,7 +3,8 @@ using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using MultiRoomAudio.Audio.PulseAudio;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.PlayerStatus;
+using MultiRoomAudio.Models.TriggerModels;
 using MultiRoomAudio.Services;
 using Sendspin.SDK.Audio;
 

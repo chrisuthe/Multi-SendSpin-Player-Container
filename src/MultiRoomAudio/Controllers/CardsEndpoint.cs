@@ -1,4 +1,5 @@
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.CardModels;
+using MultiRoomAudio.Models.DeviceInfo;
 using MultiRoomAudio.Services;
 using MultiRoomAudio.Utilities;
 

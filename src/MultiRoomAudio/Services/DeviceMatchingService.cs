@@ -1,6 +1,8 @@
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Audio.PulseAudio;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.SinkModels;
+using MultiRoomAudio.Services.Configuration;
 
 namespace MultiRoomAudio.Services;
 

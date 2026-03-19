@@ -1,5 +1,5 @@
-using MultiRoomAudio.Models;
-using MultiRoomAudio.Services;
+using MultiRoomAudio.Models.LogModels;
+using MultiRoomAudio.Services.Logging;
 
 namespace MultiRoomAudio.Controllers;
 

@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.HideButton;
 
 namespace MultiRoomAudio.Services;
 

@@ -1,4 +1,6 @@
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.TriggerModels;
+using MultiRoomAudio.Relay.Ch340;
+using MultiRoomAudio.Relay.Hid;
 
 namespace MultiRoomAudio.Relay;
 

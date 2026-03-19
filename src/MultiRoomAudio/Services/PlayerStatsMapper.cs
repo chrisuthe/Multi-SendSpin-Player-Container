@@ -1,5 +1,6 @@
 using System.Reflection;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
+using MultiRoomAudio.Models.PlayerStats;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 using Sendspin.SDK.Synchronization;

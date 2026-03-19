@@ -1,5 +1,7 @@
+using MultiRoomAudio.Models.MockHardwareModels;
 using MultiRoomAudio.Services;
-using MultiRoomAudio.Utilities;
+using MultiRoomAudio.Utilities.Pa;
+using PaModuleRunner = MultiRoomAudio.Utilities.Pa.PaModuleRunner;
 
 namespace MultiRoomAudio.Audio.Mock;
 
@@ -133,7 +135,7 @@ public class MockPaModuleRunner : IPaModuleRunner
 
         // Check hardware sinks from mock devices
         var devices = _configService?.GetEnabledAudioDevices()
-            ?? new List<Models.MockAudioDeviceConfig>();
+            ?? new List<MockAudioDeviceConfig>();
         return Task.FromResult(devices.Any(d =>
             d.Id.Equals(sinkName, StringComparison.OrdinalIgnoreCase)));
     }

@@ -1,5 +1,4 @@
-using MultiRoomAudio.Models;
-using MultiRoomAudio.Relay;
+using MultiRoomAudio.Models.MockHardwareModels;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 

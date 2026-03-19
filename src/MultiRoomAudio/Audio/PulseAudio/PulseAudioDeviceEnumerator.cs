@@ -1,5 +1,5 @@
 using System.Text.RegularExpressions;
-using MultiRoomAudio.Models;
+using MultiRoomAudio.Models.DeviceInfo;
 
 namespace MultiRoomAudio.Audio.PulseAudio;
 
