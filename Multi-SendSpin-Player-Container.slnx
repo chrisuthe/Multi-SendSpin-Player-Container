@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MultiRoomAudio/MultiRoomAudio.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+</Solution>

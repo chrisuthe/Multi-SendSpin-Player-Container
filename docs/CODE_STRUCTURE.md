@@ -47,7 +47,7 @@ squeezelite-docker/
 │   └── translations/
 │       └── en.yaml                   # English strings
 ├── docs/                             # Documentation
-└── squeezelite-docker.sln            # Visual Studio solution
+└── Multi-SendSpin-Player-Container.slnx            # Visual Studio solution
 ```
 
 ## Core Application Flow
