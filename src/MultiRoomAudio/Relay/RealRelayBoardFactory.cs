@@ -1,5 +1,6 @@
 using MultiRoomAudio.Models.TriggerModels;
 using MultiRoomAudio.Relay.Hid;
+using MultiRoomAudio.Relay.Modbus;
 
 namespace MultiRoomAudio.Relay;
 

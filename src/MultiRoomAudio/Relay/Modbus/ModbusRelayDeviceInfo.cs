@@ -1,7 +1,7 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
 
-namespace MultiRoomAudio.Relay;
+namespace MultiRoomAudio.Relay.Modbus;
 
 /// <summary>
 /// Information about a detected Modbus relay board device (serial port).

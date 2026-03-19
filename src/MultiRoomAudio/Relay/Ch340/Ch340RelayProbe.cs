@@ -1,5 +1,6 @@
 using System.IO.Ports;
 using System.Text;
+using MultiRoomAudio.Relay.Modbus;
 
 namespace MultiRoomAudio.Relay.Ch340;
 

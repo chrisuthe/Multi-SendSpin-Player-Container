@@ -1,6 +1,7 @@
 using System.IO.Ports;
 using MultiRoomAudio.Models.TriggerModels;
 using MultiRoomAudio.Relay.Ch340;
+using MultiRoomAudio.Relay.Modbus;
 
 namespace MultiRoomAudio.Relay;
 

@@ -4,6 +4,7 @@ using MultiRoomAudio.Hubs;
 using MultiRoomAudio.Models.TriggerModels;
 using MultiRoomAudio.Relay;
 using MultiRoomAudio.Relay.Hid;
+using MultiRoomAudio.Relay.Modbus;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using Timer = System.Timers.Timer;

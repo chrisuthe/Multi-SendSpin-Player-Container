@@ -2,7 +2,7 @@ using System.IO.Ports;
 using System.Text;
 using MultiRoomAudio.Models.TriggerModels;
 
-namespace MultiRoomAudio.Relay;
+namespace MultiRoomAudio.Relay.Modbus;
 
 /// <summary>
 /// Modbus ASCII relay board implementation for CH340/CH341-based boards.
