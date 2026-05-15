@@ -2691,6 +2691,22 @@ function renderSinks() {
                             </div>
                         ` : ''}
 
+                        ${isLoaded ? `
+                            <div class="mt-3 sink-volume-row">
+                                <div class="d-flex align-items-center gap-2">
+                                    <i class="fas fa-volume-down text-muted" style="width:14px;"></i>
+                                    <input type="range" class="form-range flex-grow-1" min="0" max="100" step="1"
+                                           id="sink-vol-${escapeHtml(name)}"
+                                           value="${sink.volume != null ? sink.volume : 100}"
+                                           oninput="onSinkVolumeInput(this, '${escapeJsString(name)}')"
+                                           onchange="setSinkVolume('${escapeJsString(name)}', this.value)"
+                                           title="Lautstärke">
+                                    <i class="fas fa-volume-up text-muted" style="width:14px;"></i>
+                                    <span class="text-muted small sink-vol-label" id="sink-vol-label-${escapeHtml(name)}" style="min-width:38px;text-align:right;">${sink.volume != null ? sink.volume : 100}%</span>
+                                </div>
+                            </div>
+                        ` : ''}
+
                         ${sink.errorMessage ? `
                             <div class="mt-2">
                                 <small class="text-danger player-error-message" title="${escapeHtml(sink.errorMessage)}">
@@ -2703,6 +2719,36 @@ function renderSinks() {
             </div>
         `;
     }).join('') + '</div>';
+}
+
+function onSinkVolumeInput(slider, name) {
+    const label = document.getElementById(`sink-vol-label-${name}`);
+    if (label) label.textContent = `${slider.value}%`;
+}
+
+const _sinkVolumeTimers = {};
+
+async function setSinkVolume(name, value) {
+    clearTimeout(_sinkVolumeTimers[name]);
+    _sinkVolumeTimers[name] = setTimeout(async () => {
+        const volume = parseInt(value, 10);
+        try {
+            const resp = await fetch(`./api/sinks/${encodeURIComponent(name)}/volume`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ volume })
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                console.error('Failed to set sink volume:', err);
+            } else {
+                // Update local state so re-render keeps value
+                if (customSinks[name]) customSinks[name].volume = volume;
+            }
+        } catch (e) {
+            console.error('Error setting sink volume:', e);
+        }
+    }, 300);
 }
 
 function getSinkStateBadgeClass(state) {
