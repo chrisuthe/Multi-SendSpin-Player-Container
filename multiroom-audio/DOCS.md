@@ -3,24 +3,26 @@
 <!-- VERSION_INFO_START -->
 ## Latest Release: 5.1.0
 
+
+
 ### Highlights
-- **SendSpin SDK 7.3.0** — NativeAOT, static delay reporting, reconnect resilience, FLAC 32-bit fix, simplified sync deadband
-- **Configurable Audio Buffer** — New System Settings UI with 5-30s buffer slider and per-player memory estimates
-- **Hybrid Reconnection** — Lightweight reconnect for ≤60s disconnections keeps audio playing from buffer
+- **SendSpin SDK 7.3.0** — NativeAOT support, static delay reporting, reconnect resilience, FLAC 32-bit fix, buffer overrun sync fix, simplified sync deadband, mDNS input sanitization
+- **Configurable Audio Buffer** — Global setting (5-30 seconds) with System Settings UI showing per-player memory estimates
+- **Hybrid Reconnection** — Lightweight reconnect for ≤60s disconnections keeps audio playing from buffer while WebSocket reconnects
 - **Wizard Mono Output** — Remap sink creation now supports mono/stereo toggle
 
 ### Added
-- `BUFFER_SECONDS` environment variable (5-30, default 30) for audio buffer sizing
-- `GET/PUT /api/settings/buffer` endpoint with memory usage estimates
-- System Settings modal with buffer slider and memory table
-- Server-pushed sync offset calibration (SyncOffsetApplied event)
-- Artwork cleared event to remove stale album art
-- Static delay reporting in all player state updates
-
-### Fixed
-- Buffer settings fetch paths for HA ingress (relative paths)
-- PulseAudio config CRLF line endings causing parse failures
-- Duplicate HidSharp package reference
+- `BUFFER_SECONDS` environment variable / HAOS option (5-30s, step 5, default 30s)
+- `GET/PUT /api/settings/buffer` endpoint with memory usage estimates per sample rate
+- System Settings modal with buffer size slider and per-player memory table
+- Settings persistence via `settings.yaml` through ConfigurationService
+- Server-pushed sync offset calibration via SyncOffsetApplied event
+- ArtworkCleared event to clear stale album art when server signals no artwork
+- Static delay (staticDelayMs) reported in all SendPlayerStateAsync calls for GroupSync
+- Lightweight reconnect with exponential backoff (1s, 2s, 4s... capped at 15s)
+- Full teardown fallback after 60s lightweight reconnect window expires
+- DisconnectedAt tracking for reconnect window management
+- `.gitattributes` rules for `.conf` and `.pa` files to enforce LF line endings
 
 [View full changelog](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/CHANGELOG.md)
 <!-- VERSION_INFO_END -->
