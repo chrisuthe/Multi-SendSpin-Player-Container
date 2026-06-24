@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-11c00b3
+## Development Build: sha-14f16b9
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #228 from chrisuthe/fix/219-volume-scope
+- Merge pull request #229 from chrisuthe/chore/dependabot-hold-swashbuckle-major
+- ci: hold Swashbuckle major bumps until net9/net10 migration
+- fix: only clamp hardware volume on player-assigned devices
 - Merge pull request #217 from chrisuthe/dependabot/nuget/src/MultiRoomAudio/YamlDotNet-17.0.1
 - Merge pull request #211 from chrisuthe/dependabot/nuget/src/MultiRoomAudio/System.IO.Ports-10.0.5
 - Merge pull request #209 from chrisuthe/dependabot/nuget/src/MultiRoomAudio/Microsoft.Extensions.Diagnostics.HealthChecks-10.0.5
 - Merge pull request #208 from chrisuthe/dependabot/nuget/src/MultiRoomAudio/Microsoft.AspNetCore.OpenApi-8.0.25
 - Merge pull request #226 from chrisuthe/fix/stale-repo-urls
 - fix: correct stale squeezelite-docker repo URLs
-- Bump YamlDotNet from 16.3.0 to 17.0.1
-- Bump System.IO.Ports from 10.0.3 to 10.0.5
-- Bump Microsoft.Extensions.Diagnostics.HealthChecks from 10.0.3 to 10.0.5
-- Bump Microsoft.AspNetCore.OpenApi from 8.0.24 to 8.0.25
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
