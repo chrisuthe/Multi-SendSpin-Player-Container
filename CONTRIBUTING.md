@@ -5,7 +5,7 @@ Thank you for your interest in contributing to this project!
 ## Quick Start for Contributors
 
 1. **Fork the repository** on GitHub
-2. **Clone your fork**: `git clone https://github.com/yourusername/squeezelite-docker.git`
+2. **Clone your fork**: `git clone https://github.com/yourusername/Multi-SendSpin-Player-Container.git`
 3. **Create a feature branch**: `git checkout -b feature/amazing-feature`
 4. **Make your changes** and test thoroughly
 5. **Build and verify**: `dotnet build src/MultiRoomAudio/MultiRoomAudio.csproj`

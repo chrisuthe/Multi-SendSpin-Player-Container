@@ -152,7 +152,7 @@ After restarting the container, your custom ALSA devices will appear in the devi
 1. Go to **Settings** > **Add-ons** > **Add-on Store**
 2. Click the three-dot menu (top right)
 3. Select **Repositories**
-4. Add: `https://github.com/chrisuthe/squeezelite-docker`
+4. Add: `https://github.com/chrisuthe/Multi-SendSpin-Player-Container`
 5. Click **Add**, then **Close**
 
 ### Step 2: Install the Add-on

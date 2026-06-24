@@ -156,7 +156,7 @@ Navigate to `http://your-host-ip:8096`
 
 For Home Assistant OS users, install as an add-on:
 
-1. Add repository: `https://github.com/chrisuthe/squeezelite-docker`
+1. Add repository: `https://github.com/chrisuthe/Multi-SendSpin-Player-Container`
 2. Install "Multi-Room Audio Controller"
 3. Start and access via sidebar
 
@@ -298,9 +298,9 @@ For detailed license information, see [LICENSES.md](LICENSES.md).
 
 ## Support and Community
 
-- **Issues**: Report bugs and request features via [GitHub Issues](https://github.com/chrisuthe/squeezelite-docker/issues)
+- **Issues**: Report bugs and request features via [GitHub Issues](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/issues)
 - **Docker Hub**: Pre-built images at `https://hub.docker.com/r/chrisuthe/squeezelitemultiroom`
-- **Documentation**: [Wiki](https://github.com/chrisuthe/squeezelite-docker/wiki)
+- **Documentation**: [Wiki](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/wiki)
 
 ## About This Project
 
@@ -316,7 +316,7 @@ This project was developed with the assistance of AI (Claude by Anthropic) via [
 *Built with .NET 8.0 for the open-source community*
 
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-chrisuthe%2Fsqueezelitemultiroom-blue?style=flat-square&logo=docker)](https://hub.docker.com/r/chrisuthe/squeezelitemultiroom)
-[![GitHub](https://img.shields.io/badge/GitHub-Source%20Code-black?style=flat-square&logo=github)](https://github.com/chrisuthe/squeezelite-docker)
+[![GitHub](https://img.shields.io/badge/GitHub-Source%20Code-black?style=flat-square&logo=github)](https://github.com/chrisuthe/Multi-SendSpin-Player-Container)
 
 </div>
 <!-- markdownlint-enable MD036 -->

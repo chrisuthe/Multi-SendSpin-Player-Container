@@ -244,8 +244,8 @@ own channel assignments. Boards are identified by:
 
 ## Support
 
-- [GitHub Issues](https://github.com/chrisuthe/squeezelite-docker/issues)
-- [Documentation](https://github.com/chrisuthe/squeezelite-docker)
+- [GitHub Issues](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/issues)
+- [Documentation](https://github.com/chrisuthe/Multi-SendSpin-Player-Container)
 
 ## About
 
