@@ -263,7 +263,7 @@ squeezelite-docker/
 │   ├── CHANGELOG.md
 │   └── DOCS.md
 ├── CLAUDE.md                    # This file
-└── squeezelite-docker.sln       # Solution file
+└── Multi-SendSpin-Player-Container.slnx       # Solution file
 ```
 
 ---
