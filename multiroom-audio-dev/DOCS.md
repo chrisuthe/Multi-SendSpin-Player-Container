@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-c092dab
+## Development Build: sha-91e0061
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #226 from chrisuthe/fix/stale-repo-urls
+- fix: correct stale squeezelite-docker repo URLs
 - release: prepare v5.1.0
 - Merge branch 'main' into dev
 - Merge pull request #204 from chrisuthe/dependabot/github_actions/docker/build-push-action-7
@@ -13,8 +15,6 @@
 - Merge pull request #186 from chrisuthe/dependabot/nuget/src/MultiRoomAudio/System.IO.Ports-10.0.3
 - Merge pull request #202 from chrisuthe/dependabot/github_actions/docker/metadata-action-6
 - Bump docker/setup-buildx-action from 3 to 4
-- Merge pull request #201 from chrisuthe/dependabot/github_actions/docker/setup-qemu-action-4
-- Bump docker/login-action from 3 to 4
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
