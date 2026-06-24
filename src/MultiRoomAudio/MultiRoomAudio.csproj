@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <!-- Core SDK for Sendspin protocol -->
-    <PackageReference Include="SendSpin.SDK" Version="7.3.0" />
+    <PackageReference Include="SendSpin.SDK" Version="9.1.0" />
     <PackageReference Include="System.IO.Ports" Version="10.0.5" />
 
     <!-- USB HID support for HID relay boards -->
@@ -35,6 +35,11 @@
 
     <!-- Health checks -->
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Expose internal seams (sync helpers, sync options) to the test project -->
+    <InternalsVisibleTo Include="MultiRoomAudio.Tests" />
   </ItemGroup>
 
 </Project>

@@ -164,7 +164,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// Sync correction options tuned for PulseAudio's timing characteristics.
     /// Uses a high threshold for Tier 3 (frame drop/insert) to prefer smooth rate adjustment.
     /// </summary>
-    private static readonly SyncCorrectionOptions PulseAudioSyncOptions = new()
+    internal static readonly SyncCorrectionOptions PulseAudioSyncOptions = new()
     {
         // Use 4% max correction (matches CLI) for more responsive adjustment
         MaxSpeedCorrection = 0.04,
@@ -410,10 +410,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         public EventHandler<GroupState>? GroupStateHandler { get; set; }
         // SDK 5.4.0: Handler for individual player volume/mute commands
         public EventHandler<SdkPlayerState>? PlayerStateHandler { get; set; }
-        // SDK 7.2.1: Handler for server-pushed sync offset calibration
-        public EventHandler<SyncOffsetEventArgs>? SyncOffsetHandler { get; set; }
         // SDK 7.2.1: Handler for server-cleared artwork
-        public EventHandler? ArtworkClearedHandler { get; set; }
+        public EventHandler<ArtworkClearedEventArgs>? ArtworkClearedHandler { get; set; }
         // Flag to prevent feedback loops when updating server
         public bool IsUpdatingFromServer { get; set; }
     }
@@ -1097,8 +1095,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _logger.LogInformation("VOLUME [Create] Player '{Name}': startup volume {Volume}% applied locally",
             name, context.Config.Volume);
 
-        // Apply delay offset from user configuration
-        context.ClockSync.StaticDelayMs = delayMs;
+        // Apply delay offset from user configuration.
+        // See UserDelayToStaticDelayMs for the sign rationale (SDK v8.0.0 sign flip).
+        context.ClockSync.StaticDelayMs = UserDelayToStaticDelayMs(delayMs);
         if (delayMs != 0)
         {
             _logger.LogInformation("Delay offset for '{Name}': {DelayMs}ms", name, delayMs);
@@ -1635,6 +1634,16 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// <param name="name">Player name.</param>
     /// <param name="delayMs">Delay offset in milliseconds (-5000 to 5000).</param>
     /// <returns>True if successful, false if player not found.</returns>
+    /// <summary>
+    /// Converts a user-facing delay offset (positive = play later) to the SDK's StaticDelayMs.
+    /// </summary>
+    /// <remarks>
+    /// SDK v8.0.0 flipped the static_delay sign: StaticDelayMs is now SUBTRACTED from the
+    /// converted client time (it was added pre-8.0). Negating here keeps our "Delay Offset"
+    /// knob meaning "positive = play later" without migrating persisted player config values.
+    /// </remarks>
+    internal static double UserDelayToStaticDelayMs(int delayMs) => -delayMs;
+
     public bool SetDelayOffset(string name, int delayMs)
     {
         if (!_players.TryGetValue(name, out var context))
@@ -1643,13 +1652,19 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         // Clamp to valid range
         delayMs = Math.Clamp(delayMs, -5000, 5000);
 
-        // Apply to the clock synchronizer
-        context.ClockSync.StaticDelayMs = delayMs;
+        // Apply to the clock synchronizer (see UserDelayToStaticDelayMs for the sign rationale).
+        context.ClockSync.StaticDelayMs = UserDelayToStaticDelayMs(delayMs);
         context.Config.DelayMs = delayMs;
+
+        // Re-anchor timing so the new delay applies to the already-buffered audio in place
+        // (SDK 9.0.5+). This replaces a full player restart: with a server that transmits far
+        // ahead of playback, restarting/clearing would stall for the whole transmit-ahead window
+        // (tens of seconds of silence) while the buffer refills. Re-anchor preserves the buffer.
+        context.Pipeline.ReanchorTiming();
 
         if (delayMs != 0)
         {
-            _logger.LogInformation("Set delay offset for '{Name}': {DelayMs}ms", name, delayMs);
+            _logger.LogInformation("Set delay offset for '{Name}': {DelayMs}ms (timing re-anchored)", name, delayMs);
         }
 
         // Broadcast status update so UI reflects the change
@@ -2180,8 +2195,6 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.GroupStateHandler = CreateGroupStateHandler(name, context);
         // SDK 5.4.0: PlayerStateChanged for individual player volume/mute commands
         context.PlayerStateHandler = CreatePlayerStateHandler(name, context);
-        // SDK 7.2.1: SyncOffsetApplied for server-pushed static delay calibration
-        context.SyncOffsetHandler = CreateSyncOffsetHandler(name, context);
         // SDK 7.2.1: ArtworkCleared for clearing stale album art
         context.ArtworkClearedHandler = CreateArtworkClearedHandler(name, context);
 
@@ -2193,8 +2206,6 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.Client.GroupStateChanged += context.GroupStateHandler;
         // SDK 5.4.0: Subscribe to PlayerStateChanged
         context.Client.PlayerStateChanged += context.PlayerStateHandler;
-        // SDK 7.2.1: Subscribe to SyncOffsetApplied
-        context.Client.SyncOffsetApplied += context.SyncOffsetHandler;
         // SDK 7.2.1: Subscribe to ArtworkCleared
         context.Client.ArtworkCleared += context.ArtworkClearedHandler;
     }
@@ -3058,31 +3069,6 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Creates handler for server-pushed sync offset calibration (GroupSync).
-    /// The SDK already applies the offset to ClockSync.StaticDelayMs internally;
-    /// we just persist it and broadcast to UI.
-    /// </summary>
-    /// <remarks>
-    /// SDK 7.2.1 change: SyncOffsetApplied fires when server sends sync offset calibration.
-    /// </remarks>
-    private EventHandler<SyncOffsetEventArgs> CreateSyncOffsetHandler(
-        string name, PlayerContext context)
-    {
-        return (_, args) =>
-        {
-            _logger.LogInformation(
-                "SYNC_OFFSET Player '{Name}': server set static delay to {Offset:+0.0;-0.0}ms (source: {Source})",
-                name, args.OffsetMs, args.Source);
-
-            // Persist the offset so it survives restarts
-            _config.UpdatePlayerField(name, cfg => cfg.DelayMs = (int)Math.Round(args.OffsetMs), save: true);
-
-            // Broadcast to UI so delay offset display updates
-            _ = BroadcastStatusAsync();
-        };
-    }
-
-    /// <summary>
     /// Creates handler for server-cleared artwork.
     /// The SDK already sets artwork URL to null internally;
     /// we just broadcast to UI so stale album art is cleared.
@@ -3090,7 +3076,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// <remarks>
     /// SDK 7.2.1 change: ArtworkCleared fires when server sends empty artwork.
     /// </remarks>
-    private EventHandler CreateArtworkClearedHandler(
+    private EventHandler<ArtworkClearedEventArgs> CreateArtworkClearedHandler(
         string name, PlayerContext context)
     {
         return (_, _) =>
@@ -3116,13 +3102,6 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         {
             context.Client.ArtworkCleared -= context.ArtworkClearedHandler;
             context.ArtworkClearedHandler = null;
-        }
-
-        // SDK 7.2.1: Unsubscribe SyncOffsetApplied
-        if (context.SyncOffsetHandler != null)
-        {
-            context.Client.SyncOffsetApplied -= context.SyncOffsetHandler;
-            context.SyncOffsetHandler = null;
         }
 
         // SDK 5.4.0: Unsubscribe PlayerStateChanged

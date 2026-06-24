@@ -1540,38 +1540,15 @@ function adjustDelay(name, delta) {
     setDelay(name, newValue);
 }
 
-// Track delay changes for restart on modal close
-let playerStatsInitialDelay = null;
-let playerStatsCurrentPlayer = null;
-
-async function handlePlayerStatsModalClose() {
-    if (playerStatsCurrentPlayer && playerStatsInitialDelay !== null) {
-        const player = players[playerStatsCurrentPlayer];
-        if (player && player.delayMs !== playerStatsInitialDelay) {
-            // Delay was changed, restart player to apply
-            console.log(`Delay offset changed from ${playerStatsInitialDelay}ms to ${player.delayMs}ms, restarting player`);
-            await restartPlayer(playerStatsCurrentPlayer);
-        }
-    }
-    playerStatsInitialDelay = null;
-    playerStatsCurrentPlayer = null;
-}
-
 async function showPlayerStats(name) {
     const player = players[name];
     if (!player) return;
 
-    // Store initial delay to detect changes
-    playerStatsInitialDelay = player.delayMs;
-    playerStatsCurrentPlayer = name;
+    // Delay offset applies in place (the server re-anchors timing on change), so no
+    // player restart is needed when the stats modal closes.
 
     const modal = document.getElementById('playerStatsModal');
     const body = document.getElementById('playerStatsBody');
-
-    // Set up modal close handler to restart player if delay changed
-    const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
-    modal.removeEventListener('hidden.bs.modal', handlePlayerStatsModalClose);
-    modal.addEventListener('hidden.bs.modal', handlePlayerStatsModalClose);
 
     // Determine Device vs Sink label based on sinkType
     const device = devices.find(d => d.id === player.device);

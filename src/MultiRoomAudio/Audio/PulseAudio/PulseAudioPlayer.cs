@@ -116,6 +116,25 @@ public class PulseAudioPlayer : IAudioPlayer
     // This handles any non-zero stream time that exists right after uncork.
     private long _streamTimeAtUncorkMicroseconds;
 
+    // Opt-in (default OFF): time sync against the PulseAudio DAC clock instead of the SDK's
+    // VM-resilient MonotonicTimer. The DAC clock reads the *rendered* position, which lags the
+    // buffer read pointer by the output prefill (~70-200ms) and pushes the player off the shared
+    // multi-room schedule (see issue #233 and windowsSpin commit fcc7c8a). MonotonicTimer is both
+    // VM-immune and prefill-free, so it is the default; enable USE_AUDIO_CLOCK only for hardware
+    // whose DAC clock genuinely diverges from the system clock.
+    private static readonly bool UseAudioClock =
+        ParseUseAudioClock(Environment.GetEnvironmentVariable("USE_AUDIO_CLOCK"));
+
+    /// <summary>
+    /// Parses the <c>USE_AUDIO_CLOCK</c> environment value. Defaults to <c>false</c> (null, empty,
+    /// or anything else) so the SDK stays on its VM-resilient MonotonicTimer; only "true", "1", or
+    /// "yes" (case-insensitive) opt in to the DAC clock.
+    /// </summary>
+    internal static bool ParseUseAudioClock(string? value) =>
+        value is not null &&
+        (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1" ||
+         value.Equals("yes", StringComparison.OrdinalIgnoreCase));
+
     public AudioPlayerState State { get; private set; } = AudioPlayerState.Uninitialized;
 
     private volatile float _volume = 1.0f;
@@ -167,6 +186,13 @@ public class PulseAudioPlayer : IAudioPlayer
     /// </returns>
     public long? GetAudioClockMicroseconds()
     {
+        // Opt-in only. When disabled (default), returning null keeps the SDK on its VM-resilient
+        // MonotonicTimer, which holds multi-room sync without the DAC prefill offset. See UseAudioClock.
+        if (!UseAudioClock)
+        {
+            return null;
+        }
+
         // THREAD SAFETY: Capture handles under lock to prevent race condition.
         // The SDK calls this from its timing thread while playback may be stopping
         // on another thread. Without the lock, _mainloop could become IntPtr.Zero

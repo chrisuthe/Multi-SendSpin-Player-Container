@@ -224,6 +224,7 @@ new ErrorResponse(false, "Error message")
 | `MOCK_HARDWARE` | `false` | Enable mock relay boards for testing without hardware |
 | `ENABLE_ADVANCED_FORMATS` | `false` | Show format selection UI (dev-only). All players default to flac-48000 regardless. |
 | `BUFFER_SECONDS` | `30` | Audio buffer size in seconds (5-30, step 5). Lower values reduce RAM on constrained hardware. |
+| `USE_AUDIO_CLOCK` | `false` | Opt in to the PulseAudio DAC clock for sync timing. Default uses the SDK `MonotonicTimer` (VM-resilient, no output-prefill offset, better multi-room sync). Enable only for genuinely divergent DAC clocks. |
 
 **Audio Configuration Notes:**
 - `PA_SAMPLE_RATE` and `PA_SAMPLE_FORMAT` only apply in standalone Docker mode
