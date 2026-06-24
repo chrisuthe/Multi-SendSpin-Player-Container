@@ -73,6 +73,15 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 1.5rem;
     font-weight: 600;
     color: var(--header-text);
+    /* Allow long auto-translated titles (e.g. RU "Многокомнатное аудио") to wrap
+       instead of forcing horizontal overflow that clips the header (#212). */
+    overflow-wrap: anywhere;
+}
+
+/* Let the title column shrink so the heading wraps rather than overflowing the
+   row when the action buttons sit alongside it on narrow / ingress-panel widths (#212). */
+.header-gradient .col {
+    min-width: 0;
 }
 
 .header-gradient p {
