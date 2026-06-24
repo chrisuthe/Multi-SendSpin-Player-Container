@@ -247,6 +247,22 @@ public class CustomSinkConfiguration
     /// Whether to remix (for remap-sink).
     /// </summary>
     public bool Remix { get; set; } = false;
+
+    /// <summary>
+    /// Persisted volume level (0-100). Null means use PulseAudio default (100%).
+    /// Applied automatically after the sink is loaded.
+    /// </summary>
+    public int? Volume { get; set; }
+}
+
+/// <summary>
+/// Request to set volume on a custom sink.
+/// </summary>
+public class SinkVolumeRequest
+{
+    /// <summary>Volume level 0-100.</summary>
+    [Range(0, 100, ErrorMessage = "Volume must be between 0 and 100.")]
+    public int Volume { get; set; }
 }
 
 /// <summary>
@@ -266,7 +282,9 @@ public record CustomSinkResponse(
     // Remap-sink specific
     string? MasterSink = null,
     int? Channels = null,
-    List<ChannelMapping>? ChannelMappings = null
+    List<ChannelMapping>? ChannelMappings = null,
+    // Volume
+    int? Volume = null
 );
 
 /// <summary>

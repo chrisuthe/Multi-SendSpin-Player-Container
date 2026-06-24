@@ -19,6 +19,7 @@ public class CustomSinksService : IAsyncDisposable
     private readonly IPaModuleRunner _moduleRunner;
     private readonly EnvironmentService _environment;
     private readonly IServiceProvider _services;
+    private readonly VolumeCommandRunner _volumeRunner;
     private readonly ConcurrentDictionary<string, CustomSinkContext> _sinks = new();
     private readonly string _configPath;
     private readonly IDeserializer _deserializer;
@@ -43,11 +44,13 @@ public class CustomSinksService : IAsyncDisposable
         ILogger<CustomSinksService> logger,
         IPaModuleRunner moduleRunner,
         EnvironmentService environment,
+        VolumeCommandRunner volumeRunner,
         IServiceProvider services)
     {
         _logger = logger;
         _moduleRunner = moduleRunner;
         _environment = environment;
+        _volumeRunner = volumeRunner;
         _services = services;
         _configPath = Path.Combine(environment.ConfigPath, "custom-sinks.yaml");
 
@@ -575,6 +578,13 @@ public class CustomSinksService : IAsyncDisposable
                 context.State = CustomSinkState.Loaded;
                 _logger.LogInformation("Loaded {Type}-sink '{Name}' with module index {Index}",
                     config.Type, config.Name, moduleIndex.Value);
+
+                // Apply persisted volume if set
+                if (config.Volume.HasValue)
+                {
+                    await _volumeRunner.SetVolumeAsync(config.Name, config.Volume.Value, cancellationToken);
+                    _logger.LogInformation("Restored volume of sink '{Name}' to {Volume}%", config.Name, config.Volume.Value);
+                }
             }
             else
             {
@@ -1528,6 +1538,38 @@ public class CustomSinksService : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Set the volume of a loaded custom sink and persist the value.
+    /// </summary>
+    public async Task<bool> SetSinkVolumeAsync(string name, int volume, CancellationToken cancellationToken = default)
+    {
+        if (!_sinks.TryGetValue(name, out var context))
+            return false;
+
+        volume = Math.Clamp(volume, 0, 100);
+
+        var success = await _volumeRunner.SetVolumeAsync(name, volume, cancellationToken);
+        if (success)
+        {
+            context.Config.Volume = volume;
+            SaveConfiguration(context.Config);
+            _logger.LogInformation("Set volume of sink '{Name}' to {Volume}%", name, volume);
+        }
+
+        return success;
+    }
+
+    /// <summary>
+    /// Get the current volume of a custom sink from PulseAudio.
+    /// </summary>
+    public async Task<int?> GetSinkVolumeAsync(string name, CancellationToken cancellationToken = default)
+    {
+        if (!_sinks.TryGetValue(name, out _))
+            return null;
+
+        return await _volumeRunner.GetVolumeAsync(name, cancellationToken);
+    }
+
     private static CustomSinkResponse ToResponse(string name, CustomSinkContext context)
     {
         var config = context.Config;
@@ -1543,7 +1585,8 @@ public class CustomSinksService : IAsyncDisposable
             Slaves: config.Slaves,
             MasterSink: config.MasterSink,
             Channels: config.Type == CustomSinkType.Remap ? config.Channels : null,
-            ChannelMappings: config.ChannelMappings
+            ChannelMappings: config.ChannelMappings,
+            Volume: config.Volume
         );
     }
 
