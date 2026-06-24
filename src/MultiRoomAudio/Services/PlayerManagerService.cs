@@ -482,9 +482,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Initializes all audio device hardware volumes to a safe level (80% or configured max).
+    /// Initializes audio device hardware volumes to a safe level (80% or configured max).
     /// Called by StartupOrchestrator during background initialization.
-    /// Devices with configured MaxVolume limits in devices.yaml use their limit instead.
+    /// Only devices assigned to a player (or with a configured MaxVolume in devices.yaml)
+    /// are touched; unmanaged system/Bluetooth sinks are left alone (#219).
     /// </summary>
     public async Task InitializeHardwareAsync(CancellationToken cancellationToken)
     {
@@ -525,11 +526,38 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             // Get device configurations to check for volume limits
             var deviceConfigs = _config.GetAllDeviceConfigurations();
 
+            // #219: Only initialize hardware volume on devices the add-on actually manages
+            // (assigned to a player, or with an explicit configured max). Previously every
+            // output sink was forced to 80%, which clobbered the user's system/Bluetooth
+            // volumes that the add-on has no business touching.
+            var assignedDeviceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var playerConfig in _config.Players.Values)
+            {
+                if (string.IsNullOrEmpty(playerConfig.Device))
+                {
+                    // Player targets the system default device.
+                    var defaultDevice = _backendFactory.GetDefaultDevice();
+                    if (defaultDevice != null)
+                    {
+                        assignedDeviceIds.Add(defaultDevice.Id);
+                    }
+                    continue;
+                }
+
+                assignedDeviceIds.Add(playerConfig.Device);
+                var resolved = _backendFactory.GetDevice(playerConfig.Device);
+                if (resolved != null)
+                {
+                    assignedDeviceIds.Add(resolved.Id);
+                }
+            }
+
             foreach (var device in devices)
             {
                 try
                 {
-                    // Determine volume to apply: use configured max if set, otherwise default 80%
+                    // Determine volume to apply: configured max wins; otherwise the default
+                    // clamp applies ONLY to player-assigned devices (#219).
                     var deviceKey = ConfigurationService.GenerateDeviceKey(device);
                     int volumeToApply;
                     string volumeSource;
@@ -540,11 +568,19 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                         volumeToApply = config.MaxVolume.Value;
                         volumeSource = "configured max";
                     }
+                    else if (assignedDeviceIds.Contains(device.Id))
+                    {
+                        // Device is assigned to a player - apply the default safety clamp
+                        volumeToApply = HardwareVolumePercent;
+                        volumeSource = "default (player-assigned)";
+                    }
                     else
                     {
-                        // No configured limit - apply default hardware volume
-                        volumeToApply = HardwareVolumePercent;
-                        volumeSource = "default";
+                        // Not managed by any player and no configured limit - leave it alone
+                        // so we don't clobber the user's system/Bluetooth volumes (#219).
+                        _logger.LogDebug("VOLUME [Init] Device '{Name}' ({Id}): skipped (not assigned to a player)",
+                            device.Name, device.Id);
+                        continue;
                     }
 
                     var success = await _backendFactory.SetVolumeAsync(device.Id, volumeToApply, cancellationToken);
