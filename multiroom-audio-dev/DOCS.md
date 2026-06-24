@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-6fc9ab2
+## Development Build: sha-5db05a5
 
 **Current Dev Build Changes** (recent)
 
+- test: add timer/player sync test project and wire into CI
+- fix: update to SendSpin.SDK 9.1.0 and improve multi-room sync (#233)
 - Merge pull request #231 from chrisuthe/feat/220-custom-sink-volume
 - Merge pull request #232 from chrisuthe/fix/212-header-wrap
 - Merge pull request #230 from chrisuthe/fix/223-dac-collision
@@ -13,8 +15,6 @@
 - fix: disambiguate identical USB devices that share a device key
 - Merge pull request #228 from chrisuthe/fix/219-volume-scope
 - Merge pull request #229 from chrisuthe/chore/dependabot-hold-swashbuckle-major
-- ci: hold Swashbuckle major bumps until net9/net10 migration
-- fix: only clamp hardware volume on player-assigned devices
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
