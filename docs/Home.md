@@ -85,7 +85,7 @@ Then open `http://YOUR-SERVER-IP:8096` - the setup wizard will guide you through
 
 ### Home Assistant OS
 
-1. Add repository: `https://github.com/chrisuthe/squeezelite-docker`
+1. Add repository: `https://github.com/chrisuthe/Multi-SendSpin-Player-Container`
 2. Install "Multi-Room Audio Controller" add-on
 3. Start and open from sidebar
 4. Follow the setup wizard
@@ -132,5 +132,5 @@ volumes:
 
 ## Links
 
-- [GitHub Repository](https://github.com/chrisuthe/squeezelite-docker)
-- [Report an Issue](https://github.com/chrisuthe/squeezelite-docker/issues)
+- [GitHub Repository](https://github.com/chrisuthe/Multi-SendSpin-Player-Container)
+- [Report an Issue](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/issues)

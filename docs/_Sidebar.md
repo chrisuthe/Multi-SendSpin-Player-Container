@@ -20,5 +20,5 @@
 * [Code Structure](CODE_STRUCTURE)
 
 **Links**
-* [GitHub Repository](https://github.com/chrisuthe/squeezelite-docker)
-* [Report Issue](https://github.com/chrisuthe/squeezelite-docker/issues)
+* [GitHub Repository](https://github.com/chrisuthe/Multi-SendSpin-Player-Container)
+* [Report Issue](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/issues)

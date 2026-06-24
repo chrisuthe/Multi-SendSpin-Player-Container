@@ -64,7 +64,7 @@ This add-on works differently than the standalone Docker container. Understand t
 1. Navigate to **Settings** > **Add-ons** > **Add-on Store**
 2. Click the **three-dot menu** (top right corner)
 3. Select **Repositories**
-4. Enter: `https://github.com/chrisuthe/squeezelite-docker`
+4. Enter: `https://github.com/chrisuthe/Multi-SendSpin-Player-Container`
 5. Click **Add**
 6. Click **Close**
 
@@ -421,4 +421,4 @@ If you are stuck:
    - Relevant logs
    - Steps to reproduce
 
-**GitHub Issues**: https://github.com/chrisuthe/squeezelite-docker/issues
+**GitHub Issues**: https://github.com/chrisuthe/Multi-SendSpin-Player-Container/issues

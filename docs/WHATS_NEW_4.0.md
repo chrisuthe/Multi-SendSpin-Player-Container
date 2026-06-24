@@ -155,7 +155,7 @@ For the technically curious:
 
 This release represents months of work based on community feedback. Special thanks to everyone who reported issues, requested features, and tested pre-releases.
 
-Found a bug? Have a suggestion? [Open an issue](https://github.com/chrisuthe/squeezelite-docker/issues).
+Found a bug? Have a suggestion? [Open an issue](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/issues).
 
 ---
 

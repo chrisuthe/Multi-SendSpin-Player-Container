@@ -4,7 +4,7 @@ slug: multiroom-audio-dev
 description: >-
   Development builds - may be unstable. Sendspin-powered multi-room audio
   controller for testing new features.
-url: https://github.com/chrisuthe/squeezelite-docker
+url: https://github.com/chrisuthe/Multi-SendSpin-Player-Container
 image: ghcr.io/chrisuthe/multiroom-audio-hassio-dev
 startup: services
 arch:
