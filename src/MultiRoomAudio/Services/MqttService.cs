@@ -25,6 +25,7 @@ public class MqttService
     private string _baseTopic = "multiroom-audio";
     private readonly SemaphoreSlim _publishLock = new(1, 1);
     private CancellationTokenSource? _reconnectCts;
+    private volatile bool _shuttingDown;
 
     public MqttService(
         MqttConfigService config,
@@ -194,9 +195,7 @@ public class MqttService
 
     private async Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
-        // If ShutdownAsync already cancelled the CTS, this is a graceful shutdown disconnect — don't reconnect.
-        var shuttingDown = _reconnectCts?.IsCancellationRequested ?? false;
-        if (shuttingDown) return;
+        if (_shuttingDown) return;
 
         LastError = e.Exception?.Message ?? e.ReasonString;
         _logger.LogWarning("MQTT disconnected: {Reason}. Reconnecting...", LastError);
@@ -239,6 +238,7 @@ public class MqttService
     /// <summary>Publishes an offline availability message, disconnects from the broker, and disposes resources.</summary>
     public async Task ShutdownAsync(CancellationToken ct)
     {
+        _shuttingDown = true;
         _players.PlayersChanged -= OnPlayersChanged;
         _reconnectCts?.Cancel();
         _reconnectCts?.Dispose();
