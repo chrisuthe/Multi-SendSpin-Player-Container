@@ -43,11 +43,18 @@ options:
   log_level: info
   mock_hardware: false
   enable_advanced_formats: false
+  mqtt_enabled: false
 
 schema:
   log_level: list(debug|info|warning|error)
   mock_hardware: bool?
   enable_advanced_formats: bool?
+  mqtt_enabled: bool
+  mqtt_host: str?
+  mqtt_port: port?
+  mqtt_username: str?
+  mqtt_password: password?
+  mqtt_tls: bool?
 
 # Watchdog - auto-restart if health check fails
 watchdog: http://[HOST]:[PORT:8096]/api/health
