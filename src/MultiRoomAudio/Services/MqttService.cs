@@ -14,6 +14,7 @@ public class MqttService
 {
     private readonly MqttConfigService _config;
     private readonly PlayerManagerService _players;
+    private readonly TriggerService _triggers;
     private readonly VersionService _version;
     private readonly EnvironmentService _env;
     private readonly StartupProgressService _startup;
@@ -30,6 +31,7 @@ public class MqttService
     public MqttService(
         MqttConfigService config,
         PlayerManagerService players,
+        TriggerService triggers,
         VersionService version,
         EnvironmentService env,
         StartupProgressService startup,
@@ -37,6 +39,7 @@ public class MqttService
     {
         _config = config;
         _players = players;
+        _triggers = triggers;
         _version = version;
         _env = env;
         _startup = startup;
@@ -96,6 +99,7 @@ public class MqttService
         await ConnectAndAnnounceAsync(ct);
 
         _players.PlayersChanged += OnPlayersChanged;
+        _triggers.TriggersChanged += OnTriggersChanged;
     }
 
     private MqttClientOptions? _options;
@@ -107,6 +111,7 @@ public class MqttService
         _logger.LogInformation("MQTT bridge connected to broker");
 
         await _client.SubscribeAsync(_topics!.PlayerCommandSubscription, MqttQualityOfServiceLevel.AtLeastOnce, ct);
+        await _client.SubscribeAsync(_topics!.AmpCommandSubscription, MqttQualityOfServiceLevel.AtLeastOnce, ct);
         await PublishAvailabilityAsync("online", ct);
         await PublishDiscoveryAsync(ct);
         await PublishAllStateAsync(ct);
@@ -123,6 +128,12 @@ public class MqttService
 
         foreach (var m in _discovery!.ForContainer(_env.EnvironmentName))
             await PublishAsync(m.Topic, m.Payload, retain: true, ct);
+
+        var trig = _triggers.GetStatus();
+        foreach (var board in trig.Boards)
+            foreach (var t in board.Triggers)
+                foreach (var m in _discovery!.ForAmp(board.BoardId, board.DisplayName, t))
+                    await PublishAsync(m.Topic, m.Payload, retain: true, ct);
     }
 
     private async Task PublishAllStateAsync(CancellationToken ct)
@@ -135,6 +146,12 @@ public class MqttService
             MqttStatePayloads.Container(_startup.IsStartupComplete, _version.Version,
                 players.Count, _env.AudioBackend, _env.EnvironmentName),
             retain: true, ct);
+
+        var trigState = _triggers.GetStatus();
+        foreach (var board in trigState.Boards)
+            foreach (var t in board.Triggers)
+                await PublishAsync(_topics!.AmpStateTopic(board.BoardId, t.Channel),
+                    MqttStatePayloads.Amp(t, board.IsConnected), retain: true, ct);
     }
 
     private void OnPlayersChanged()
@@ -155,6 +172,23 @@ public class MqttService
         });
     }
 
+    private void OnTriggersChanged()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (!IsConnected) return;
+                await PublishDiscoveryAsync(CancellationToken.None);
+                await PublishAllStateAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish MQTT state on trigger change");
+            }
+        });
+    }
+
     private async Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
     {
         try
@@ -168,6 +202,23 @@ public class MqttService
             var payload = Encoding.UTF8.GetString(payloadBytes);
             var cmd = MqttCommand.Parse(_baseTopic, topic, payload);
             if (cmd.Kind == MqttCommandKind.Unknown) return;
+
+            if (cmd.Kind == MqttCommandKind.AmpOverride && cmd.AmpZone is not null)
+            {
+                foreach (var board in _triggers.GetStatus().Boards)
+                {
+                    foreach (var t in board.Triggers)
+                    {
+                        if ($"{MqttTopics.Sanitize(board.BoardId)}_{t.Channel}" == cmd.AmpZone)
+                        {
+                            _triggers.SetOverride(board.BoardId, t.Channel, cmd.BoolValue ?? false);
+                            return;
+                        }
+                    }
+                }
+                _logger.LogWarning("MQTT amp override for unknown zone {Zone}", cmd.AmpZone);
+                return;
+            }
 
             var player = _players.GetAllPlayers().Players
                 .FirstOrDefault(p => MqttTopics.Sanitize(p.ClientId) == cmd.PlayerClientId);
@@ -258,6 +309,7 @@ public class MqttService
     {
         _shuttingDown = true;
         _players.PlayersChanged -= OnPlayersChanged;
+        _triggers.TriggersChanged -= OnTriggersChanged;
         _reconnectCts?.Cancel();
         _reconnectCts?.Dispose();
         _reconnectCts = null;
