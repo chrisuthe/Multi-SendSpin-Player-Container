@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-12692be
+## Development Build: sha-ad37020
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #239 from chrisuthe/fix/mqtt-unique-client-id
+- fix: use a unique MQTT client ID to stop broker takeover loop
 - Merge pull request #237 from chrisuthe/fix/mqtt-dev-addon-options
 - fix: expose MQTT options in dev add-on config
 - Merge pull request #236 from chrisuthe/feat/mqtt-ha-bridge-phase2
@@ -13,8 +15,6 @@
 - feat: add virtual board and override controls to triggers UI
 - feat: expose MQTT options in HAOS add-on config
 - fix: resolve HAOS MQTT options by snake_case keys
-- feat: publish amp state and dispatch override commands in MqttService
-- feat: parse amp override commands in MqttCommand
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
