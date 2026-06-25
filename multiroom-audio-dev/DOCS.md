@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-5db05a5
+## Development Build: sha-6df2449
 
 **Current Dev Build Changes** (recent)
 
-- test: add timer/player sync test project and wire into CI
-- fix: update to SendSpin.SDK 9.1.0 and improve multi-room sync (#233)
-- Merge pull request #231 from chrisuthe/feat/220-custom-sink-volume
-- Merge pull request #232 from chrisuthe/fix/212-header-wrap
-- Merge pull request #230 from chrisuthe/fix/223-dac-collision
-- fix: prevent header title clipping with long translated titles
-- Lautstärkeregelung für Custom Sinks hinzugefügt
-- fix: disambiguate identical USB devices that share a device key
-- Merge pull request #228 from chrisuthe/fix/219-volume-scope
-- Merge pull request #229 from chrisuthe/chore/dependabot-hold-swashbuckle-major
+- Merge pull request #235 from chrisuthe/feat/mqtt-home-assistant-bridge
+- fix: publish MQTT container ready state after startup completes
+- feat: add MQTT settings API endpoint
+- feat: wire MQTT bridge into startup orchestrator and DI
+- fix: guard MqttService reconnect with shutdown flag
+- fix: replace reconnect CTS per-disconnect and tidy MqttService
+- feat: add MqttService connection, discovery, state, and command handling
+- feat: raise PlayersChanged event alongside SignalR broadcasts
+- feat: add MQTT command parser
+- fix: use friendly HA entity names for container device and tighten test
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
