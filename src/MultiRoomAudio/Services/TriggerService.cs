@@ -619,6 +619,10 @@ public class TriggerService : IAsyncDisposable
         if (!_channelStates.TryGetValue((boardId, channel), out var state))
             return false;
 
+        // No-op: releasing an override that was never set — nothing to do, avoid a spurious publish.
+        if (!on && !state.IsOverridden)
+            return true;
+
         var offDelay = boardConfig.Triggers.FirstOrDefault(t => t.Channel == channel)?.OffDelaySeconds ?? 60;
 
         lock (_stateLock)

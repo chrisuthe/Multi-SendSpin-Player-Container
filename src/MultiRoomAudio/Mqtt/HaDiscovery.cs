@@ -125,6 +125,9 @@ public class HaDiscovery
         };
     }
 
+    /// <summary>
+    /// Returns HA MQTT discovery config messages for all entities belonging to a single amplifier zone (relay channel).
+    /// </summary>
     public IReadOnlyList<DiscoveryMessage> ForAmp(string boardId, string? boardDisplayName, TriggerResponse t)
     {
         var zone = $"{MqttTopics.Sanitize(boardId)}_{t.Channel}";

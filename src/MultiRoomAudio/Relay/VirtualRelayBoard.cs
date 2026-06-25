@@ -23,10 +23,16 @@ public sealed class VirtualRelayBoard : IRelayBoard
         _channelCount = Math.Clamp(channelCount, 1, 16);
     }
 
+    /// <inheritdoc />
     public bool IsConnected => _isConnected;
+
+    /// <inheritdoc />
     public string? SerialNumber => _serialNumber;
+
+    /// <inheritdoc />
     public int ChannelCount => _channelCount;
 
+    /// <inheritdoc />
     public int CurrentState
     {
         get
@@ -38,6 +44,7 @@ public sealed class VirtualRelayBoard : IRelayBoard
         }
     }
 
+    /// <inheritdoc />
     public bool Open()
     {
         if (_disposed) return false;
@@ -45,10 +52,13 @@ public sealed class VirtualRelayBoard : IRelayBoard
         return true;
     }
 
+    /// <inheritdoc />
     public bool OpenBySerial(string serialNumber) => Open();
 
+    /// <inheritdoc />
     public void Close() => _isConnected = false;
 
+    /// <inheritdoc />
     public bool SetRelay(int channel, bool on)
     {
         if (!_isConnected || channel < 1 || channel > _channelCount) return false;
@@ -57,12 +67,14 @@ public sealed class VirtualRelayBoard : IRelayBoard
         return true;
     }
 
+    /// <inheritdoc />
     public RelayState GetRelay(int channel)
     {
         if (!_isConnected || channel < 1 || channel > _channelCount) return RelayState.Unknown;
         return _states[channel - 1] ? RelayState.On : RelayState.Off;
     }
 
+    /// <inheritdoc />
     public bool AllOff()
     {
         if (!_isConnected) return false;
@@ -70,6 +82,7 @@ public sealed class VirtualRelayBoard : IRelayBoard
         return true;
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
