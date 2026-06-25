@@ -566,10 +566,13 @@
                         </div>
                     </div>
 
-                    <!-- Add Board Button -->
+                    <!-- Add Board Buttons -->
                     <div class="mb-3">
-                        <button class="btn btn-outline-primary btn-sm" onclick="showAddBoardDialog()">
+                        <button class="btn btn-outline-primary btn-sm me-2" onclick="showAddBoardDialog()">
                             <i class="fas fa-plus me-1"></i> Add Relay Board
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="showAddVirtualBoardDialog()">
+                            <i class="fas fa-plus me-1"></i> Add Virtual Board
                         </button>
                         <span id="triggersTotalChannels" class="ms-2 text-muted small"></span>
                     </div>
@@ -644,6 +647,43 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" onclick="addBoard()">Add Board</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Virtual Board Modal -->
+    <div class="modal fade" id="addVirtualBoardModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add Virtual Board</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">
+                        <i class="fas fa-info-circle me-1"></i>
+                        A virtual board has no physical hardware. Its relay state is published via MQTT so
+                        Home Assistant can mirror amp power automatically.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label" for="addVirtualBoardDisplayName">Display Name (optional)</label>
+                        <input type="text" class="form-control" id="addVirtualBoardDisplayName"
+                               placeholder="e.g., Living Room Amp">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="addVirtualBoardChannelCount">Channel Count</label>
+                        <select class="form-select" id="addVirtualBoardChannelCount">
+                            <option value="1">1</option>
+                            <option value="2" selected>2</option>
+                            <option value="4">4</option>
+                            <option value="8">8</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="addVirtualBoard()">Add Board</button>
                 </div>
             </div>
         </div>
