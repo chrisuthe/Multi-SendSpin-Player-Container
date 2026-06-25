@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-b364ae9
+## Development Build: sha-12692be
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #237 from chrisuthe/fix/mqtt-dev-addon-options
+- fix: expose MQTT options in dev add-on config
 - Merge pull request #236 from chrisuthe/feat/mqtt-ha-bridge-phase2
 - docs: reconcile virtual-board MQTT-down signal (LWT availability) in phase 2 spec
 - refactor: early-return on no-op override release and add XML docs
@@ -13,8 +15,6 @@
 - fix: resolve HAOS MQTT options by snake_case keys
 - feat: publish amp state and dispatch override commands in MqttService
 - feat: parse amp override commands in MqttCommand
-- feat: add HA discovery builders for amp zones
-- feat: add MQTT amp state payload builder
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
