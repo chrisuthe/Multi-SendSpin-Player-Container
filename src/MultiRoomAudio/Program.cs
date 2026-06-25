@@ -168,6 +168,8 @@ builder.Services.AddSingleton<CardProfileService>();
 builder.Services.AddSingleton<CustomSinksService>();
 builder.Services.AddSingleton<PlayerManagerService>();
 builder.Services.AddSingleton<TriggerService>();
+builder.Services.AddSingleton<MqttConfigService>();
+builder.Services.AddSingleton<MqttService>();
 
 // HID button support for hardware volume/mute controls
 builder.Services.AddSingleton<HidInputDeviceDetector>();

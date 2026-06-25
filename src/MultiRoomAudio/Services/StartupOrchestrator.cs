@@ -25,6 +25,7 @@ public class StartupOrchestrator : BackgroundService
     private PlayerManagerService _playerManager = null!;
     private TriggerService _triggers = null!;
     private HidButtonService _hidButtons = null!;
+    private MqttService _mqtt = null!;
 
     public StartupOrchestrator(
         ILogger<StartupOrchestrator> logger,
@@ -52,6 +53,7 @@ public class StartupOrchestrator : BackgroundService
         _playerManager = _services.GetRequiredService<PlayerManagerService>();
         _triggers = _services.GetRequiredService<TriggerService>();
         _hidButtons = _services.GetRequiredService<HidButtonService>();
+        _mqtt = _services.GetRequiredService<MqttService>();
 
         _logger.LogInformation("StartupOrchestrator: beginning background initialization...");
 
@@ -74,6 +76,9 @@ public class StartupOrchestrator : BackgroundService
 
             // Phase 6: Initialize HID button support for hardware volume/mute controls
             await RunPhaseAsync("hidbuttons", () => _hidButtons.InitializeAsync(stoppingToken), stoppingToken);
+
+            // Phase 7: Connect MQTT bridge (publishes to Home Assistant). Non-blocking.
+            await RunPhaseAsync("mqtt", () => _mqtt.InitializeAsync(stoppingToken), stoppingToken);
 
             _logger.LogInformation("StartupOrchestrator: all phases complete");
         }
@@ -112,6 +117,8 @@ public class StartupOrchestrator : BackgroundService
         _logger.LogInformation("StartupOrchestrator: shutting down services...");
 
         // Services may not have been resolved yet if shutdown occurs during early startup
+        if (_mqtt != null)
+            await _mqtt.ShutdownAsync(cancellationToken);
         if (_hidButtons != null)
             await _hidButtons.DisposeAsync();
         if (_triggers != null)
