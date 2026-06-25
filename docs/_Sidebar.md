@@ -12,6 +12,7 @@
 * [12V Triggers](12V-TRIGGERS)
 * [Custom Sinks](CUSTOM_SINKS)
 * [Sound Card Setup](SOUND_CARD_SETUP)
+* [Home Assistant MQTT](HOME_ASSISTANT_MQTT)
 
 **Development**
 * [Architecture](ARCHITECTURE)

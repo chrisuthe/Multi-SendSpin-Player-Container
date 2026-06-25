@@ -51,6 +51,7 @@ Players appear automatically in Music Assistant via the Sendspin protocol.
 - **Native Add-on** - Installs from the add-on store
 - **Sidebar Integration** - Access from your HA dashboard
 - **PulseAudio Support** - Works with HA's audio system
+- **MQTT Bridge** - Player diagnostics, amplifier zone control, and virtual relays exposed to HA via MQTT Discovery
 
 ---
 
@@ -60,6 +61,7 @@ Players appear automatically in Music Assistant via the Sendspin protocol.
 |--------------|---------|
 | See what's new in 5.0 | [What's New](WHATS_NEW_5.0) |
 | Control amplifier power | [12V Triggers](12V-TRIGGERS) |
+| See status & control amps in Home Assistant | [Home Assistant MQTT](HOME_ASSISTANT_MQTT) |
 | Get running in 5 minutes | [Getting Started](GETTING_STARTED) |
 | Use with Home Assistant | [HAOS Add-on Guide](HAOS_ADDON_GUIDE) |
 | Split a multi-channel DAC | [Custom Sinks Guide](CUSTOM_SINKS) |
