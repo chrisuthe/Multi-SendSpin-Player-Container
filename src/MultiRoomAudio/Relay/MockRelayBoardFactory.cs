@@ -29,6 +29,9 @@ public class MockRelayBoardFactory : IRelayBoardFactory
         _logger.LogDebug("Creating mock relay board: BoardId={BoardId}, BoardType={BoardType}, Serial={Serial}, Channels={Channels}",
             boardId, boardType, serial, channelCount);
 
+        if (boardType == RelayBoardType.Virtual)
+            return new VirtualRelayBoard(_loggerFactory.CreateLogger<VirtualRelayBoard>(), boardId, channelCount);
+
         return new MockRelayBoard(
             logger: _loggerFactory.CreateLogger<MockRelayBoard>(),
             serialNumber: serial,

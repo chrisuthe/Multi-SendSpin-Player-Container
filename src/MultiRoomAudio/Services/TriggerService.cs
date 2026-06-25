@@ -37,6 +37,15 @@ public class TriggerService : IAsyncDisposable
     private TriggerFeatureConfiguration _config = new();
     private bool _disposed;
 
+    /// <summary>
+    /// Raised whenever a relay/channel or board state changes (auto on/off, off-timer,
+    /// manual control, override, connect/disconnect). The MQTT bridge subscribes to
+    /// publish amp state without polling.
+    /// </summary>
+    public event Action? TriggersChanged;
+
+    private void RaiseTriggersChanged() => TriggersChanged?.Invoke();
+
     // Track active triggers and their off timers using composite key (boardId, channel)
     private readonly ConcurrentDictionary<(string BoardId, int Channel), TriggerChannelState> _channelStates = new();
 
@@ -49,6 +58,7 @@ public class TriggerService : IAsyncDisposable
         public DateTime? LastActivated { get; set; }
         public Timer? OffDelayTimer { get; set; }
         public int ActivePlayerCount { get; set; }
+        public bool IsOverridden { get; set; }
     }
 
     public TriggerService(
@@ -239,7 +249,8 @@ public class TriggerService : IAsyncDisposable
                 LastActivated: channelState.LastActivated,
                 ScheduledOffTime: channelState.OffDelayTimer?.Enabled == true
                     ? channelState.LastActivated?.AddSeconds(config.OffDelaySeconds)
-                    : null
+                    : null,
+                IsOverridden: channelState.IsOverridden
             ));
         }
 
@@ -325,6 +336,8 @@ public class TriggerService : IAsyncDisposable
                 boardType = RelayBoardType.UsbHid;
             else if (boardId.StartsWith("MODBUS:", StringComparison.OrdinalIgnoreCase))
                 boardType = RelayBoardType.Modbus;
+            else if (boardId.StartsWith("VIRTUAL:", StringComparison.OrdinalIgnoreCase))
+                boardType = RelayBoardType.Virtual;
             else
                 boardType = RelayBoardType.Ftdi;
         }
@@ -590,6 +603,70 @@ public class TriggerService : IAsyncDisposable
         return result;
     }
 
+    /// <summary>
+    /// Sticky manual override for a channel. ON forces the relay on and suspends the
+    /// playback auto-logic for that channel; OFF releases back to auto (stays on if a
+    /// player is active, otherwise starts the configured off-delay).
+    /// </summary>
+    public bool SetOverride(string boardId, int channel, bool on)
+    {
+        var boardConfig = _config.Boards.FirstOrDefault(b => b.BoardId == boardId);
+        if (boardConfig == null)
+            throw new ArgumentException($"Board '{boardId}' not found", nameof(boardId));
+        if (channel < 1 || channel > boardConfig.ChannelCount)
+            throw new ArgumentOutOfRangeException(nameof(channel), $"Channel must be between 1 and {boardConfig.ChannelCount}");
+
+        if (!_channelStates.TryGetValue((boardId, channel), out var state))
+            return false;
+
+        // No-op: releasing an override that was never set — nothing to do, avoid a spurious publish.
+        if (!on && !state.IsOverridden)
+            return true;
+
+        var offDelay = boardConfig.Triggers.FirstOrDefault(t => t.Channel == channel)?.OffDelaySeconds ?? 60;
+
+        lock (_stateLock)
+        {
+            if (on)
+            {
+                CancelOffTimer(boardId, channel);
+                state.IsOverridden = true;
+                state.IsActive = true;
+                state.LastActivated ??= DateTime.UtcNow;
+                var board = TryGetOrReconnectBoard(boardId);
+                board?.SetRelay(channel, true);
+                _logger.LogInformation("Override ON: Board '{BoardId}' channel {Channel} (auto-logic suspended)", boardId, channel);
+            }
+            else
+            {
+                state.IsOverridden = false;
+                if (state.ActivePlayerCount > 0)
+                {
+                    // A player is still active — keep it on, ensure relay reflects that.
+                    state.IsActive = true;
+                    TryGetOrReconnectBoard(boardId)?.SetRelay(channel, true);
+                    _logger.LogInformation("Override released: Board '{BoardId}' channel {Channel} → stays ON (active playback)", boardId, channel);
+                }
+                else if (state.IsActive)
+                {
+                    if (offDelay <= 0)
+                    {
+                        state.IsActive = false;
+                        TryGetOrReconnectBoard(boardId)?.SetRelay(channel, false);
+                    }
+                    else
+                    {
+                        StartOffTimer(boardId, channel, offDelay);
+                    }
+                    _logger.LogInformation("Override released: Board '{BoardId}' channel {Channel} → returning to auto (off in {Delay}s)", boardId, channel, offDelay);
+                }
+            }
+        }
+
+        RaiseTriggersChanged();
+        return true;
+    }
+
     #endregion
 
     #region Public API - Device Discovery
@@ -745,6 +822,8 @@ public class TriggerService : IAsyncDisposable
                     boardType = RelayBoardType.UsbHid;
                 else if (boardId.StartsWith("MODBUS:", StringComparison.OrdinalIgnoreCase))
                     boardType = RelayBoardType.Modbus;
+                else if (boardId.StartsWith("VIRTUAL:", StringComparison.OrdinalIgnoreCase))
+                    boardType = RelayBoardType.Virtual;
                 else
                     boardType = RelayBoardType.Ftdi;
             }
@@ -832,6 +911,10 @@ public class TriggerService : IAsyncDisposable
                     _logger.LogWarning("Board '{BoardId}' is FTDI type but factory didn't create FtdiRelayBoard", boardId);
                     connected = board.Open();
                 }
+            }
+            else if (boardId.StartsWith("VIRTUAL:", StringComparison.OrdinalIgnoreCase))
+            {
+                connected = board.Open();
             }
             else
             {
@@ -1099,6 +1182,7 @@ public class TriggerService : IAsyncDisposable
                     boardId, channel, playerName, state.ActivePlayerCount);
             }
         }
+        RaiseTriggersChanged();
     }
 
     private void DeactivateTrigger(string boardId, int channel, int offDelaySeconds, string playerName)
@@ -1116,7 +1200,11 @@ public class TriggerService : IAsyncDisposable
                 playerName, boardId, channel, state.ActivePlayerCount);
 
             // Only start off delay if no players are active
-            if (state.ActivePlayerCount == 0 && state.IsActive)
+            if (state.IsOverridden)
+            {
+                // Manual override holds the relay on; auto-off is suspended until released.
+            }
+            else if (state.ActivePlayerCount == 0 && state.IsActive)
             {
                 if (offDelaySeconds <= 0)
                 {
@@ -1141,6 +1229,7 @@ public class TriggerService : IAsyncDisposable
                 }
             }
         }
+        RaiseTriggersChanged();
     }
 
     private void StartOffTimer(string boardId, int channel, int delaySeconds)
@@ -1174,6 +1263,9 @@ public class TriggerService : IAsyncDisposable
 
         lock (_stateLock)
         {
+            if (state.IsOverridden)
+                return;   // override holds the relay on
+
             // Check if still should turn off (no new players started)
             if (state.ActivePlayerCount == 0 && state.IsActive)
             {
@@ -1195,6 +1287,7 @@ public class TriggerService : IAsyncDisposable
                     boardId, channel, state.ActivePlayerCount);
             }
         }
+        RaiseTriggersChanged();
     }
 
     #endregion

@@ -77,7 +77,7 @@ public class MqttConfigService : YamlFileService<MqttSettings>
     private string ResolveSource(IReadOnlyDictionary<string, string?> env)
     {
         if (!string.IsNullOrWhiteSpace(env["MQTT_HOST"])) return "env";
-        if (_env.IsHaos && !string.IsNullOrWhiteSpace(_env.GetHaosOption<string?>("MQTT_HOST"))) return "haos";
+        if (_env.IsHaos && !string.IsNullOrWhiteSpace(_env.GetHaosOption<string?>("mqtt_host"))) return "haos";
         if (!string.IsNullOrWhiteSpace(Data.Host)) return "yaml";
         return "default";
     }
@@ -101,16 +101,16 @@ public class MqttConfigService : YamlFileService<MqttSettings>
         return new MqttSettings
         {
             Enabled = EnvStr("MQTT_ENABLED") is { } en ? IsTruthy(en)
-                      : haosBool("MQTT_ENABLED") ?? fromYaml.Enabled,
-            Host = EnvStr("MQTT_HOST") ?? haosString("MQTT_HOST") ?? fromYaml.Host,
+                      : haosBool("mqtt_enabled") ?? fromYaml.Enabled,
+            Host = EnvStr("MQTT_HOST") ?? haosString("mqtt_host") ?? fromYaml.Host,
             Port = (EnvStr("MQTT_PORT") is { } p && int.TryParse(p, out var pv)) ? pv
-                   : haosInt("MQTT_PORT") ?? fromYaml.Port,
-            Username = EnvStr("MQTT_USERNAME") ?? haosString("MQTT_USERNAME") ?? fromYaml.Username,
-            Password = EnvStr("MQTT_PASSWORD") ?? haosString("MQTT_PASSWORD") ?? fromYaml.Password,
+                   : haosInt("mqtt_port") ?? fromYaml.Port,
+            Username = EnvStr("MQTT_USERNAME") ?? haosString("mqtt_username") ?? fromYaml.Username,
+            Password = EnvStr("MQTT_PASSWORD") ?? haosString("mqtt_password") ?? fromYaml.Password,
             UseTls = EnvStr("MQTT_TLS") is { } tls ? IsTruthy(tls)
-                     : haosBool("MQTT_TLS") ?? fromYaml.UseTls,
-            DiscoveryPrefix = EnvStr("MQTT_DISCOVERY_PREFIX") ?? haosString("MQTT_DISCOVERY_PREFIX") ?? fromYaml.DiscoveryPrefix,
-            BaseTopic = EnvStr("MQTT_BASE_TOPIC") ?? haosString("MQTT_BASE_TOPIC") ?? fromYaml.BaseTopic,
+                     : haosBool("mqtt_tls") ?? fromYaml.UseTls,
+            DiscoveryPrefix = EnvStr("MQTT_DISCOVERY_PREFIX") ?? haosString("mqtt_discovery_prefix") ?? fromYaml.DiscoveryPrefix,
+            BaseTopic = EnvStr("MQTT_BASE_TOPIC") ?? haosString("mqtt_base_topic") ?? fromYaml.BaseTopic,
         };
     }
 }

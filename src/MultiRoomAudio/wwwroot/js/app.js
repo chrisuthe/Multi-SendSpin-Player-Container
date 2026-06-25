@@ -4898,6 +4898,8 @@ function renderTriggers() {
             ? '<span class="badge bg-warning text-dark ms-1" title="Identified by USB port - may change if moved"><i class="fas fa-exclamation-triangle"></i> Port-based</span>'
             : '';
 
+        const isVirtualBoard = board.boardType === 'Virtual';
+
         const channelsHtml = board.triggers.map(trigger => {
             const isOn = trigger.relayState === 'On';
             const activeStatus = isOn
@@ -4905,6 +4907,7 @@ function renderTriggers() {
                 : '<span class="badge bg-secondary ms-1">Off</span>';
             const onBtnClass = isOn ? 'btn btn-success btn-sm' : 'btn btn-outline-secondary btn-sm';
             const offBtnClass = !isOn && trigger.relayState === 'Off' ? 'btn btn-secondary btn-sm' : 'btn btn-outline-secondary btn-sm';
+            const overrideChecked = trigger.isOverridden ? 'checked' : '';
 
             return `
                 <tr>
@@ -4932,6 +4935,16 @@ function renderTriggers() {
                             <span class="input-group-text">s</span>
                         </div>
                     </td>
+                    <td>
+                        <div class="form-check form-switch mb-0" title="Manual override — force the relay ON regardless of playback state">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   id="trigger-override-${boardIdSafe}-${trigger.channel}"
+                                   ${overrideChecked}
+                                   ${controlsDisabled ? 'disabled' : ''}
+                                   onchange="setChannelOverride('${boardId}', ${trigger.channel}, this.checked)">
+                            <label class="form-check-label small text-muted" for="trigger-override-${boardIdSafe}-${trigger.channel}">Override</label>
+                        </div>
+                    </td>
                     <td class="text-end" style="white-space: nowrap;">
                         <button class="${onBtnClass}"
                                 onclick="testTrigger('${boardId}', ${trigger.channel}, true)"
@@ -4951,9 +4964,15 @@ function renderTriggers() {
         }).join('');
 
         // Board type badge
-        const boardTypeLabel = board.boardType === 'Ftdi' ? 'FTDI' : (board.boardType === 'UsbHid' ? 'HID' : board.boardType);
+        const boardTypeLabel = board.boardType === 'Ftdi' ? 'FTDI'
+            : board.boardType === 'UsbHid' ? 'HID'
+            : board.boardType === 'Virtual' ? 'Virtual'
+            : board.boardType;
+        const boardTypeBadgeClass = board.boardType === 'Ftdi' ? 'bg-primary'
+            : board.boardType === 'Virtual' ? 'bg-purple text-white'
+            : 'bg-info';
         const boardTypeBadge = board.boardType
-            ? `<span class="badge ${board.boardType === 'Ftdi' ? 'bg-primary' : 'bg-info'} ms-2">${boardTypeLabel}</span>`
+            ? `<span class="badge ${boardTypeBadgeClass} ms-2" style="${board.boardType === 'Virtual' ? 'background-color:#6f42c1' : ''}">${boardTypeLabel}</span>`
             : '';
 
         return `
@@ -5017,12 +5036,14 @@ function renderTriggers() {
                             </span>
                         </div>
                         ${board.errorMessage ? `<div class="alert alert-warning small mb-2"><i class="fas fa-exclamation-triangle me-1"></i>${escapeHtml(board.errorMessage)}</div>` : ''}
+                        ${isVirtualBoard ? '<div class="alert alert-info small mb-2 py-1 px-2"><i class="fas fa-wifi me-1"></i>Virtual board — relay state is published via MQTT. MQTT must be enabled and connected for Home Assistant to mirror amp power.</div>' : ''}
                         <table class="table table-sm table-hover mb-0">
                             <thead>
                                 <tr>
                                     <th>Channel</th>
                                     <th>Sink</th>
                                     <th>Off Delay</th>
+                                    <th>Override</th>
                                     <th class="text-end trigger-action-header"><span class="trigger-action-col">On</span><span class="trigger-action-col">Off</span></th>
                                 </tr>
                             </thead>
@@ -5223,6 +5244,44 @@ async function addBoard() {
     } catch (error) {
         console.error('Error adding board:', error);
         showAlert(`Failed to add board: ${error.message}`, 'danger');
+    }
+}
+
+// Show add virtual board dialog
+let addVirtualBoardModal = null;
+
+function showAddVirtualBoardDialog() {
+    if (!addVirtualBoardModal) {
+        addVirtualBoardModal = new bootstrap.Modal(document.getElementById('addVirtualBoardModal'));
+    }
+    document.getElementById('addVirtualBoardDisplayName').value = '';
+    document.getElementById('addVirtualBoardChannelCount').value = '2';
+    addVirtualBoardModal.show();
+}
+
+// Add a new virtual board
+async function addVirtualBoard() {
+    const displayName = document.getElementById('addVirtualBoardDisplayName').value.trim();
+    const channelCount = parseInt(document.getElementById('addVirtualBoardChannelCount').value, 10);
+
+    try {
+        const response = await fetch('./api/triggers/boards', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ boardType: 'Virtual', displayName: displayName || null, channelCount })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to add virtual board');
+        }
+
+        addVirtualBoardModal.hide();
+        await loadTriggers();
+        showAlert('Virtual board added successfully', 'success');
+    } catch (error) {
+        console.error('Error adding virtual board:', error);
+        showAlert(`Failed to add virtual board: ${error.message}`, 'danger');
     }
 }
 
@@ -5634,6 +5693,52 @@ async function testTrigger(boardId, channel, on) {
     } catch (error) {
         console.error('Error testing trigger:', error);
         showAlert(`Failed to test relay: ${error.message}`, 'danger');
+    } finally {
+        triggersOperationCount--;
+    }
+}
+
+// Set manual override for a channel (forces relay ON regardless of playback state)
+async function setChannelOverride(boardId, channel, on) {
+    triggersOperationCount++;
+
+    // Save expanded state before any async operations
+    const container = document.getElementById('triggersContainer');
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
+    try {
+        const url = `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}/override`;
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ on })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to set override');
+        }
+
+        showAlert(`Channel ${channel} override ${on ? 'enabled' : 'disabled'}`, 'success', 2000);
+
+        // Update local data and re-render to reflect new state
+        const board = triggersData?.boards?.find(b => b.boardId === boardId);
+        if (board) {
+            const trigger = board.triggers?.find(t => t.channel === channel);
+            if (trigger) {
+                trigger.isOverridden = on;
+            }
+        }
+    } catch (error) {
+        console.error('Error setting channel override:', error);
+        showAlert(`Failed to set override: ${error.message}`, 'danger');
+        // Revert the toggle by reloading
+        await loadTriggers();
     } finally {
         triggersOperationCount--;
     }

@@ -33,6 +33,18 @@ public class MqttTopics
     /// <summary>Single wildcard subscription covering all player command topics.</summary>
     public string PlayerCommandSubscription => $"{_base}/player/+/+/set";
 
+    private string AmpZone(string boardId, int channel) => $"{Sanitize(boardId)}_{channel}";
+
+    /// <summary>State topic for an amp/zone (one JSON document per zone).</summary>
+    public string AmpStateTopic(string boardId, int channel) => $"{_base}/amp/{AmpZone(boardId, channel)}/state";
+
+    /// <summary>Command topic for an amp/zone control (e.g. "override").</summary>
+    public string AmpCommandTopic(string boardId, int channel, string command) =>
+        $"{_base}/amp/{AmpZone(boardId, channel)}/{command}/set";
+
+    /// <summary>Single wildcard subscription covering all amp command topics.</summary>
+    public string AmpCommandSubscription => $"{_base}/amp/+/+/set";
+
     /// <summary>Home Assistant MQTT discovery config topic for the given component type and object ID.</summary>
     public string DiscoveryTopic(string component, string objectId) =>
         $"{_prefix}/{component}/{objectId}/config";
