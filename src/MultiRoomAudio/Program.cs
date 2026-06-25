@@ -294,6 +294,7 @@ app.MapLogsEndpoints();
 app.MapTriggersEndpoints();
 app.MapDiagnosticsEndpoints();
 app.MapSettingsEndpoints();
+app.MapMqttEndpoints();
 
 // Startup progress endpoint (for web UI to show initialization status)
 app.MapGet("/api/startup", (StartupProgressService startup) => Results.Ok(startup.GetProgress()))
