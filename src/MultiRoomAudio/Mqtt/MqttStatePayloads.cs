@@ -33,4 +33,13 @@ public static class MqttStatePayloads
         audio_backend = audioBackend,
         environment,
     });
+
+    /// <summary>Per-amp/zone state document. RelayState.On → power ON; Unknown → OFF.</summary>
+    public static string Amp(MultiRoomAudio.Models.TriggerResponse t, bool boardConnected) => JsonSerializer.Serialize(new
+    {
+        power = OnOff(t.RelayState == MultiRoomAudio.Models.RelayState.On),
+        scheduled_off = t.ScheduledOffTime,
+        @override = OnOff(t.IsOverridden),
+        board_connected = OnOff(boardConnected),
+    });
 }
