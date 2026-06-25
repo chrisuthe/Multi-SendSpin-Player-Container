@@ -47,6 +47,16 @@ public class MqttService
     }
 
     /// <summary>Gets whether the MQTT client is currently connected to the broker.</summary>
+    /// <summary>
+    /// Builds a globally-unique MQTT client ID. The GUID suffix is essential:
+    /// MQTT brokers allow only one connection per client ID, so a non-unique ID
+    /// (e.g. a stale session from a prior start, a second add-on instance, or the
+    /// shared host name under host_network) causes the broker to kick one client
+    /// off as the other connects — an endless connect/disconnect takeover loop.
+    /// </summary>
+    internal static string NewClientId()
+        => $"multiroom-audio-{Environment.MachineName}-{Guid.NewGuid():N}";
+
     public bool IsConnected => _client?.IsConnected ?? false;
 
     /// <summary>Gets the most recent connection or disconnect error message, or null if healthy.</summary>
@@ -78,7 +88,7 @@ public class MqttService
         _client = factory.CreateMqttClient();
 
         var optionsBuilder = new MqttClientOptionsBuilder()
-            .WithClientId($"multiroom-audio-{Environment.MachineName}")
+            .WithClientId(NewClientId())
             .WithTcpServer(settings.Host, settings.Port)
             .WithWillTopic(_topics.BridgeAvailabilityTopic)
             .WithWillPayload(Encoding.UTF8.GetBytes("offline"))
