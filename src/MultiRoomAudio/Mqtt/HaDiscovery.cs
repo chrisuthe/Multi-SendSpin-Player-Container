@@ -125,6 +125,54 @@ public class HaDiscovery
         };
     }
 
+    public IReadOnlyList<DiscoveryMessage> ForAmp(string boardId, string? boardDisplayName, TriggerResponse t)
+    {
+        var zone = $"{MqttTopics.Sanitize(boardId)}_{t.Channel}";
+        var stateTopic = _topics.AmpStateTopic(boardId, t.Channel);
+        var deviceId = $"mra_amp_{zone}";
+        var label = !string.IsNullOrWhiteSpace(t.ZoneName) ? t.ZoneName
+                  : !string.IsNullOrWhiteSpace(boardDisplayName) ? $"{boardDisplayName} CH{t.Channel}"
+                  : $"{boardId} CH{t.Channel}";
+        var device = Device(deviceId, label!, "Amplifier Zone");
+
+        DiscoveryMessage Entity(string component, string key, string name, Action<Utf8JsonWriter> extra)
+            => Build(component, $"mra_amp_{zone}_{key}", name, deviceId, stateTopic, device, extra);
+
+        return new List<DiscoveryMessage>
+        {
+            Entity("binary_sensor", "power", $"{label} Power", w =>
+            {
+                w.WriteString("value_template", "{{ value_json.power }}");
+                w.WriteString("payload_on", "ON");
+                w.WriteString("payload_off", "OFF");
+                w.WriteString("device_class", "power");
+            }),
+            Entity("sensor", "scheduled_off", $"{label} Scheduled Off", w =>
+            {
+                w.WriteString("value_template", "{{ value_json.scheduled_off }}");
+                w.WriteString("device_class", "timestamp");
+                w.WriteString("entity_category", "diagnostic");
+            }),
+            Entity("switch", "override", $"{label} Override", w =>
+            {
+                w.WriteString("command_topic", _topics.AmpCommandTopic(boardId, t.Channel, "override"));
+                w.WriteString("value_template", "{{ value_json.override }}");
+                w.WriteString("state_on", "ON");
+                w.WriteString("state_off", "OFF");
+                w.WriteString("payload_on", "ON");
+                w.WriteString("payload_off", "OFF");
+            }),
+            Entity("binary_sensor", "board_connected", $"{label} Board Connected", w =>
+            {
+                w.WriteString("value_template", "{{ value_json.board_connected }}");
+                w.WriteString("payload_on", "ON");
+                w.WriteString("payload_off", "OFF");
+                w.WriteString("device_class", "connectivity");
+                w.WriteString("entity_category", "diagnostic");
+            }),
+        };
+    }
+
     private DiscoveryMessage Build(string component, string uniqueId, string name,
         string deviceId, string stateTopic, Action<Utf8JsonWriter> deviceBlock,
         Action<Utf8JsonWriter> extra)
