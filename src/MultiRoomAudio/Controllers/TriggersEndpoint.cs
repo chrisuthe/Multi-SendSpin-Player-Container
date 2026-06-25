@@ -132,9 +132,14 @@ public static class TriggersEndpoint
             ILoggerFactory lf) =>
         {
             var logger = lf.CreateLogger("TriggersEndpoint");
-            logger.LogDebug("API: POST /api/triggers/boards - {BoardId}", request.BoardId);
 
-            if (string.IsNullOrWhiteSpace(request.BoardId))
+            var boardId = request.BoardId;
+            if (request.BoardType == RelayBoardType.Virtual && string.IsNullOrWhiteSpace(boardId))
+                boardId = $"VIRTUAL:{Guid.NewGuid():N}".Substring(0, 16);
+
+            logger.LogDebug("API: POST /api/triggers/boards - {BoardId}", boardId);
+
+            if (string.IsNullOrWhiteSpace(boardId))
             {
                 return Results.BadRequest(new ErrorResponse(false, "Board ID is required"));
             }
@@ -145,16 +150,16 @@ public static class TriggersEndpoint
                     $"Channel count must be one of: {string.Join(", ", ValidChannelCounts.Values)}"));
             }
 
-            var success = service.AddBoard(request.BoardId, request.DisplayName, request.ChannelCount, request.BoardType);
+            var success = service.AddBoard(boardId, request.DisplayName, request.ChannelCount, request.BoardType);
             if (success)
             {
-                var boardStatus = service.GetBoardStatus(request.BoardId);
-                logger.LogInformation("Added board '{BoardId}'", request.BoardId);
-                return Results.Created($"/api/triggers/boards/{request.BoardId}", boardStatus);
+                var boardStatus = service.GetBoardStatus(boardId);
+                logger.LogInformation("Added board '{BoardId}'", boardId);
+                return Results.Created($"/api/triggers/boards/{boardId}", boardStatus);
             }
             else
             {
-                return Results.Conflict(new ErrorResponse(false, $"Board '{request.BoardId}' already exists"));
+                return Results.Conflict(new ErrorResponse(false, $"Board '{boardId}' already exists"));
             }
         })
         .WithName("AddBoard")
@@ -582,6 +587,20 @@ public static class TriggersEndpoint
         })
         .WithName("TestBoardRelay")
         .WithDescription("Manually control a relay for testing on a specific board (path params)");
+
+        // PUT /api/triggers/boards/{boardId}/{channel}/override - Set trigger override
+        group.MapPut("/boards/{boardId}/{channel:int}/override", (string boardId, int channel, RelayManualControlRequest request, TriggerService triggers) =>
+        {
+            try
+            {
+                var ok = triggers.SetOverride(Uri.UnescapeDataString(boardId), channel, request.On);
+                return ok
+                    ? Results.Ok(new { success = true, message = $"Override {(request.On ? "engaged" : "released")}.", boardId, channel, on = request.On })
+                    : Results.BadRequest(new ErrorResponse(false, "Board not connected or channel unavailable."));
+            }
+            catch (ArgumentException ex) { return Results.BadRequest(new ErrorResponse(false, ex.Message)); }
+        })
+        .WithTags("Triggers").WithName("SetTriggerOverride");
 
         // ============================================
         // Legacy Endpoints (for backwards compatibility)
