@@ -42,9 +42,13 @@ public class MqttService
         _logger = logger;
     }
 
+    /// <summary>Gets whether the MQTT client is currently connected to the broker.</summary>
     public bool IsConnected => _client?.IsConnected ?? false;
+
+    /// <summary>Gets the most recent connection or disconnect error message, or null if healthy.</summary>
     public string? LastError { get; private set; }
 
+    /// <summary>Initializes the MQTT client, connects to the configured broker, and publishes discovery and state.</summary>
     public async Task InitializeAsync(CancellationToken ct)
     {
         _config.Reload();
@@ -122,10 +126,10 @@ public class MqttService
 
     private async Task PublishAllStateAsync(CancellationToken ct)
     {
-        foreach (var p in _players.GetAllPlayers().Players)
+        var players = _players.GetAllPlayers().Players;
+        foreach (var p in players)
             await PublishAsync(_topics!.PlayerStateTopic(p.ClientId), MqttStatePayloads.Player(p), retain: true, ct);
 
-        var players = _players.GetAllPlayers().Players;
         await PublishAsync(_topics!.ContainerStateTopic,
             MqttStatePayloads.Container(_startup.IsStartupComplete, _version.Version,
                 players.Count, _env.AudioBackend, _env.EnvironmentName),
@@ -190,10 +194,16 @@ public class MqttService
 
     private async Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
+        // If ShutdownAsync already cancelled the CTS, this is a graceful shutdown disconnect — don't reconnect.
+        var shuttingDown = _reconnectCts?.IsCancellationRequested ?? false;
+        if (shuttingDown) return;
+
         LastError = e.Exception?.Message ?? e.ReasonString;
         _logger.LogWarning("MQTT disconnected: {Reason}. Reconnecting...", LastError);
 
-        var ct = (_reconnectCts ??= new CancellationTokenSource()).Token;
+        _reconnectCts?.Dispose();
+        _reconnectCts = new CancellationTokenSource();
+        var ct = _reconnectCts.Token;
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(5), ct);
@@ -226,10 +236,13 @@ public class MqttService
         }
     }
 
+    /// <summary>Publishes an offline availability message, disconnects from the broker, and disposes resources.</summary>
     public async Task ShutdownAsync(CancellationToken ct)
     {
         _players.PlayersChanged -= OnPlayersChanged;
         _reconnectCts?.Cancel();
+        _reconnectCts?.Dispose();
+        _reconnectCts = null;
         if (_client is { IsConnected: true })
         {
             try
