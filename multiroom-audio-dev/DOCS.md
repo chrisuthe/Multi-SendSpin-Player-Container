@@ -1,20 +1,20 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-6df2449
+## Development Build: sha-b364ae9
 
 **Current Dev Build Changes** (recent)
 
-- Merge pull request #235 from chrisuthe/feat/mqtt-home-assistant-bridge
-- fix: publish MQTT container ready state after startup completes
-- feat: add MQTT settings API endpoint
-- feat: wire MQTT bridge into startup orchestrator and DI
-- fix: guard MqttService reconnect with shutdown flag
-- fix: replace reconnect CTS per-disconnect and tidy MqttService
-- feat: add MqttService connection, discovery, state, and command handling
-- feat: raise PlayersChanged event alongside SignalR broadcasts
-- feat: add MQTT command parser
-- fix: use friendly HA entity names for container device and tighten test
+- Merge pull request #236 from chrisuthe/feat/mqtt-ha-bridge-phase2
+- docs: reconcile virtual-board MQTT-down signal (LWT availability) in phase 2 spec
+- refactor: early-return on no-op override release and add XML docs
+- feat: add virtual board and override controls to triggers UI
+- feat: expose MQTT options in HAOS add-on config
+- fix: resolve HAOS MQTT options by snake_case keys
+- feat: publish amp state and dispatch override commands in MqttService
+- feat: parse amp override commands in MqttCommand
+- feat: add HA discovery builders for amp zones
+- feat: add MQTT amp state payload builder
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
