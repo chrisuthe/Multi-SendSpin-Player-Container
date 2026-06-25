@@ -23,15 +23,33 @@ namespace MultiRoomAudio.Tests.Services;
 /// </summary>
 internal static class TriggerTestHarness
 {
+    private static readonly object _envLock = new();
+
     public static TriggerService CreateMockService()
     {
         // Point config at a temp dir so file I/O doesn't touch real paths or fail on Windows.
         var tempConfig = Path.Combine(Path.GetTempPath(), "trigger-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempConfig);
-        Environment.SetEnvironmentVariable("CONFIG_PATH", tempConfig);
 
         var loggerFactory = NullLoggerFactory.Instance;
-        var env = new EnvironmentService(NullLogger<EnvironmentService>.Instance);
+        EnvironmentService env;
+
+        // Lock so that concurrent harness calls cannot interleave their CONFIG_PATH mutation
+        // with EnvironmentService construction (EnvironmentService reads CONFIG_PATH once, in
+        // its constructor, so restoring afterward is safe).
+        lock (_envLock)
+        {
+            var prev = Environment.GetEnvironmentVariable("CONFIG_PATH");
+            try
+            {
+                Environment.SetEnvironmentVariable("CONFIG_PATH", tempConfig);
+                env = new EnvironmentService(NullLogger<EnvironmentService>.Instance);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("CONFIG_PATH", prev);
+            }
+        }
 
         var moduleRunner = new MockPaModuleRunner(NullLogger<MockPaModuleRunner>.Instance);
         var volumeRunner = new VolumeCommandRunner(NullLogger<VolumeCommandRunner>.Instance);
