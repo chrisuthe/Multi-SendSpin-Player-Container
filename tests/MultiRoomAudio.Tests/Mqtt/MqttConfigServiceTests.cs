@@ -18,3 +18,34 @@ public class MqttSettingsTests
         Assert.Null(s.Host);
     }
 }
+
+public class MqttConfigOverrideTests
+{
+    private static MqttSettings Apply(Dictionary<string, string?> env) =>
+        MultiRoomAudio.Services.MqttConfigService.ApplyOverrides(
+            new MqttSettings { Host = "yaml-host", Port = 1883 },
+            env,
+            _ => null, _ => null, _ => null);
+
+    [Fact]
+    public void EnvVar_OverridesYamlHost()
+    {
+        var result = Apply(new() { ["MQTT_HOST"] = "env-host" });
+        Assert.Equal("env-host", result.Host);
+    }
+
+    [Fact]
+    public void EnvEnabled_ParsesTruthyValues()
+    {
+        var result = Apply(new() { ["MQTT_ENABLED"] = "true" });
+        Assert.True(result.Enabled);
+    }
+
+    [Fact]
+    public void NoOverrides_KeepsYamlValues()
+    {
+        var result = Apply(new());
+        Assert.Equal("yaml-host", result.Host);
+        Assert.Equal(1883, result.Port);
+    }
+}
