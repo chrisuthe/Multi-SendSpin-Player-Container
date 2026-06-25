@@ -31,6 +31,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private readonly ConfigurationService _config;
     private readonly EnvironmentService _environment;
     private readonly IHubContext<PlayerStatusHub> _hubContext;
+
+    /// <summary>
+    /// Raised whenever player status changes (same moments as the SignalR broadcast).
+    /// The MQTT bridge subscribes to mirror state without polling.
+    /// </summary>
+    public event Action? PlayersChanged;
+
     private readonly VolumeCommandRunner _volumeRunner;
     private readonly BackendFactory _backendFactory;
     private readonly TriggerService _triggerService;
@@ -1498,6 +1505,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         {
             var players = GetAllPlayers();
             await _hubContext.BroadcastStatusUpdateAsync(players);
+            PlayersChanged?.Invoke();
         }, $"Mute broadcast for '{name}'", _logger);
 
         // Sync mute state to Music Assistant server (bidirectional sync)
@@ -3418,6 +3426,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         {
             var players = GetAllPlayers();
             await _hubContext.BroadcastStatusUpdateAsync(players);
+            PlayersChanged?.Invoke();
         }
         catch (Exception ex)
         {
