@@ -57,7 +57,7 @@ The auto-logic guard is a single `if (state.IsOverridden) return;` (or equivalen
 - Created by **both** `RealRelayBoardFactory` and `MockRelayBoardFactory` for `RelayBoardType.Virtual` (it is software, so it exists in real deployments too). `CanCreate(... Virtual)` returns true in both.
 - **No MQTT dependency in the relay layer.** A zone's amp-power state reaches HA through the normal amp-state publish driven by `TriggersChanged` (Section 3). When the auto-logic drives a virtual channel on, the amp `binary_sensor` flips to ON in HA and the user's automation mirrors it onto their outlet.
 - **Added manually** via the trigger API/UI (not hardware-discovered). The user supplies a display name and channel count, assigns sinks + off-delays per channel like any board. `BoardId` is a stable `VIRTUAL:<id>` generated once on creation and persisted in `triggers.yaml`.
-- **MQTT-usable diagnostic.** A virtual board only does anything when MQTT is connected. Surface this: the board's "board connected" diagnostic (Section 3) reflects an MQTT-usable condition (MQTT enabled AND connected) rather than always-true, and the trigger status reflects "MQTT not connected" for virtual boards when the bridge is down/disabled.
+- **MQTT-down signal.** A virtual board only does anything when MQTT is connected. This is surfaced through the **bridge LWT availability**, not the per-board sensor: when MQTT drops or is disabled, the bridge's last-will marks every entity (including the amp zone) `unavailable` in Home Assistant — the clearest "not reaching HA" signal. The amp's `board_connected` diagnostic therefore reflects the board's own `IsConnected` (always true for a software board once opened), and the web UI shows a static "requires MQTT" hint on virtual boards. (Implementation note: an earlier draft had `board_connected` itself reflect MQTT-usable state; that was dropped because, while MQTT is connected we are publishing, and while it is down LWT already makes the entity unavailable — so a per-board MQTT-usable flag would never differ observably from `IsConnected`.)
 
 ## 3. MQTT layer extension
 
@@ -70,7 +70,7 @@ Builds on Phase 1's tested pure units; each extension is TDD'd in the same style
 | Amp power | binary_sensor (`device_class: power`) | R | `TriggerResponse.RelayState` |
 | Scheduled off | sensor (`device_class: timestamp`) | R | `TriggerResponse.ScheduledOffTime` |
 | Manual override | switch | R/W | `TriggerResponse.IsOverridden` ← / → `SetOverride` |
-| Board connected | binary_sensor (diagnostic, `device_class: connectivity`) | R | board `IsConnected`; for virtual boards, MQTT-usable |
+| Board connected | binary_sensor (diagnostic, `device_class: connectivity`) | R | board `IsConnected` (MQTT-down is surfaced via the bridge LWT availability — see §2) |
 
 All share one device identifier and the same availability/device-block pattern as Phase 1's player entities.
 
