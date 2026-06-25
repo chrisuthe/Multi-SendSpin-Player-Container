@@ -49,3 +49,20 @@ public class MqttConfigOverrideTests
         Assert.Equal(1883, result.Port);
     }
 }
+
+public class MqttConfigHaosKeyTests
+{
+    [Fact]
+    public void HaosSnakeCaseKeys_Resolve_AndOverrideYaml()
+    {
+        var result = MultiRoomAudio.Services.MqttConfigService.ApplyOverrides(
+            new MqttSettings { Host = "yaml-host", Enabled = false },
+            new Dictionary<string, string?>(),                 // no env
+            haosBool: key => key == "mqtt_enabled" ? true : (bool?)null,
+            haosString: key => key == "mqtt_host" ? "haos-host" : null,
+            haosInt: _ => null);
+
+        Assert.True(result.Enabled);              // from mqtt_enabled
+        Assert.Equal("haos-host", result.Host);   // from mqtt_host overriding yaml
+    }
+}
