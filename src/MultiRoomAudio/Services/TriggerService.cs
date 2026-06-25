@@ -336,6 +336,8 @@ public class TriggerService : IAsyncDisposable
                 boardType = RelayBoardType.UsbHid;
             else if (boardId.StartsWith("MODBUS:", StringComparison.OrdinalIgnoreCase))
                 boardType = RelayBoardType.Modbus;
+            else if (boardId.StartsWith("VIRTUAL:", StringComparison.OrdinalIgnoreCase))
+                boardType = RelayBoardType.Virtual;
             else
                 boardType = RelayBoardType.Ftdi;
         }
@@ -816,6 +818,8 @@ public class TriggerService : IAsyncDisposable
                     boardType = RelayBoardType.UsbHid;
                 else if (boardId.StartsWith("MODBUS:", StringComparison.OrdinalIgnoreCase))
                     boardType = RelayBoardType.Modbus;
+                else if (boardId.StartsWith("VIRTUAL:", StringComparison.OrdinalIgnoreCase))
+                    boardType = RelayBoardType.Virtual;
                 else
                     boardType = RelayBoardType.Ftdi;
             }
@@ -903,6 +907,10 @@ public class TriggerService : IAsyncDisposable
                     _logger.LogWarning("Board '{BoardId}' is FTDI type but factory didn't create FtdiRelayBoard", boardId);
                     connected = board.Open();
                 }
+            }
+            else if (boardId.StartsWith("VIRTUAL:", StringComparison.OrdinalIgnoreCase))
+            {
+                connected = board.Open();
             }
             else
             {

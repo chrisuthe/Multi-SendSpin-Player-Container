@@ -27,6 +27,7 @@ public class RealRelayBoardFactory : IRelayBoardFactory
             RelayBoardType.Ftdi => new FtdiRelayBoard(_loggerFactory.CreateLogger<FtdiRelayBoard>()),
             RelayBoardType.Modbus => CreateModbusBoard(boardId),
             RelayBoardType.Lcus => CreateLcusBoard(boardId),
+            RelayBoardType.Virtual => new VirtualRelayBoard(_loggerFactory.CreateLogger<VirtualRelayBoard>(), boardId),
             _ => throw new ArgumentException($"Unsupported board type: {boardType}", nameof(boardType))
         };
     }
@@ -64,6 +65,7 @@ public class RealRelayBoardFactory : IRelayBoardFactory
             RelayBoardType.Ftdi => FtdiRelayBoard.IsLibraryAvailable(),
             RelayBoardType.Modbus => true, // Serial ports are always available via System.IO.Ports
             RelayBoardType.Lcus => true, // Serial ports are always available via System.IO.Ports
+            RelayBoardType.Virtual => true, // software board, always available
             RelayBoardType.Mock => false, // Real factory doesn't create mock boards
             _ => false
         };
