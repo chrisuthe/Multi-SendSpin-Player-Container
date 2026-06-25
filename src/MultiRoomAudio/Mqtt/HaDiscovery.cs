@@ -21,6 +21,9 @@ public class HaDiscovery
 
     public record DiscoveryMessage(string Topic, string Payload);
 
+    /// <summary>
+    /// Returns HA MQTT discovery config messages for all entities belonging to a single audio player device.
+    /// </summary>
     public IReadOnlyList<DiscoveryMessage> ForPlayer(PlayerResponse p)
     {
         var id = MqttTopics.Sanitize(p.ClientId);
@@ -79,6 +82,9 @@ public class HaDiscovery
         };
     }
 
+    /// <summary>
+    /// Returns HA MQTT discovery config messages for all entities belonging to the container-level bridge device.
+    /// </summary>
     public IReadOnlyList<DiscoveryMessage> ForContainer(string instanceId)
     {
         var id = MqttTopics.Sanitize(instanceId);
@@ -92,26 +98,26 @@ public class HaDiscovery
 
         return new List<DiscoveryMessage>
         {
-            Entity("binary_sensor", "ready", "ready", w =>
+            Entity("binary_sensor", "ready", "Multi-Room Audio Ready", w =>
             {
                 w.WriteString("value_template", "{{ value_json.ready }}");
                 w.WriteString("payload_on", "ON");
                 w.WriteString("payload_off", "OFF");
                 w.WriteString("device_class", "running");
             }),
-            Entity("sensor", "version", "version", w =>
+            Entity("sensor", "version", "Multi-Room Audio Version", w =>
             {
                 w.WriteString("value_template", "{{ value_json.version }}");
                 w.WriteString("entity_category", "diagnostic");
             }),
-            Entity("sensor", "player_count", "player_count", w =>
+            Entity("sensor", "player_count", "Multi-Room Audio Players", w =>
                 w.WriteString("value_template", "{{ value_json.player_count }}")),
-            Entity("sensor", "audio_backend", "audio_backend", w =>
+            Entity("sensor", "audio_backend", "Multi-Room Audio Backend", w =>
             {
                 w.WriteString("value_template", "{{ value_json.audio_backend }}");
                 w.WriteString("entity_category", "diagnostic");
             }),
-            Entity("sensor", "environment", "environment", w =>
+            Entity("sensor", "environment", "Multi-Room Audio Environment", w =>
             {
                 w.WriteString("value_template", "{{ value_json.environment }}");
                 w.WriteString("entity_category", "diagnostic");

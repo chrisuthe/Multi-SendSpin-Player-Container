@@ -56,6 +56,11 @@ public class HaDiscoveryTests
     public void Container_EmitsReadyBinarySensor()
     {
         var msgs = _d.ForContainer("instance1");
-        Assert.Contains(msgs, m => m.Topic.Contains("/binary_sensor/") && m.Payload.Contains("\"ready\""));
+        Assert.Contains(msgs, m =>
+        {
+            if (!m.Topic.Contains("/binary_sensor/")) return false;
+            using var doc = System.Text.Json.JsonDocument.Parse(m.Payload);
+            return doc.RootElement.GetProperty("value_template").GetString()!.Contains("value_json.ready");
+        });
     }
 }
