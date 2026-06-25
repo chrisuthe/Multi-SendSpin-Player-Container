@@ -80,6 +80,9 @@ public class StartupOrchestrator : BackgroundService
             // Phase 7: Connect MQTT bridge (publishes to Home Assistant). Non-blocking.
             await RunPhaseAsync("mqtt", () => _mqtt.InitializeAsync(stoppingToken), stoppingToken);
 
+            // All phases finished — republish container state so the HA "Ready" sensor reflects completion.
+            await _mqtt.PublishStartupCompleteAsync(stoppingToken);
+
             _logger.LogInformation("StartupOrchestrator: all phases complete");
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

@@ -235,6 +235,24 @@ public class MqttService
         }
     }
 
+    /// <summary>
+    /// Republishes container/bridge state after all startup phases finish, so the
+    /// Home Assistant "Ready" sensor reflects completion even on an idle system.
+    /// Safe to call when MQTT is disabled or not connected (no-op). Never throws.
+    /// </summary>
+    public async Task PublishStartupCompleteAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!IsConnected) return;
+            await PublishAllStateAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish MQTT state after startup completion");
+        }
+    }
+
     /// <summary>Publishes an offline availability message, disconnects from the broker, and disposes resources.</summary>
     public async Task ShutdownAsync(CancellationToken ct)
     {

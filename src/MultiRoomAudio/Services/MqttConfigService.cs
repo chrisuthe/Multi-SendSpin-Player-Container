@@ -12,6 +12,7 @@ public class MqttConfigService : YamlFileService<MqttSettings>
     private readonly EnvironmentService _env;
     private MqttSettings _current = new();
 
+    /// <summary>Initializes the service with the environment-resolved config path and logger.</summary>
     public MqttConfigService(EnvironmentService env, ILogger<MqttConfigService> logger)
         : base(env.MqttConfigPath, logger)
     {
