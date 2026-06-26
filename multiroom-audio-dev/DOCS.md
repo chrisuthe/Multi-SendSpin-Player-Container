@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-3cd5822
+## Development Build: sha-c733631
 
 **Current Dev Build Changes** (recent)
 
+- feat: allow a relay trigger to reference multiple sinks (#250) (#255)
 - feat: improve MQTT discovery for HA automations (#249) (#254)
 - fix: stop reporting benign startup sample discard as a buffer overflow (#233) (#253)
 - Merge pull request #248 from chrisuthe/fix/combine-sink-resume
@@ -14,7 +15,6 @@
 - fix: use a unique MQTT client ID to stop broker takeover loop
 - Merge pull request #237 from chrisuthe/fix/mqtt-dev-addon-options
 - fix: expose MQTT options in dev add-on config
-- Merge pull request #236 from chrisuthe/feat/mqtt-ha-bridge-phase2
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
