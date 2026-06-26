@@ -353,6 +353,17 @@ function escapeJsString(str) {
     return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+// Escape for a double-quoted HTML attribute value (encodes & < > and ").
+function escapeAttr(value) {
+    return escapeHtml(String(value)).replace(/"/g, '&quot;');
+}
+
+// Escape a value to sit inside a single-quoted JS string literal that is itself
+// inside a double-quoted HTML attribute (e.g. onclick="fn('...')").
+function escapeJsAttr(value) {
+    return escapeAttr(escapeJsString(String(value)));
+}
+
 // Extract simplified USB port identifier from full device path
 // e.g., "...AppleUSB20HubPort@02341200..." -> "Port 4.1.2"
 function extractUsbPort(usbPath) {
@@ -5549,16 +5560,16 @@ function renderSinkChips(boardId, channel, names, allSinks, disabled) {
         const remove = disabled ? '' :
             `<button type="button" class="btn-close btn-close-white ms-1" style="font-size:.5rem"
                      aria-label="Remove" title="Remove zone"
-                     onclick="removeTriggerSink(${escapeHtml(JSON.stringify(boardId))}, ${channel}, ${escapeHtml(JSON.stringify(name))})"></button>`;
+                     onclick="removeTriggerSink('${escapeJsAttr(boardId)}', ${channel}, '${escapeJsAttr(name)}')"></button>`;
         return `<span class="badge bg-primary d-inline-flex align-items-center me-1 mb-1">${escapeHtml(label)}${remove}</span>`;
     }).join('');
 
     const remaining = (allSinks || []).filter(s => !safeNames.includes(s.name));
     const addControl = (disabled || remaining.length === 0) ? '' : `
         <select class="form-select form-select-sm mt-1"
-                onchange="addTriggerSink(${escapeHtml(JSON.stringify(boardId))}, ${channel}, this.value); this.value='';">
+                onchange="addTriggerSink('${escapeJsAttr(boardId)}', ${channel}, this.value); this.value='';">
             <option value="">+ Add zone…</option>
-            ${remaining.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.description || s.name)}</option>`).join('')}
+            ${remaining.map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(s.description || s.name)}</option>`).join('')}
         </select>`;
 
     const empty = safeNames.length === 0 ? '<span class="text-muted small">Not assigned</span>' : '';
