@@ -75,15 +75,19 @@ const Wizard = {
     customSinks: [],
     playersToCreate: [],
     modal: null,
+    triggerBoards: [],     // boards fetched from /api/triggers
+    triggersEnabled: false,
 
     // Step definitions
     // Note: 'cards' step is conditionally shown only if there are cards with multiple profiles
+    // Note: 'triggers' step is conditionally shown only if relay boards exist
     STEPS: [
         { id: 'welcome', title: 'Welcome' },
         { id: 'cards', title: 'Devices' },
         { id: 'identify', title: 'Identify' },
         { id: 'sinks', title: 'Sinks' },
         { id: 'players', title: 'Players' },
+        { id: 'triggers', title: 'Amp Triggers' },
         { id: 'complete', title: 'Done' }
     ],
 
@@ -166,6 +170,9 @@ const Wizard = {
 
     // Hide the wizard
     hide() {
+        // Restore main-app chip handlers (defined in app.js).
+        if (typeof appAddTriggerSink === 'function') window.addTriggerSink = appAddTriggerSink;
+        if (typeof appRemoveTriggerSink === 'function') window.removeTriggerSink = appRemoveTriggerSink;
         this.modal.hide();
     },
 
@@ -235,10 +242,12 @@ const Wizard = {
     renderProgress() {
         const container = document.getElementById('wizardProgress');
         const showCards = this.hasMultiProfileCards();
+        const showTriggers = this.triggerBoards.length > 0;
 
-        // Filter steps - hide cards step if no multi-profile cards
+        // Filter steps - hide cards step if no multi-profile cards; hide triggers step if no boards
         const visibleSteps = this.STEPS.filter(step =>
-            step.id !== 'cards' || showCards
+            (step.id !== 'cards' || showCards) &&
+            (step.id !== 'triggers' || showTriggers)
         );
 
         container.innerHTML = visibleSteps.map((step, displayIndex) => {
@@ -311,6 +320,17 @@ const Wizard = {
                 break;
             case 'players':
                 content.innerHTML = this.renderPlayers();
+                break;
+            case 'triggers':
+                await this.loadTriggerBoards();
+                if (this.triggerBoards.length === 0) {
+                    // No relay boards configured — skip this step entirely.
+                    this.currentStep++;
+                    this.renderProgress();
+                    await this.renderStep();
+                    return;
+                }
+                content.innerHTML = this.renderTriggers();
                 break;
             case 'complete':
                 content.innerHTML = this.renderComplete();
@@ -1536,6 +1556,100 @@ const Wizard = {
                 autostart: true
             });
         });
+    },
+
+    // Load configured relay boards for the triggers step.
+    async loadTriggerBoards() {
+        try {
+            const response = await fetch('./api/triggers');
+            if (!response.ok) { this.triggerBoards = []; return; }
+            const data = await response.json();
+            this.triggerBoards = data.boards || [];
+            this.triggersEnabled = !!data.enabled;
+        } catch (error) {
+            console.error('Failed to load trigger boards:', error);
+            this.triggerBoards = [];
+        }
+    },
+
+    // Step: assign zones/sinks to relay channels using the shared chip picker.
+    renderTriggers() {
+        // Route chip-picker callbacks to wizard-scoped handlers for this step.
+        window.addTriggerSink = (b, c, s) => this.wizardAddTriggerSink(b, c, s);
+        window.removeTriggerSink = (b, c, s) => this.wizardRemoveTriggerSink(b, c, s);
+
+        const sinkList = this.customSinks.map(s => ({ name: s.name, description: s.description || s.name }));
+        const boardsHtml = this.triggerBoards.map(board => {
+            const rows = (board.triggers || []).map(t => `
+                <tr>
+                    <td><span class="badge bg-primary">CH ${t.channel}</span></td>
+                    <td>
+                        <div id="wizard-trigger-sink-${board.boardId.replace(/[^a-zA-Z0-9]/g, '_')}-${t.channel}">
+                            ${renderSinkChips(board.boardId, t.channel, t.customSinkNames, sinkList, false)}
+                        </div>
+                    </td>
+                </tr>`).join('');
+            return `
+                <h6 class="mt-3">${escapeHtml(board.displayName || board.boardId)}</h6>
+                <table class="table table-sm align-middle">
+                    <thead><tr><th style="width:6rem">Channel</th><th>Zones</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
+        }).join('');
+
+        return `
+            <div class="py-2">
+                <h4>Amplifier Triggers</h4>
+                <p class="text-muted">Assign one or more zones to each relay channel. The relay
+                   switches on when any assigned zone plays and off when all of them stop —
+                   ideal for powering a multi-zone amplifier from a single trigger.</p>
+                ${boardsHtml}
+            </div>`;
+    },
+
+    wizardGetTrigger(boardId, channel) {
+        const board = this.triggerBoards.find(b => b.boardId === boardId);
+        return board?.triggers?.find(t => t.channel === channel);
+    },
+
+    async wizardAddTriggerSink(boardId, channel, sinkName) {
+        if (!sinkName) return;
+        const t = this.wizardGetTrigger(boardId, channel);
+        if (!t) return;
+        t.customSinkNames = t.customSinkNames || [];
+        if (!t.customSinkNames.includes(sinkName)) t.customSinkNames.push(sinkName);
+        await this.wizardSaveTriggerSinks(boardId, channel);
+    },
+
+    async wizardRemoveTriggerSink(boardId, channel, sinkName) {
+        const t = this.wizardGetTrigger(boardId, channel);
+        if (!t) return;
+        t.customSinkNames = (t.customSinkNames || []).filter(n => n !== sinkName);
+        await this.wizardSaveTriggerSinks(boardId, channel);
+    },
+
+    async wizardSaveTriggerSinks(boardId, channel) {
+        const t = this.wizardGetTrigger(boardId, channel);
+        const names = t ? (t.customSinkNames || []) : [];
+        // Ensure the feature is enabled before the first assignment.
+        if (!this.triggersEnabled) {
+            await fetch('./api/triggers/enabled', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: true })
+            });
+            this.triggersEnabled = true;
+        }
+        const url = boardId.includes('/')
+            ? `./api/triggers/boards/channel?boardId=${encodeURIComponent(boardId)}&channel=${channel}`
+            : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`;
+        await fetch(url, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: 60 })
+        });
+        const safe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
+        const container = document.getElementById(`wizard-trigger-sink-${safe}-${channel}`);
+        const sinkList = this.customSinks.map(s => ({ name: s.name, description: s.description || s.name }));
+        if (container) container.innerHTML = renderSinkChips(boardId, channel, names, sinkList, false);
     },
 
     // Complete the wizard

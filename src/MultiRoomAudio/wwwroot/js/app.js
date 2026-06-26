@@ -5581,6 +5581,10 @@ async function removeTriggerSink(boardId, channel, sinkName) {
     await saveTriggerSinks(boardId, channel);
 }
 
+// Preserve references so the onboarding wizard can restore these after overriding.
+const appAddTriggerSink = addTriggerSink;
+const appRemoveTriggerSink = removeTriggerSink;
+
 // Persist the channel's full sink list (+ current delay) and re-render its chips.
 async function saveTriggerSinks(boardId, channel) {
     const boardIdSafe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
