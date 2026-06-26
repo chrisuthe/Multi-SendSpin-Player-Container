@@ -1,28 +1,29 @@
 # Multi-Room Audio Controller
 
 <!-- VERSION_INFO_START -->
-## Latest Release: 5.1.0
+## Latest Release: 5.2.0
 
 
 
 ### Highlights
-- **SendSpin SDK 7.3.0** — NativeAOT support, static delay reporting, reconnect resilience, FLAC 32-bit fix, buffer overrun sync fix, simplified sync deadband, mDNS input sanitization
-- **Configurable Audio Buffer** — Global setting (5-30 seconds) with System Settings UI showing per-player memory estimates
-- **Hybrid Reconnection** — Lightweight reconnect for ≤60s disconnections keeps audio playing from buffer while WebSocket reconnects
-- **Wizard Mono Output** — Remap sink creation now supports mono/stereo toggle
+- **Home Assistant MQTT Bridge** — Players and amp zones auto-register in Home Assistant via MQTT discovery, with live state publishing, command handling, and container availability via Last Will & Testament. Enable and configure through the new MQTT add-on options or environment variables.
+- **Virtual Relay Boards & Sticky Amp Overrides** — Create virtual relay boards and manually override amp power (sticky on/off) from the Triggers UI or via Home Assistant, independent of player activity.
+- **SendSpin SDK 9.1.0** — Upgraded from 7.3.0 with improved multi-room sync
+- **Custom Sink Volume Control** — Volume control for combined/remapped custom sinks
 
 ### Added
-- `BUFFER_SECONDS` environment variable / HAOS option (5-30s, step 5, default 30s)
-- `GET/PUT /api/settings/buffer` endpoint with memory usage estimates per sample rate
-- System Settings modal with buffer size slider and per-player memory table
-- Settings persistence via `settings.yaml` through ConfigurationService
-- Server-pushed sync offset calibration via SyncOffsetApplied event
-- ArtworkCleared event to clear stale album art when server signals no artwork
-- Static delay (staticDelayMs) reported in all SendPlayerStateAsync calls for GroupSync
-- Lightweight reconnect with exponential backoff (1s, 2s, 4s... capped at 15s)
-- Full teardown fallback after 60s lightweight reconnect window expires
-- DisconnectedAt tracking for reconnect window management
-- `.gitattributes` rules for `.conf` and `.pa` files to enforce LF line endings
+- Home Assistant MQTT discovery config builders for players and amp zones, state payload publishers, and command parsing/handling
+- MQTT settings model, config service with env/HAOS override precedence, and `GET/PUT` MQTT settings API endpoint
+- MQTT options in both the stable and dev HAOS add-on config (`mqtt_enabled`, `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password`, `mqtt_tls`)
+- Container availability signal published over MQTT (online/offline via LWT)
+- Virtual relay board type with factory/connect wiring
+- Sticky amp override: trigger override endpoint, `TriggerResponse.IsOverridden`, and `TriggersChanged` event
+- Virtual board and amp override controls in the Triggers UI
+- Custom sink volume control (#220)
+- `PlayersChanged` event raised alongside SignalR broadcasts to keep MQTT state in sync
+- Timer/player sync test project wired into CI
+
+### Fixed
 
 [View full changelog](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/CHANGELOG.md)
 <!-- VERSION_INFO_END -->
