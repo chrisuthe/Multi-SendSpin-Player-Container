@@ -126,10 +126,28 @@ public class TriggerConfiguration
     public int Channel { get; set; }
 
     /// <summary>
-    /// Name of the custom sink that triggers this relay.
-    /// Null or empty means this trigger is not assigned.
+    /// Names of the custom sinks that trigger this relay.
+    /// Empty means this trigger is not assigned. The relay turns on when any
+    /// listed sink starts and off (after the delay) when all have stopped.
     /// </summary>
-    public string? CustomSinkName { get; set; }
+    public List<string> CustomSinkNames { get; set; } = new();
+
+    /// <summary>
+    /// Legacy single-sink property. Retained ONLY so old triggers.yaml
+    /// (custom_sink_name) migrates into <see cref="CustomSinkNames"/> on load.
+    /// The null getter combined with the serializer's OmitNull handling means it
+    /// is never written back to disk.
+    /// </summary>
+    [Obsolete("Use CustomSinkNames. Retained for config migration.")]
+    public string? CustomSinkName
+    {
+        get => null;
+        set
+        {
+            if (!string.IsNullOrEmpty(value) && !CustomSinkNames.Contains(value))
+                CustomSinkNames.Add(value);
+        }
+    }
 
     /// <summary>
     /// Delay in seconds before turning off the relay after playback stops.
@@ -289,8 +307,8 @@ public class TriggerFeatureConfiguration
 /// </summary>
 public record TriggerResponse(
     int Channel,
-    string? CustomSinkName,
-    string? CustomSinkDisplayName,
+    List<string> CustomSinkNames,
+    List<string> CustomSinkDisplayNames,
     int OffDelaySeconds,
     string? ZoneName,
     RelayState RelayState,
@@ -412,10 +430,25 @@ public class TriggerConfigureRequest
     public int Channel { get; set; }
 
     /// <summary>
-    /// Custom sink name to assign to this trigger.
-    /// Set to null or empty to unassign.
+    /// Custom sink names to assign to this trigger. Empty list unassigns.
+    /// </summary>
+    public List<string> CustomSinkNames { get; set; } = new();
+
+    /// <summary>
+    /// Legacy single-sink field. If <see cref="CustomSinkNames"/> is empty and this
+    /// is set, it is folded into the list (back-compat for older API callers).
     /// </summary>
     public string? CustomSinkName { get; set; }
+
+    /// <summary>
+    /// Resolve the effective sink list, folding in the legacy singular field.
+    /// </summary>
+    public List<string> ResolveSinkNames()
+    {
+        if (CustomSinkNames.Count == 0 && !string.IsNullOrEmpty(CustomSinkName))
+            return new List<string> { CustomSinkName };
+        return CustomSinkNames;
+    }
 
     /// <summary>
     /// Off delay in seconds (0-3600).

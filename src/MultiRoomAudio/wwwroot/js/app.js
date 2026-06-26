@@ -353,6 +353,17 @@ function escapeJsString(str) {
     return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+// Escape for a double-quoted HTML attribute value (encodes & < > and ").
+function escapeAttr(value) {
+    return escapeHtml(String(value)).replace(/"/g, '&quot;');
+}
+
+// Escape a value to sit inside a single-quoted JS string literal that is itself
+// inside a double-quoted HTML attribute (e.g. onclick="fn('...')").
+function escapeJsAttr(value) {
+    return escapeAttr(escapeJsString(String(value)));
+}
+
 // Extract simplified USB port identifier from full device path
 // e.g., "...AppleUSB20HubPort@02341200..." -> "Port 4.1.2"
 function extractUsbPort(usbPath) {
@@ -4650,6 +4661,7 @@ let triggersModal = null;
 let addBoardModal = null;
 let triggersData = null;
 let customSinksList = [];
+let triggerSinksList = [];
 let ftdiDevicesData = null;
 let triggersRefreshInterval = null;
 let triggersOperationCount = 0; // Counter to prevent refresh interval from clobbering state during overlapping operations
@@ -4863,10 +4875,8 @@ function renderTriggers() {
         errorDiv.classList.add('d-none');
     }
 
-    // Build sink options HTML
-    const sinkOptions = customSinksList.map(sink =>
-        `<option value="${escapeHtml(sink.name)}">${escapeHtml(sink.description || sink.name)}</option>`
-    ).join('');
+    // Expose the current sink list to chip-picker handlers (and the wizard).
+    triggerSinksList = customSinksList;
 
     // Build accordion for each board
     if (triggersData.boards.length === 0) {
@@ -4916,13 +4926,10 @@ function renderTriggers() {
                         ${activeStatus}
                     </td>
                     <td>
-                        <select class="form-select form-select-sm"
-                                id="trigger-sink-${boardIdSafe}-${trigger.channel}"
-                                onchange="updateTriggerSink('${boardId}', ${trigger.channel}, this.value)"
-                                ${controlsDisabled ? 'disabled' : ''}>
-                            <option value="">Not assigned</option>
-                            ${sinkOptions}
-                        </select>
+                        <div id="trigger-sink-${boardIdSafe}-${trigger.channel}"
+                             class="trigger-sink-picker">
+                            ${renderSinkChips(boardId, trigger.channel, trigger.customSinkNames, customSinksList, controlsDisabled)}
+                        </div>
                     </td>
                     <td>
                         <div class="input-group input-group-sm">
@@ -5058,17 +5065,6 @@ function renderTriggers() {
     }).join('');
 
     container.innerHTML = accordionHtml;
-
-    // Set selected values for sink dropdowns
-    triggersData.boards.forEach(board => {
-        const boardIdSafe = board.boardId.replace(/[^a-zA-Z0-9]/g, '_');
-        board.triggers.forEach(trigger => {
-            const select = document.getElementById(`trigger-sink-${boardIdSafe}-${trigger.channel}`);
-            if (select && trigger.customSinkName) {
-                select.value = trigger.customSinkName;
-            }
-        });
-    });
 
     // Restore scroll position after DOM update
     if (modalBody && scrollTop > 0) {
@@ -5549,33 +5545,83 @@ async function reconnectBoard(boardId) {
     }
 }
 
-// Update trigger sink assignment (multi-board)
-async function updateTriggerSink(boardId, channel, sinkName) {
+// Look up the in-memory trigger object for a board/channel.
+function getTrigger(boardId, channel) {
+    const board = triggersData?.boards?.find(b => b.boardId === boardId);
+    return board?.triggers?.find(t => t.channel === channel);
+}
+
+// Render the selected-sink chips plus an "add" dropdown for a channel.
+function renderSinkChips(boardId, channel, names, allSinks, disabled) {
+    const safeNames = names || [];
+    const chips = safeNames.map(name => {
+        const sink = (allSinks || []).find(s => s.name === name);
+        const label = sink ? (sink.description || sink.name) : name;
+        const remove = disabled ? '' :
+            `<button type="button" class="btn-close btn-close-white ms-1" style="font-size:.5rem"
+                     aria-label="Remove" title="Remove zone"
+                     onclick="removeTriggerSink('${escapeJsAttr(boardId)}', ${channel}, '${escapeJsAttr(name)}')"></button>`;
+        return `<span class="badge bg-primary d-inline-flex align-items-center me-1 mb-1">${escapeHtml(label)}${remove}</span>`;
+    }).join('');
+
+    const remaining = (allSinks || []).filter(s => !safeNames.includes(s.name));
+    const addControl = (disabled || remaining.length === 0) ? '' : `
+        <select class="form-select form-select-sm mt-1"
+                onchange="addTriggerSink('${escapeJsAttr(boardId)}', ${channel}, this.value); this.value='';">
+            <option value="">+ Add zone…</option>
+            ${remaining.map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(s.description || s.name)}</option>`).join('')}
+        </select>`;
+
+    const empty = safeNames.length === 0 ? '<span class="text-muted small">Not assigned</span>' : '';
+    return `<div class="d-flex flex-wrap align-items-center">${chips}${empty}</div>${addControl}`;
+}
+
+async function addTriggerSink(boardId, channel, sinkName) {
+    if (!sinkName) return;
+    const t = getTrigger(boardId, channel);
+    if (!t) return;
+    t.customSinkNames = t.customSinkNames || [];
+    if (!t.customSinkNames.includes(sinkName)) t.customSinkNames.push(sinkName);
+    await saveTriggerSinks(boardId, channel);
+}
+
+async function removeTriggerSink(boardId, channel, sinkName) {
+    const t = getTrigger(boardId, channel);
+    if (!t) return;
+    t.customSinkNames = (t.customSinkNames || []).filter(n => n !== sinkName);
+    await saveTriggerSinks(boardId, channel);
+}
+
+// Preserve references so the onboarding wizard can restore these after overriding.
+const appAddTriggerSink = addTriggerSink;
+const appRemoveTriggerSink = removeTriggerSink;
+
+// Persist the channel's full sink list (+ current delay) and re-render its chips.
+async function saveTriggerSinks(boardId, channel) {
     const boardIdSafe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
+    const t = getTrigger(boardId, channel);
+    const names = t ? (t.customSinkNames || []) : [];
     const delayInput = document.getElementById(`trigger-delay-${boardIdSafe}-${channel}`);
     const delay = delayInput ? parseInt(delayInput.value, 10) : 60;
 
     try {
-        // Use query params for board IDs that contain slashes (e.g., LCUS:/dev/ttyUSB0)
         const url = boardId.includes('/')
             ? `./api/triggers/boards/channel?boardId=${encodeURIComponent(boardId)}&channel=${channel}`
             : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`;
         const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                channel,
-                customSinkName: sinkName || null,
-                offDelaySeconds: delay
-            })
+            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: delay })
         });
-
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.message || 'Failed to update trigger');
         }
-
-        showAlert(`Trigger updated`, 'success', 2000);
+        const container = document.getElementById(`trigger-sink-${boardIdSafe}-${channel}`);
+        if (container) {
+            container.innerHTML = renderSinkChips(boardId, channel, names, triggerSinksList, false);
+        }
+        showAlert('Trigger updated', 'success', 2000);
     } catch (error) {
         console.error('Error updating trigger:', error);
         showAlert(`Failed to update trigger: ${error.message}`, 'danger');
@@ -5584,23 +5630,17 @@ async function updateTriggerSink(boardId, channel, sinkName) {
 
 // Update trigger off delay (multi-board)
 async function updateTriggerDelay(boardId, channel, delay) {
-    const boardIdSafe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
-    const sinkSelect = document.getElementById(`trigger-sink-${boardIdSafe}-${channel}`);
-    const sinkName = sinkSelect ? sinkSelect.value : null;
+    const t = getTrigger(boardId, channel);
+    const names = t ? (t.customSinkNames || []) : [];
 
     try {
-        // Use query params for board IDs that contain slashes (e.g., LCUS:/dev/ttyUSB0)
         const url = boardId.includes('/')
             ? `./api/triggers/boards/channel?boardId=${encodeURIComponent(boardId)}&channel=${channel}`
             : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`;
         const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                channel,
-                customSinkName: sinkName || null,
-                offDelaySeconds: parseInt(delay, 10)
-            })
+            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: parseInt(delay, 10) })
         });
 
         if (!response.ok) {
@@ -5608,7 +5648,7 @@ async function updateTriggerDelay(boardId, channel, delay) {
             throw new Error(error.message || 'Failed to update trigger');
         }
 
-        showAlert(`Delay updated`, 'success', 2000);
+        showAlert('Delay updated', 'success', 2000);
     } catch (error) {
         console.error('Error updating trigger delay:', error);
         showAlert(`Failed to update trigger: ${error.message}`, 'danger');
@@ -5628,11 +5668,11 @@ function updateChannelState(boardId, channel, isOn) {
         }
     }
 
-    // Find the row for this channel by looking for the sink select element
-    const sinkSelect = document.getElementById(`trigger-sink-${boardIdSafe}-${channel}`);
-    if (!sinkSelect) return;
+    // Find the row for this channel by looking for the sink cell element
+    const sinkCell = document.getElementById(`trigger-sink-${boardIdSafe}-${channel}`);
+    if (!sinkCell) return;
 
-    const row = sinkSelect.closest('tr');
+    const row = sinkCell.closest('tr');
     if (!row) return;
 
     // Update the badge in the first cell
