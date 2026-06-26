@@ -10,6 +10,10 @@ namespace MultiRoomAudio.Mqtt;
 /// </summary>
 public class HaDiscovery
 {
+    /// <summary>Possible values of the player State sensor, derived from <see cref="PlayerState"/> to stay in sync with the published payload.</summary>
+    private static readonly string[] PlayerStateOptions =
+        Enum.GetNames<PlayerState>().Select(n => n.ToLowerInvariant()).ToArray();
+
     private readonly MqttTopics _topics;
     private readonly string _version;
 
@@ -38,7 +42,14 @@ public class HaDiscovery
         return new List<DiscoveryMessage>
         {
             Entity("sensor", "state", $"{p.Name} State", w =>
-                w.WriteString("value_template", "{{ value_json.state }}")),
+            {
+                w.WriteString("value_template", "{{ value_json.state }}");
+                w.WriteString("device_class", "enum");
+                w.WritePropertyName("options");
+                w.WriteStartArray();
+                foreach (var s in PlayerStateOptions) w.WriteStringValue(s);
+                w.WriteEndArray();
+            }),
             Entity("sensor", "server", $"{p.Name} Server", w =>
             {
                 w.WriteString("value_template", "{{ value_json.server_name }}");
@@ -109,6 +120,7 @@ public class HaDiscovery
             {
                 w.WriteString("value_template", "{{ value_json.version }}");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteBoolean("enabled_by_default", false);
             }),
             Entity("sensor", "player_count", "Multi-Room Audio Players", w =>
                 w.WriteString("value_template", "{{ value_json.player_count }}")),
@@ -116,11 +128,13 @@ public class HaDiscovery
             {
                 w.WriteString("value_template", "{{ value_json.audio_backend }}");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteBoolean("enabled_by_default", false);
             }),
             Entity("sensor", "environment", "Multi-Room Audio Environment", w =>
             {
                 w.WriteString("value_template", "{{ value_json.environment }}");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteBoolean("enabled_by_default", false);
             }),
         };
     }
