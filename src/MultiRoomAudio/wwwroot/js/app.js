@@ -5549,14 +5549,14 @@ function renderSinkChips(boardId, channel, names, allSinks, disabled) {
         const remove = disabled ? '' :
             `<button type="button" class="btn-close btn-close-white ms-1" style="font-size:.5rem"
                      aria-label="Remove" title="Remove zone"
-                     onclick="removeTriggerSink('${escapeHtml(boardId)}', ${channel}, '${escapeHtml(name)}')"></button>`;
+                     onclick="removeTriggerSink(${escapeHtml(JSON.stringify(boardId))}, ${channel}, ${escapeHtml(JSON.stringify(name))})"></button>`;
         return `<span class="badge bg-primary d-inline-flex align-items-center me-1 mb-1">${escapeHtml(label)}${remove}</span>`;
     }).join('');
 
     const remaining = (allSinks || []).filter(s => !safeNames.includes(s.name));
     const addControl = (disabled || remaining.length === 0) ? '' : `
         <select class="form-select form-select-sm mt-1"
-                onchange="addTriggerSink('${escapeHtml(boardId)}', ${channel}, this.value); this.value='';">
+                onchange="addTriggerSink(${escapeHtml(JSON.stringify(boardId))}, ${channel}, this.value); this.value='';">
             <option value="">+ Add zone…</option>
             ${remaining.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.description || s.name)}</option>`).join('')}
         </select>`;
