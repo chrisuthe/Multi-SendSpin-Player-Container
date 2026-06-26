@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using MultiRoomAudio.Models;
@@ -11,7 +12,8 @@ public class AmpDiscoveryTests
     private readonly HaDiscovery _d = new(new MqttTopics("multiroom-audio", "homeassistant"), "1.2.3");
 
     private static TriggerResponse Zone() => new(
-        Channel: 1, CustomSinkName: "sink", CustomSinkDisplayName: "Sink",
+        Channel: 1, CustomSinkNames: new List<string> { "sink" },
+        CustomSinkDisplayNames: new List<string> { "Sink" },
         OffDelaySeconds: 30, ZoneName: "Living Room", RelayState: RelayState.On,
         IsActive: true, LastActivated: null, ScheduledOffTime: null, IsOverridden: false);
 
