@@ -1,5 +1,11 @@
 # Changelog
 
+## [5.2.1] - Combine Sink Startup Fix
+
+### Fixed
+- Combine sinks built from custom remap sinks now reload correctly after an add-on restart. Startup loading is ordered by actual sink dependencies (topological sort) instead of a fixed combine-then-remap order, so a combine sink no longer initializes before the remap sinks it depends on (#247)
+- Stopped sink migration from treating references to other custom sinks as missing hardware, removing a misleading "slave sink not found" warning on startup
+
 ## [5.2.0] - Home Assistant MQTT Bridge & Amp Override Controls
 
 ### Highlights
