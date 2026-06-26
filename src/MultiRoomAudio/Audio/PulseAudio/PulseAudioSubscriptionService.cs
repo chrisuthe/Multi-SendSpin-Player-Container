@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using static MultiRoomAudio.Audio.PulseAudio.PulseAudioNative;
 
 namespace MultiRoomAudio.Audio.PulseAudio;

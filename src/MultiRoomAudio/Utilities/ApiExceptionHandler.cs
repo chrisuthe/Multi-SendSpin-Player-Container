@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Models;
 

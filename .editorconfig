@@ -335,7 +335,9 @@ dotnet_diagnostic.IDE0001.severity = suggestion
 dotnet_diagnostic.IDE0002.severity = suggestion
 dotnet_diagnostic.IDE0003.severity = suggestion
 dotnet_diagnostic.IDE0004.severity = suggestion
-dotnet_diagnostic.IDE0005.severity = suggestion
+# IDE0005 (remove unnecessary usings) is enforced: the CI `dotnet format
+# --verify-no-changes` step fails when unused usings are present.
+dotnet_diagnostic.IDE0005.severity = warning
 dotnet_diagnostic.IDE0007.severity = suggestion
 dotnet_diagnostic.IDE0008.severity = suggestion
 dotnet_diagnostic.IDE0009.severity = suggestion

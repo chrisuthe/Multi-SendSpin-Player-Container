@@ -1,5 +1,4 @@
 using System.IO.Ports;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace MultiRoomAudio.Relay;
