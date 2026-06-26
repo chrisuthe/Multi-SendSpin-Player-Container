@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-d409471
+## Development Build: sha-3cd5822
 
 **Current Dev Build Changes** (recent)
 
+- feat: improve MQTT discovery for HA automations (#249) (#254)
 - fix: stop reporting benign startup sample discard as a buffer overflow (#233) (#253)
 - Merge pull request #248 from chrisuthe/fix/combine-sink-resume
 - fix: load custom sinks in dependency order so combine-of-remaps survives restart
@@ -14,7 +15,6 @@
 - Merge pull request #237 from chrisuthe/fix/mqtt-dev-addon-options
 - fix: expose MQTT options in dev add-on config
 - Merge pull request #236 from chrisuthe/feat/mqtt-ha-bridge-phase2
-- docs: reconcile virtual-board MQTT-down signal (LWT availability) in phase 2 spec
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
