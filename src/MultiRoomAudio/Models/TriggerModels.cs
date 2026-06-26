@@ -51,6 +51,8 @@ public enum RelayBoardType
     Modbus,
     /// <summary>LCUS binary relay board (1-8 channel) - uses simple binary protocol over CH340/CH341.</summary>
     Lcus,
+    /// <summary>Software-only virtual board; power state is published over MQTT for HA to mirror onto a smart outlet.</summary>
+    Virtual,
     /// <summary>Mock board for testing.</summary>
     Mock
 }
@@ -294,7 +296,8 @@ public record TriggerResponse(
     RelayState RelayState,
     bool IsActive,
     DateTime? LastActivated,
-    DateTime? ScheduledOffTime
+    DateTime? ScheduledOffTime,
+    bool IsOverridden = false
 );
 
 /// <summary>

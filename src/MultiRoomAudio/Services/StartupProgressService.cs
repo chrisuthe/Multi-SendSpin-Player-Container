@@ -31,7 +31,8 @@ public class StartupProgressService
             new("devices", "Detecting audio devices"),
             new("players", "Starting audio players"),
             new("triggers", "Initializing 12V triggers"),
-            new("hidbuttons", "Initializing HID buttons")
+            new("hidbuttons", "Initializing HID buttons"),
+            new("mqtt", "Connecting MQTT bridge")
         };
     }
 

@@ -174,6 +174,11 @@ public class EnvironmentService
     public string SettingsConfigPath => Path.Combine(_configPath, "settings.yaml");
 
     /// <summary>
+    /// Full path to mqtt.yaml configuration file (MQTT bridge settings).
+    /// </summary>
+    public string MqttConfigPath => Path.Combine(_configPath, "mqtt.yaml");
+
+    /// <summary>
     /// Path to log directory.
     /// </summary>
     public string LogPath => _logPath;

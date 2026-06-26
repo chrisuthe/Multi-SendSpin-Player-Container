@@ -43,7 +43,7 @@ public class PlayerCreateRequest
     /// <summary>
     /// Audio delay offset in milliseconds. Can be negative or positive.
     /// </summary>
-    [Range(-10000, 10000, ErrorMessage = "DelayMs must be between -10000 and 10000 milliseconds.")]
+    [Range(-5000, 5000, ErrorMessage = "DelayMs must be between -5000 and 5000 milliseconds.")]
     public int DelayMs { get; set; }
 
     /// <summary>
@@ -108,9 +108,9 @@ public record VolumeRequest(
 /// <summary>
 /// Request to update offset.
 /// </summary>
-/// <param name="DelayMs">Audio delay offset in milliseconds (-10000 to 10000).</param>
+/// <param name="DelayMs">Audio delay offset in milliseconds (-5000 to 5000).</param>
 public record OffsetRequest(
-    [property: Range(-10000, 10000, ErrorMessage = "DelayMs must be between -10000 and 10000 milliseconds.")]
+    [property: Range(-5000, 5000, ErrorMessage = "DelayMs must be between -5000 and 5000 milliseconds.")]
     int DelayMs);
 
 /// <summary>

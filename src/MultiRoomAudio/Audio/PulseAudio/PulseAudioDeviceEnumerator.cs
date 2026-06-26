@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using MultiRoomAudio.Models;
+using MultiRoomAudio.Services;
 
 namespace MultiRoomAudio.Audio.PulseAudio;
 
@@ -60,6 +61,12 @@ public static partial class PulseAudioDeviceEnumerator
             }
 
             _logger?.LogDebug("Found {Count} PulseAudio sinks", devices.Count);
+
+            // #223: identical USB devices that expose no bus path or serial collapse to the
+            // same stable device key (usb_VID_PID). That conflates their saved config and
+            // breaks playback when more than one is connected. Give colliding devices a
+            // synthetic identifier from their (unique) sink name so each gets a distinct key.
+            DisambiguateCollidingDeviceKeys(devices);
         }
         catch (Exception ex)
         {
@@ -67,6 +74,41 @@ public static partial class PulseAudioDeviceEnumerator
         }
 
         return devices;
+    }
+
+    /// <summary>
+    /// Ensures every enumerated device has a distinct stable key. Identical USB devices that
+    /// expose no bus path or serial otherwise collapse to the same usb_VID_PID key (#223),
+    /// conflating their saved configuration and breaking playback when more than one is
+    /// connected. The first device with a given key keeps it (preserving existing config);
+    /// each subsequent collision is given a synthetic bus path derived from its unique
+    /// PulseAudio sink name. For truly indistinguishable devices the synthetic key is stable
+    /// only while the sink name is, but this prevents the hard breakage of conflated devices.
+    /// </summary>
+    private static void DisambiguateCollidingDeviceKeys(List<AudioDevice> devices)
+    {
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < devices.Count; i++)
+        {
+            var key = ConfigurationService.GenerateDeviceKey(devices[i]);
+            if (seenKeys.Add(key))
+            {
+                continue;
+            }
+
+            // Collision with an earlier device. Synthesize a unique identifier from the sink
+            // name (PulseAudio guarantees sink names are unique) so this device gets its own key.
+            var device = devices[i];
+            var ids = device.Identifiers ?? new DeviceIdentifiers(null, null, null, null, null, null, null);
+            devices[i] = device with { Identifiers = ids with { BusPath = $"sink:{device.Id}" } };
+
+            var newKey = ConfigurationService.GenerateDeviceKey(devices[i]);
+            seenKeys.Add(newKey);
+            _logger?.LogWarning(
+                "Device '{Name}' (sink '{Sink}') collided on device key '{Key}' with another device " +
+                "and exposes no bus path/serial; assigned synthetic key '{NewKey}' to avoid conflated config (#223).",
+                device.Name, device.Id, key, newKey);
+        }
     }
 
     /// <summary>

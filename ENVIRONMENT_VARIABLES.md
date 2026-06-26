@@ -190,6 +190,24 @@ PA_SAMPLE_FORMAT=s16le
 
 **Note:** PulseAudio will automatically negotiate down to hardware capabilities if the requested format/rate isn't supported. These settings only affect the default target - actual output depends on DAC capabilities.
 
+### USE_AUDIO_CLOCK
+
+Use the PulseAudio DAC clock as the sync-timing source instead of the SDK's monotonic timer.
+
+- **Type:** Boolean
+- **Default:** `false`
+- **Valid Values:** `true`, `1`, `yes` (case-insensitive) to enable; anything else disables
+- **Description:** When disabled (default), playback sync is timed against the SDK's `MonotonicTimer` — a software clock that is immune to VM wall-clock jumps and tracks the buffer read pointer 1:1, which holds multi-room sync. When enabled, sync is timed against the DAC-rendered position from `pa_stream_get_time()`. The DAC clock lags the buffer read pointer by the output prefill (~70–200ms), which can push a player off the shared multi-room schedule (out of sync with other rooms). Enable this **only** for hardware whose DAC clock genuinely diverges from the system clock; for almost all setups the default gives better sync.
+
+**Examples:**
+```bash
+# Default - monotonic timer (recommended, best multi-room sync)
+USE_AUDIO_CLOCK=false
+
+# Opt in to the DAC clock (only for genuinely divergent DAC hardware)
+USE_AUDIO_CLOCK=true
+```
+
 ## HAOS-Specific Variables
 
 ### SUPERVISOR_TOKEN

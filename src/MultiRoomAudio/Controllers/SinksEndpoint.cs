@@ -128,6 +128,41 @@ public static class SinksEndpoint
         .WithName("CreateRemapSink")
         .WithDescription("Create a remap-sink to extract channels from a multi-channel device");
 
+        // PUT /api/sinks/{name}/volume - Set volume of a custom sink
+        group.MapPut("/{name}/volume", async (
+            string name,
+            SinkVolumeRequest request,
+            CustomSinksService service,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var logger = loggerFactory.CreateLogger("SinksEndpoint");
+            logger.LogDebug("API: PUT /api/sinks/{SinkName}/volume - {Volume}%", name, request.Volume);
+            return await ApiExceptionHandler.ExecuteAsync(async () =>
+            {
+                var sink = service.GetSink(name);
+                if (sink == null)
+                    return SinkNotFoundResult(name, logger, "set-volume");
+
+                if (sink.State != CustomSinkState.Loaded)
+                {
+                    return Results.BadRequest(new ErrorResponse(false,
+                        $"Sink '{name}' is not loaded (state: {sink.State}). Volume can only be set on loaded sinks."));
+                }
+
+                var success = await service.SetSinkVolumeAsync(name, request.Volume, ct);
+                if (!success)
+                {
+                    return Results.Problem($"Failed to set volume for sink '{name}'");
+                }
+
+                logger.LogInformation("API: Sink '{SinkName}' volume set to {Volume}%", name, request.Volume);
+                return Results.Ok(new { success = true, name, volume = request.Volume });
+            }, logger, "set-volume", name);
+        })
+        .WithName("SetSinkVolume")
+        .WithDescription("Set the volume (0-100) of a loaded custom sink");
+
         // DELETE /api/sinks/{name} - Delete sink
         group.MapDelete("/{name}", async (
             string name,

@@ -1540,38 +1540,15 @@ function adjustDelay(name, delta) {
     setDelay(name, newValue);
 }
 
-// Track delay changes for restart on modal close
-let playerStatsInitialDelay = null;
-let playerStatsCurrentPlayer = null;
-
-async function handlePlayerStatsModalClose() {
-    if (playerStatsCurrentPlayer && playerStatsInitialDelay !== null) {
-        const player = players[playerStatsCurrentPlayer];
-        if (player && player.delayMs !== playerStatsInitialDelay) {
-            // Delay was changed, restart player to apply
-            console.log(`Delay offset changed from ${playerStatsInitialDelay}ms to ${player.delayMs}ms, restarting player`);
-            await restartPlayer(playerStatsCurrentPlayer);
-        }
-    }
-    playerStatsInitialDelay = null;
-    playerStatsCurrentPlayer = null;
-}
-
 async function showPlayerStats(name) {
     const player = players[name];
     if (!player) return;
 
-    // Store initial delay to detect changes
-    playerStatsInitialDelay = player.delayMs;
-    playerStatsCurrentPlayer = name;
+    // Delay offset applies in place (the server re-anchors timing on change), so no
+    // player restart is needed when the stats modal closes.
 
     const modal = document.getElementById('playerStatsModal');
     const body = document.getElementById('playerStatsBody');
-
-    // Set up modal close handler to restart player if delay changed
-    const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
-    modal.removeEventListener('hidden.bs.modal', handlePlayerStatsModalClose);
-    modal.addEventListener('hidden.bs.modal', handlePlayerStatsModalClose);
 
     // Determine Device vs Sink label based on sinkType
     const device = devices.find(d => d.id === player.device);
@@ -2691,6 +2668,22 @@ function renderSinks() {
                             </div>
                         ` : ''}
 
+                        ${isLoaded ? `
+                            <div class="mt-3 sink-volume-row">
+                                <div class="d-flex align-items-center gap-2">
+                                    <i class="fas fa-volume-down text-muted" style="width:14px;"></i>
+                                    <input type="range" class="form-range flex-grow-1" min="0" max="100" step="1"
+                                           id="sink-vol-${escapeHtml(name)}"
+                                           value="${sink.volume != null ? sink.volume : 100}"
+                                           oninput="onSinkVolumeInput(this, '${escapeJsString(name)}')"
+                                           onchange="setSinkVolume('${escapeJsString(name)}', this.value)"
+                                           title="Lautstärke">
+                                    <i class="fas fa-volume-up text-muted" style="width:14px;"></i>
+                                    <span class="text-muted small sink-vol-label" id="sink-vol-label-${escapeHtml(name)}" style="min-width:38px;text-align:right;">${sink.volume != null ? sink.volume : 100}%</span>
+                                </div>
+                            </div>
+                        ` : ''}
+
                         ${sink.errorMessage ? `
                             <div class="mt-2">
                                 <small class="text-danger player-error-message" title="${escapeHtml(sink.errorMessage)}">
@@ -2703,6 +2696,36 @@ function renderSinks() {
             </div>
         `;
     }).join('') + '</div>';
+}
+
+function onSinkVolumeInput(slider, name) {
+    const label = document.getElementById(`sink-vol-label-${name}`);
+    if (label) label.textContent = `${slider.value}%`;
+}
+
+const _sinkVolumeTimers = {};
+
+async function setSinkVolume(name, value) {
+    clearTimeout(_sinkVolumeTimers[name]);
+    _sinkVolumeTimers[name] = setTimeout(async () => {
+        const volume = parseInt(value, 10);
+        try {
+            const resp = await fetch(`./api/sinks/${encodeURIComponent(name)}/volume`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ volume })
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                console.error('Failed to set sink volume:', err);
+            } else {
+                // Update local state so re-render keeps value
+                if (customSinks[name]) customSinks[name].volume = volume;
+            }
+        } catch (e) {
+            console.error('Error setting sink volume:', e);
+        }
+    }, 300);
 }
 
 function getSinkStateBadgeClass(state) {
@@ -4875,6 +4898,8 @@ function renderTriggers() {
             ? '<span class="badge bg-warning text-dark ms-1" title="Identified by USB port - may change if moved"><i class="fas fa-exclamation-triangle"></i> Port-based</span>'
             : '';
 
+        const isVirtualBoard = board.boardType === 'Virtual';
+
         const channelsHtml = board.triggers.map(trigger => {
             const isOn = trigger.relayState === 'On';
             const activeStatus = isOn
@@ -4882,6 +4907,7 @@ function renderTriggers() {
                 : '<span class="badge bg-secondary ms-1">Off</span>';
             const onBtnClass = isOn ? 'btn btn-success btn-sm' : 'btn btn-outline-secondary btn-sm';
             const offBtnClass = !isOn && trigger.relayState === 'Off' ? 'btn btn-secondary btn-sm' : 'btn btn-outline-secondary btn-sm';
+            const overrideChecked = trigger.isOverridden ? 'checked' : '';
 
             return `
                 <tr>
@@ -4909,6 +4935,16 @@ function renderTriggers() {
                             <span class="input-group-text">s</span>
                         </div>
                     </td>
+                    <td>
+                        <div class="form-check form-switch mb-0" title="Manual override — force the relay ON regardless of playback state">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   id="trigger-override-${boardIdSafe}-${trigger.channel}"
+                                   ${overrideChecked}
+                                   ${controlsDisabled ? 'disabled' : ''}
+                                   onchange="setChannelOverride('${boardId}', ${trigger.channel}, this.checked)">
+                            <label class="form-check-label small text-muted" for="trigger-override-${boardIdSafe}-${trigger.channel}">Override</label>
+                        </div>
+                    </td>
                     <td class="text-end" style="white-space: nowrap;">
                         <button class="${onBtnClass}"
                                 onclick="testTrigger('${boardId}', ${trigger.channel}, true)"
@@ -4928,9 +4964,15 @@ function renderTriggers() {
         }).join('');
 
         // Board type badge
-        const boardTypeLabel = board.boardType === 'Ftdi' ? 'FTDI' : (board.boardType === 'UsbHid' ? 'HID' : board.boardType);
+        const boardTypeLabel = board.boardType === 'Ftdi' ? 'FTDI'
+            : board.boardType === 'UsbHid' ? 'HID'
+            : board.boardType === 'Virtual' ? 'Virtual'
+            : board.boardType;
+        const boardTypeBadgeClass = board.boardType === 'Ftdi' ? 'bg-primary'
+            : board.boardType === 'Virtual' ? 'bg-purple text-white'
+            : 'bg-info';
         const boardTypeBadge = board.boardType
-            ? `<span class="badge ${board.boardType === 'Ftdi' ? 'bg-primary' : 'bg-info'} ms-2">${boardTypeLabel}</span>`
+            ? `<span class="badge ${boardTypeBadgeClass} ms-2" style="${board.boardType === 'Virtual' ? 'background-color:#6f42c1' : ''}">${boardTypeLabel}</span>`
             : '';
 
         return `
@@ -4994,12 +5036,14 @@ function renderTriggers() {
                             </span>
                         </div>
                         ${board.errorMessage ? `<div class="alert alert-warning small mb-2"><i class="fas fa-exclamation-triangle me-1"></i>${escapeHtml(board.errorMessage)}</div>` : ''}
+                        ${isVirtualBoard ? '<div class="alert alert-info small mb-2 py-1 px-2"><i class="fas fa-wifi me-1"></i>Virtual board — relay state is published via MQTT. MQTT must be enabled and connected for Home Assistant to mirror amp power.</div>' : ''}
                         <table class="table table-sm table-hover mb-0">
                             <thead>
                                 <tr>
                                     <th>Channel</th>
                                     <th>Sink</th>
                                     <th>Off Delay</th>
+                                    <th>Override</th>
                                     <th class="text-end trigger-action-header"><span class="trigger-action-col">On</span><span class="trigger-action-col">Off</span></th>
                                 </tr>
                             </thead>
@@ -5200,6 +5244,44 @@ async function addBoard() {
     } catch (error) {
         console.error('Error adding board:', error);
         showAlert(`Failed to add board: ${error.message}`, 'danger');
+    }
+}
+
+// Show add virtual board dialog
+let addVirtualBoardModal = null;
+
+function showAddVirtualBoardDialog() {
+    if (!addVirtualBoardModal) {
+        addVirtualBoardModal = new bootstrap.Modal(document.getElementById('addVirtualBoardModal'));
+    }
+    document.getElementById('addVirtualBoardDisplayName').value = '';
+    document.getElementById('addVirtualBoardChannelCount').value = '2';
+    addVirtualBoardModal.show();
+}
+
+// Add a new virtual board
+async function addVirtualBoard() {
+    const displayName = document.getElementById('addVirtualBoardDisplayName').value.trim();
+    const channelCount = parseInt(document.getElementById('addVirtualBoardChannelCount').value, 10);
+
+    try {
+        const response = await fetch('./api/triggers/boards', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ boardType: 'Virtual', displayName: displayName || null, channelCount })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to add virtual board');
+        }
+
+        addVirtualBoardModal.hide();
+        await loadTriggers();
+        showAlert('Virtual board added successfully', 'success');
+    } catch (error) {
+        console.error('Error adding virtual board:', error);
+        showAlert(`Failed to add virtual board: ${error.message}`, 'danger');
     }
 }
 
@@ -5611,6 +5693,52 @@ async function testTrigger(boardId, channel, on) {
     } catch (error) {
         console.error('Error testing trigger:', error);
         showAlert(`Failed to test relay: ${error.message}`, 'danger');
+    } finally {
+        triggersOperationCount--;
+    }
+}
+
+// Set manual override for a channel (forces relay ON regardless of playback state)
+async function setChannelOverride(boardId, channel, on) {
+    triggersOperationCount++;
+
+    // Save expanded state before any async operations
+    const container = document.getElementById('triggersContainer');
+    container.querySelectorAll('.accordion-collapse.show').forEach(el => {
+        const match = el.id.match(/^board-(.+)$/);
+        if (match) {
+            expandedBoardsState.add(match[1]);
+        }
+    });
+
+    try {
+        const url = `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}/override`;
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ on })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to set override');
+        }
+
+        showAlert(`Channel ${channel} override ${on ? 'enabled' : 'disabled'}`, 'success', 2000);
+
+        // Update local data and re-render to reflect new state
+        const board = triggersData?.boards?.find(b => b.boardId === boardId);
+        if (board) {
+            const trigger = board.triggers?.find(t => t.channel === channel);
+            if (trigger) {
+                trigger.isOverridden = on;
+            }
+        }
+    } catch (error) {
+        console.error('Error setting channel override:', error);
+        showAlert(`Failed to set override: ${error.message}`, 'danger');
+        // Revert the toggle by reloading
+        await loadTriggers();
     } finally {
         triggersOperationCount--;
     }

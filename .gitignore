@@ -59,7 +59,6 @@ coverage.xml
 # Testing
 .pytest_cache/
 .tox/
-tests/*
 
 # Documentation build
 docs/_build/

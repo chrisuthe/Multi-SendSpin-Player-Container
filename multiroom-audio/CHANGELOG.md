@@ -1,5 +1,47 @@
 # Changelog
 
+## [5.2.0] - Home Assistant MQTT Bridge & Amp Override Controls
+
+### Highlights
+- **Home Assistant MQTT Bridge** — Players and amp zones auto-register in Home Assistant via MQTT discovery, with live state publishing, command handling, and container availability via Last Will & Testament. Enable and configure through the new MQTT add-on options or environment variables.
+- **Virtual Relay Boards & Sticky Amp Overrides** — Create virtual relay boards and manually override amp power (sticky on/off) from the Triggers UI or via Home Assistant, independent of player activity.
+- **SendSpin SDK 9.1.0** — Upgraded from 7.3.0 with improved multi-room sync
+- **Custom Sink Volume Control** — Volume control for combined/remapped custom sinks
+
+### Added
+- Home Assistant MQTT discovery config builders for players and amp zones, state payload publishers, and command parsing/handling
+- MQTT settings model, config service with env/HAOS override precedence, and `GET/PUT` MQTT settings API endpoint
+- MQTT options in both the stable and dev HAOS add-on config (`mqtt_enabled`, `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password`, `mqtt_tls`)
+- Container availability signal published over MQTT (online/offline via LWT)
+- Virtual relay board type with factory/connect wiring
+- Sticky amp override: trigger override endpoint, `TriggerResponse.IsOverridden`, and `TriggersChanged` event
+- Virtual board and amp override controls in the Triggers UI
+- Custom sink volume control (#220)
+- `PlayersChanged` event raised alongside SignalR broadcasts to keep MQTT state in sync
+- Timer/player sync test project wired into CI
+
+### Fixed
+- Unique MQTT client ID to stop a broker takeover/reconnect loop (#239)
+- Disambiguate identical USB DACs that share a device key (#223)
+- Only clamp hardware volume on player-assigned devices (#219)
+- Header title clipping with long translated titles (#212)
+- Resolve HAOS MQTT options by snake_case keys
+- Publish MQTT container ready state after startup completes
+- Guard `MqttService` reconnect with a shutdown flag and replace the reconnect token per disconnect
+
+### Changed
+- SendSpin SDK upgraded from 7.3.0 to 9.1.0 (#233)
+- Added MQTTnet 5.0.1.1416 dependency
+- Migrated the solution to the new `.slnx` format (#213)
+
+### Dependencies
+- YamlDotNet 16.3.0 → 17.0.1
+- System.IO.Ports 10.0.3 → 10.0.5
+- Microsoft.Extensions.Diagnostics.HealthChecks 10.0.3 → 10.0.5
+- Microsoft.AspNetCore.OpenApi 8.0.24 → 8.0.25
+
+---
+
 ## [5.1.0] - SDK Upgrade, Configurable Buffer & Hybrid Reconnection
 
 ### Highlights

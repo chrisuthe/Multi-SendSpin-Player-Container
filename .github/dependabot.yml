@@ -5,6 +5,14 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      # Swashbuckle.AspNetCore 9+ pulls Microsoft.OpenApi 2.x, whose flattened
+      # namespace conflicts at runtime with Microsoft.AspNetCore.OpenApi 8.x
+      # (used via .WithOpenApi()), which references Microsoft.OpenApi 1.x types.
+      # The major bump compiles but throws TypeLoadException at startup. Hold it
+      # until the project targets net9/net10. See #216.
+      - dependency-name: "Swashbuckle.AspNetCore"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

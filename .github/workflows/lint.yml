@@ -27,3 +27,6 @@ jobs:
 
       - name: Check formatting
         run: dotnet format src/MultiRoomAudio/MultiRoomAudio.csproj --verify-no-changes --verbosity diagnostic
+
+      - name: Test
+        run: dotnet test tests/MultiRoomAudio.Tests/MultiRoomAudio.Tests.csproj -c Release
