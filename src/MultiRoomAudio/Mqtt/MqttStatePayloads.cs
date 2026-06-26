@@ -26,13 +26,13 @@ public static class MqttStatePayloads
     /// <summary>Container/hub health document.</summary>
     public static string Container(bool ready, string version, int playerCount,
         string audioBackend, string environment) => JsonSerializer.Serialize(new
-    {
-        ready = OnOff(ready),
-        version,
-        player_count = playerCount,
-        audio_backend = audioBackend,
-        environment,
-    });
+        {
+            ready = OnOff(ready),
+            version,
+            player_count = playerCount,
+            audio_backend = audioBackend,
+            environment,
+        });
 
     /// <summary>Per-amp/zone state document. RelayState.On → power ON; Unknown → OFF.</summary>
     public static string Amp(MultiRoomAudio.Models.TriggerResponse t, bool boardConnected) => JsonSerializer.Serialize(new

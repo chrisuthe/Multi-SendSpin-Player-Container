@@ -39,7 +39,8 @@ public sealed class VirtualRelayBoard : IRelayBoard
         {
             int s = 0;
             for (int i = 0; i < _channelCount; i++)
-                if (_states[i]) s |= (1 << i);
+                if (_states[i])
+                    s |= (1 << i);
             return s;
         }
     }
@@ -47,7 +48,8 @@ public sealed class VirtualRelayBoard : IRelayBoard
     /// <inheritdoc />
     public bool Open()
     {
-        if (_disposed) return false;
+        if (_disposed)
+            return false;
         _isConnected = true;
         return true;
     }
@@ -61,7 +63,8 @@ public sealed class VirtualRelayBoard : IRelayBoard
     /// <inheritdoc />
     public bool SetRelay(int channel, bool on)
     {
-        if (!_isConnected || channel < 1 || channel > _channelCount) return false;
+        if (!_isConnected || channel < 1 || channel > _channelCount)
+            return false;
         _states[channel - 1] = on;
         _logger?.LogDebug("Virtual relay '{Serial}' channel {Channel} → {State}", _serialNumber, channel, on ? "ON" : "OFF");
         return true;
@@ -70,14 +73,16 @@ public sealed class VirtualRelayBoard : IRelayBoard
     /// <inheritdoc />
     public RelayState GetRelay(int channel)
     {
-        if (!_isConnected || channel < 1 || channel > _channelCount) return RelayState.Unknown;
+        if (!_isConnected || channel < 1 || channel > _channelCount)
+            return RelayState.Unknown;
         return _states[channel - 1] ? RelayState.On : RelayState.Off;
     }
 
     /// <inheritdoc />
     public bool AllOff()
     {
-        if (!_isConnected) return false;
+        if (!_isConnected)
+            return false;
         Array.Clear(_states);
         return true;
     }
@@ -85,7 +90,8 @@ public sealed class VirtualRelayBoard : IRelayBoard
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
         _disposed = true;
         _isConnected = false;
     }
