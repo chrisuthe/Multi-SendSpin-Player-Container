@@ -149,6 +149,7 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
     private long _lastKnownDroppedSamples;
     private long _lastKnownOverrunCount;
     private bool _hasLoggedOverrunStart;
+    private bool _hasLoggedStartupDiscard;
 
     // Startup tracking for deadband widening
     private long _correctionStartTime;  // Timestamp when first correction was considered
@@ -608,11 +609,21 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         var currentDropped = stats.DroppedSamples;
         var currentOverruns = stats.OverrunCount;
 
-        if (currentDropped > _lastKnownDroppedSamples || currentOverruns > _lastKnownOverrunCount)
-        {
-            var newDrops = currentDropped - _lastKnownDroppedSamples;
-            var newOverruns = currentOverruns - _lastKnownOverrunCount;
+        var newDrops = currentDropped - _lastKnownDroppedSamples;
+        var newOverruns = currentOverruns - _lastKnownOverrunCount;
 
+        if (newDrops <= 0 && newOverruns <= 0)
+        {
+            return;
+        }
+
+        // A genuine overflow is signalled by the SDK's OverrunCount advancing: the buffer filled and
+        // Read() failed to consume in time. A rise in DroppedSamples *without* an overrun increment is a
+        // benign one-time startup discard - the SDK re-anchors playback and drops samples whose scheduled
+        // play-time already passed (see issue #233). At startup the buffer is nowhere near capacity and
+        // Read() is consuming normally, so reporting that as a buffer-full overrun is a false alarm.
+        if (newOverruns > 0 || _hasLoggedOverrunStart)
+        {
             if (!_hasLoggedOverrunStart)
             {
                 _hasLoggedOverrunStart = true;
@@ -634,10 +645,21 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
                     "bufferedMs={BufferedMs:F0}, isPlaybackActive={IsPlaybackActive}",
                     newDrops, currentDropped, currentOverruns, stats.BufferedMs, stats.IsPlaybackActive);
             }
-
-            _lastKnownDroppedSamples = currentDropped;
-            _lastKnownOverrunCount = currentOverruns;
         }
+        else if (!_hasLoggedStartupDiscard)
+        {
+            // One-time, non-alarming: the SDK aligned playback to the schedule by discarding stale samples.
+            _hasLoggedStartupDiscard = true;
+            var approxMs = newDrops * 1000.0 / (_sampleRate * _channels);
+            _logger.LogInformation(
+                "Startup alignment discard: SDK dropped {Dropped} samples (~{Ms:F0}ms) aligning playback to the schedule. " +
+                "bufferedMs={BufferedMs:F0}, overrunCount={Overruns} (no overrun - buffer not full, Read consuming). " +
+                "One-time startup transient.",
+                newDrops, approxMs, stats.BufferedMs, currentOverruns);
+        }
+
+        _lastKnownDroppedSamples = currentDropped;
+        _lastKnownOverrunCount = currentOverruns;
     }
 
     /// <summary>
@@ -651,6 +673,7 @@ public sealed class BufferedAudioSampleSource : IAudioSampleSource
         _totalDropped = 0;
         _totalInserted = 0;
         _hasLoggedOverrunStart = false;  // Allow ERROR level logging on next overrun
+        _hasLoggedStartupDiscard = false;  // Allow startup-discard INFO on next playback
 
         // Reset anti-oscillation state
         _currentDirection = CorrectionDirection.None;
