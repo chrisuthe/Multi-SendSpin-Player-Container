@@ -1582,7 +1582,7 @@ const Wizard = {
         const boardsHtml = this.triggerBoards.map(board => {
             const rows = (board.triggers || []).map(t => `
                 <tr>
-                    <td><span class="badge bg-primary">CH ${t.channel}</span></td>
+                    <td><span class="badge bg-primary">CH ${parseInt(t.channel, 10)}</span></td>
                     <td>
                         <div id="wizard-trigger-sink-${board.boardId.replace(/[^a-zA-Z0-9]/g, '_')}-${t.channel}">
                             ${renderSinkChips(board.boardId, t.channel, t.customSinkNames, sinkList, false)}
@@ -1631,25 +1631,36 @@ const Wizard = {
     async wizardSaveTriggerSinks(boardId, channel) {
         const t = this.wizardGetTrigger(boardId, channel);
         const names = t ? (t.customSinkNames || []) : [];
-        // Ensure the feature is enabled before the first assignment.
-        if (!this.triggersEnabled) {
-            await fetch('./api/triggers/enabled', {
+
+        try {
+            // Ensure the feature is enabled before the first assignment.
+            if (!this.triggersEnabled) {
+                await fetch('./api/triggers/enabled', {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: true })
+                });
+                this.triggersEnabled = true;
+            }
+            const url = boardId.includes('/')
+                ? `./api/triggers/boards/channel?boardId=${encodeURIComponent(boardId)}&channel=${channel}`
+                : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`;
+            const response = await fetch(url, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: true })
+                body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: 60 })
             });
-            this.triggersEnabled = true;
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to update trigger');
+            }
+            const safe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
+            const container = document.getElementById(`wizard-trigger-sink-${safe}-${channel}`);
+            const sinkList = this.customSinks.map(s => ({ name: s.name, description: s.description || s.name }));
+            if (container) container.innerHTML = renderSinkChips(boardId, channel, names, sinkList, false);
+            showAlert('Trigger updated', 'success', 2000);
+        } catch (error) {
+            console.error('Failed to save trigger assignment:', error);
+            showAlert('Failed to update trigger: ' + error.message, 'danger');
         }
-        const url = boardId.includes('/')
-            ? `./api/triggers/boards/channel?boardId=${encodeURIComponent(boardId)}&channel=${channel}`
-            : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`;
-        await fetch(url, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: 60 })
-        });
-        const safe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
-        const container = document.getElementById(`wizard-trigger-sink-${safe}-${channel}`);
-        const sinkList = this.customSinks.map(s => ({ name: s.name, description: s.description || s.name }));
-        if (container) container.innerHTML = renderSinkChips(boardId, channel, names, sinkList, false);
     },
 
     // Complete the wizard
