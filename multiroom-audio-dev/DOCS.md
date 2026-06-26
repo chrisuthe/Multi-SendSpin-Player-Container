@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-edc8437
+## Development Build: sha-127cd75
 
 **Current Dev Build Changes** (recent)
 
+- Merge pull request #248 from chrisuthe/fix/combine-sink-resume
+- fix: load custom sinks in dependency order so combine-of-remaps survives restart
 - docs: add 5.2.0 changelog (MQTT bridge, amp overrides, SDK 9.1.0)
 - Merge pull request #239 from chrisuthe/fix/mqtt-unique-client-id
 - fix: use a unique MQTT client ID to stop broker takeover loop
@@ -13,8 +15,6 @@
 - Merge pull request #236 from chrisuthe/feat/mqtt-ha-bridge-phase2
 - docs: reconcile virtual-board MQTT-down signal (LWT availability) in phase 2 spec
 - refactor: early-return on no-op override release and add XML docs
-- feat: add virtual board and override controls to triggers UI
-- feat: expose MQTT options in HAOS add-on config
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
