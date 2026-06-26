@@ -5055,17 +5055,6 @@ function renderTriggers() {
 
     container.innerHTML = accordionHtml;
 
-    // Set selected values for sink dropdowns
-    triggersData.boards.forEach(board => {
-        const boardIdSafe = board.boardId.replace(/[^a-zA-Z0-9]/g, '_');
-        board.triggers.forEach(trigger => {
-            const select = document.getElementById(`trigger-sink-${boardIdSafe}-${trigger.channel}`);
-            if (select && trigger.customSinkName) {
-                select.value = trigger.customSinkName;
-            }
-        });
-    });
-
     // Restore scroll position after DOM update
     if (modalBody && scrollTop > 0) {
         requestAnimationFrame(() => {
@@ -5560,14 +5549,14 @@ function renderSinkChips(boardId, channel, names, allSinks, disabled) {
         const remove = disabled ? '' :
             `<button type="button" class="btn-close btn-close-white ms-1" style="font-size:.5rem"
                      aria-label="Remove" title="Remove zone"
-                     onclick="removeTriggerSink('${boardId}', ${channel}, '${escapeHtml(name)}')"></button>`;
+                     onclick="removeTriggerSink('${escapeHtml(boardId)}', ${channel}, '${escapeHtml(name)}')"></button>`;
         return `<span class="badge bg-primary d-inline-flex align-items-center me-1 mb-1">${escapeHtml(label)}${remove}</span>`;
     }).join('');
 
     const remaining = (allSinks || []).filter(s => !safeNames.includes(s.name));
     const addControl = (disabled || remaining.length === 0) ? '' : `
         <select class="form-select form-select-sm mt-1"
-                onchange="addTriggerSink('${boardId}', ${channel}, this.value); this.value='';">
+                onchange="addTriggerSink('${escapeHtml(boardId)}', ${channel}, this.value); this.value='';">
             <option value="">+ Add zone…</option>
             ${remaining.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.description || s.name)}</option>`).join('')}
         </select>`;
