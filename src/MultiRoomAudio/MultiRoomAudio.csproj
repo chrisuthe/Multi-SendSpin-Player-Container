@@ -34,7 +34,7 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="8.1.4" />
 
     <!-- Health checks -->
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.5" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.9" />
 
     <!-- MQTT client for Home Assistant bridge -->
     <PackageReference Include="MQTTnet" Version="5.0.1.1416" />
