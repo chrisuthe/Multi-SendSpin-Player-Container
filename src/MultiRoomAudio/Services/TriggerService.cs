@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Timers;
 using Microsoft.AspNetCore.SignalR;
 using MultiRoomAudio.Hubs;
 using MultiRoomAudio.Models;

@@ -1,5 +1,4 @@
 using System.Buffers;
-using Microsoft.Extensions.Logging;
 using Sendspin.SDK.Audio;
 using Sendspin.SDK.Models;
 

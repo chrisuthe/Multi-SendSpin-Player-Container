@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Microsoft.Extensions.DependencyInjection;
 using MultiRoomAudio.Audio;
 using MultiRoomAudio.Exceptions;
 using MultiRoomAudio.Models;
