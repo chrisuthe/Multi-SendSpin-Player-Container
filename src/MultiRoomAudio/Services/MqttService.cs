@@ -171,7 +171,8 @@ public class MqttService
         {
             try
             {
-                if (!IsConnected) return;
+                if (!IsConnected)
+                    return;
                 await PublishDiscoveryAsync(CancellationToken.None);
                 await PublishAllStateAsync(CancellationToken.None);
             }
@@ -188,7 +189,8 @@ public class MqttService
         {
             try
             {
-                if (!IsConnected) return;
+                if (!IsConnected)
+                    return;
                 await PublishDiscoveryAsync(CancellationToken.None);
                 await PublishAllStateAsync(CancellationToken.None);
             }
@@ -211,7 +213,8 @@ public class MqttService
                 : System.Buffers.BuffersExtensions.ToArray(seq);
             var payload = Encoding.UTF8.GetString(payloadBytes);
             var cmd = MqttCommand.Parse(_baseTopic, topic, payload);
-            if (cmd.Kind == MqttCommandKind.Unknown) return;
+            if (cmd.Kind == MqttCommandKind.Unknown)
+                return;
 
             if (cmd.Kind == MqttCommandKind.AmpOverride && cmd.AmpZone is not null)
             {
@@ -256,7 +259,8 @@ public class MqttService
 
     private async Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
-        if (_shuttingDown) return;
+        if (_shuttingDown)
+            return;
 
         LastError = e.Exception?.Message ?? e.ReasonString;
         _logger.LogWarning("MQTT disconnected: {Reason}. Reconnecting...", LastError);
@@ -278,7 +282,8 @@ public class MqttService
 
     private async Task PublishAsync(string topic, string payload, bool retain, CancellationToken ct)
     {
-        if (_client is null) return;
+        if (_client is null)
+            return;
         await _publishLock.WaitAsync(ct);
         try
         {
@@ -305,7 +310,8 @@ public class MqttService
     {
         try
         {
-            if (!IsConnected) return;
+            if (!IsConnected)
+                return;
             await PublishAllStateAsync(ct);
         }
         catch (Exception ex)

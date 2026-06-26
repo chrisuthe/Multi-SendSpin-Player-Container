@@ -57,14 +57,22 @@ public class MqttConfigService : YamlFileService<MqttSettings>
         Lock.EnterWriteLock();
         try
         {
-            if (request.Enabled is { } enabled) Data.Enabled = enabled;
-            if (request.Host is not null) Data.Host = string.IsNullOrWhiteSpace(request.Host) ? null : request.Host;
-            if (request.Port is { } port) Data.Port = port;
-            if (request.Username is not null) Data.Username = string.IsNullOrWhiteSpace(request.Username) ? null : request.Username;
-            if (request.Password is not null) Data.Password = request.Password.Length == 0 ? null : request.Password;
-            if (request.UseTls is { } tls) Data.UseTls = tls;
-            if (!string.IsNullOrWhiteSpace(request.DiscoveryPrefix)) Data.DiscoveryPrefix = request.DiscoveryPrefix;
-            if (!string.IsNullOrWhiteSpace(request.BaseTopic)) Data.BaseTopic = request.BaseTopic;
+            if (request.Enabled is { } enabled)
+                Data.Enabled = enabled;
+            if (request.Host is not null)
+                Data.Host = string.IsNullOrWhiteSpace(request.Host) ? null : request.Host;
+            if (request.Port is { } port)
+                Data.Port = port;
+            if (request.Username is not null)
+                Data.Username = string.IsNullOrWhiteSpace(request.Username) ? null : request.Username;
+            if (request.Password is not null)
+                Data.Password = request.Password.Length == 0 ? null : request.Password;
+            if (request.UseTls is { } tls)
+                Data.UseTls = tls;
+            if (!string.IsNullOrWhiteSpace(request.DiscoveryPrefix))
+                Data.DiscoveryPrefix = request.DiscoveryPrefix;
+            if (!string.IsNullOrWhiteSpace(request.BaseTopic))
+                Data.BaseTopic = request.BaseTopic;
         }
         finally
         {
@@ -76,9 +84,12 @@ public class MqttConfigService : YamlFileService<MqttSettings>
 
     private string ResolveSource(IReadOnlyDictionary<string, string?> env)
     {
-        if (!string.IsNullOrWhiteSpace(env["MQTT_HOST"])) return "env";
-        if (_env.IsHaos && !string.IsNullOrWhiteSpace(_env.GetHaosOption<string?>("mqtt_host"))) return "haos";
-        if (!string.IsNullOrWhiteSpace(Data.Host)) return "yaml";
+        if (!string.IsNullOrWhiteSpace(env["MQTT_HOST"]))
+            return "env";
+        if (_env.IsHaos && !string.IsNullOrWhiteSpace(_env.GetHaosOption<string?>("mqtt_host")))
+            return "haos";
+        if (!string.IsNullOrWhiteSpace(Data.Host))
+            return "yaml";
         return "default";
     }
 
