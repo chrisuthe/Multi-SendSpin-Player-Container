@@ -37,7 +37,7 @@
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.9" />
 
     <!-- MQTT client for Home Assistant bridge -->
-    <PackageReference Include="MQTTnet" Version="5.0.1.1416" />
+    <PackageReference Include="MQTTnet" Version="5.1.0.1559" />
   </ItemGroup>
 
   <ItemGroup>
