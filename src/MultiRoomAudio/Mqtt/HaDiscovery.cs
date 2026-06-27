@@ -43,6 +43,7 @@ public class HaDiscovery
             {
                 w.WriteString("value_template", "{{ value_json.server_name }}");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
             Entity("binary_sensor", "clock_synced", $"{p.Name} Clock Synced", w =>
             {
@@ -50,6 +51,7 @@ public class HaDiscovery
                 w.WriteString("payload_on", "ON");
                 w.WriteString("payload_off", "OFF");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
             Entity("binary_sensor", "reconnect_pending", $"{p.Name} Reconnecting", w =>
             {
@@ -57,11 +59,13 @@ public class HaDiscovery
                 w.WriteString("payload_on", "ON");
                 w.WriteString("payload_off", "OFF");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
             Entity("sensor", "reconnect_attempts", $"{p.Name} Reconnect Attempts", w =>
             {
                 w.WriteString("value_template", "{{ value_json.reconnect_attempts }}");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
             Entity("number", "offset", $"{p.Name} Delay Offset", w =>
             {
@@ -78,6 +82,7 @@ public class HaDiscovery
                 w.WriteString("command_topic", _topics.PlayerCommandTopic(p.ClientId, "restart"));
                 w.WriteString("payload_press", "PRESS");
                 w.WriteString("entity_category", "config");
+                w.WriteString("enabled_by_default", "false");
             }),
         };
     }
@@ -109,6 +114,7 @@ public class HaDiscovery
             {
                 w.WriteString("value_template", "{{ value_json.version }}");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
             Entity("sensor", "player_count", "Multi-Room Audio Players", w =>
                 w.WriteString("value_template", "{{ value_json.player_count }}")),
@@ -116,11 +122,13 @@ public class HaDiscovery
             {
                 w.WriteString("value_template", "{{ value_json.audio_backend }}");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
             Entity("sensor", "environment", "Multi-Room Audio Environment", w =>
             {
                 w.WriteString("value_template", "{{ value_json.environment }}");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
         };
     }
@@ -155,6 +163,7 @@ public class HaDiscovery
                 w.WriteString("value_template", "{{ value_json.scheduled_off }}");
                 w.WriteString("device_class", "timestamp");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
             Entity("switch", "override", $"{label} Override", w =>
             {
@@ -172,6 +181,7 @@ public class HaDiscovery
                 w.WriteString("payload_off", "OFF");
                 w.WriteString("device_class", "connectivity");
                 w.WriteString("entity_category", "diagnostic");
+                w.WriteString("enabled_by_default", "false");
             }),
         };
     }
