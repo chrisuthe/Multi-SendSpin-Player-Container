@@ -1892,7 +1892,12 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         {
             Name = config.Name,
             Device = config.DeviceId,
-            ClientId = config.ClientId,
+            // Derive the client id from the CURRENT name (matching every other
+            // recreate path) so a rename actually propagates to Music Assistant.
+            // MA keys players by client_id, and the name only travels in the
+            // Sendspin client/hello on reconnect; reusing the cached (old
+            // name-derived) id would keep MA showing the old name.
+            ClientId = ClientIdGenerator.Generate(config.Name),
             ServerUrl = config.ServerUrl,
             Volume = startupVolume,  // Use startup volume, not runtime volume
             DelayMs = config.DelayMs,
