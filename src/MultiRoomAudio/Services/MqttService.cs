@@ -133,16 +133,16 @@ public class MqttService
     private async Task PublishDiscoveryAsync(CancellationToken ct)
     {
         foreach (var p in _players.GetAllPlayers().Players)
-            foreach (var m in _discovery!.ForPlayer(p))
+            foreach (var m in _discovery!.ForPlayerDevice(p))
                 await PublishAsync(m.Topic, m.Payload, retain: true, ct);
 
-        foreach (var m in _discovery!.ForContainer(_env.EnvironmentName))
+        foreach (var m in _discovery!.ForContainerDevice(_env.EnvironmentName))
             await PublishAsync(m.Topic, m.Payload, retain: true, ct);
 
         var trig = _triggers.GetStatus();
         foreach (var board in trig.Boards)
             foreach (var t in board.Triggers)
-                foreach (var m in _discovery!.ForAmp(board.BoardId, board.DisplayName, t))
+                foreach (var m in _discovery!.ForAmpDevice(board.BoardId, board.DisplayName, t))
                     await PublishAsync(m.Topic, m.Payload, retain: true, ct);
     }
 
@@ -173,7 +173,7 @@ public class MqttService
             {
                 if (!IsConnected)
                     return;
-                await PublishDiscoveryAsync(CancellationToken.None);
+                //await PublishDiscoveryAsync(CancellationToken.None);
                 await PublishAllStateAsync(CancellationToken.None);
             }
             catch (Exception ex)
@@ -312,6 +312,7 @@ public class MqttService
         {
             if (!IsConnected)
                 return;
+            await PublishDiscoveryAsync(ct);
             await PublishAllStateAsync(ct);
         }
         catch (Exception ex)

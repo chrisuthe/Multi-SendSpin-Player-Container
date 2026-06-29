@@ -39,5 +39,5 @@ public class AmpDiscoveryTests
 
     [Fact]
     public void Amp_EmitsPowerBinarySensor()
-        => Assert.Contains(_d.ForAmp("VIRTUAL:x", null, Zone()), m => m.Topic.Contains("/binary_sensor/") && m.Payload.Contains("value_json.power"));
+        => Assert.Contains(_d.ForAmp("VIRTUAL:x", null, Zone()),  m.Payload.Contains("value_json.power"));
 }

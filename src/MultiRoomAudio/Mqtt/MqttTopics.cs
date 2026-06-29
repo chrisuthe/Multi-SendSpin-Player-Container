@@ -49,6 +49,9 @@ public class MqttTopics
     public string DiscoveryTopic(string component, string objectId) =>
         $"{_prefix}/{component}/{objectId}/config";
 
+    public string DeviceDiscoveryTopic(string deviceId) =>
+        $"{_prefix}/device/{deviceId}/config";
+
     /// <summary>Lowercase and replace any character outside [a-z0-9_-] with '_'. Collapse consecutive underscores.</summary>
     public static string Sanitize(string raw)
     {
