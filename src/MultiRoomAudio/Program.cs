@@ -12,6 +12,7 @@ using MultiRoomAudio.Utilities;
 var appVersion = Environment.GetEnvironmentVariable("APP_VERSION") ?? "dev";
 var buildSha = Environment.GetEnvironmentVariable("APP_BUILD_SHA");
 var buildDate = Environment.GetEnvironmentVariable("APP_BUILD_DATE");
+// Display name logged at startup.
 const string AppName = "Multi-Room Audio Controller";
 
 var builder = WebApplication.CreateBuilder(args);
