@@ -1243,25 +1243,21 @@ async function savePlayer() {
 
             // Show appropriate message based on changes
             if (result.needsRestart) {
+                // Auto-restart so the change takes effect immediately. A rename is
+                // treated like any other restart-requiring change: restarting
+                // re-announces the player under its new name-derived client id, so
+                // Music Assistant picks up the new name without a container restart.
+                const restartResponse = await fetch(`./api/players/${encodeURIComponent(finalName)}/restart`, {
+                    method: 'POST'
+                });
+                if (!restartResponse.ok) {
+                    console.warn('Restart request failed, player may need manual restart');
+                }
+                // Refresh status AFTER restart completes
+                await refreshStatus(true);
                 if (wasRenamed) {
-                    // For renames, offer to restart rather than auto-restart
-                    // The name change is saved locally, but Music Assistant needs a restart to see it
-                    await refreshStatus(true);
-                    showAlert(
-                        `Player renamed to "${finalName}". Restart the player for the name to appear in Music Assistant.`,
-                        'info',
-                        8000 // Show for longer since it's actionable
-                    );
+                    showAlert(`Player renamed to "${finalName}" — new name now in Music Assistant`, 'success');
                 } else {
-                    // For other changes requiring restart (e.g., server URL, format), auto-restart
-                    const restartResponse = await fetch(`./api/players/${encodeURIComponent(finalName)}/restart`, {
-                        method: 'POST'
-                    });
-                    if (!restartResponse.ok) {
-                        console.warn('Restart request failed, player may need manual restart');
-                    }
-                    // Refresh status AFTER restart completes
-                    await refreshStatus(true);
                     showAlert(`Player "${finalName}" updated and restarted`, 'success');
                 }
             } else {

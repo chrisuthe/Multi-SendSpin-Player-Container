@@ -437,8 +437,10 @@ public static class PlayersEndpoint
                 var currentName = name;
 
                 // Handle rename first (affects subsequent operations)
-                // Note: Rename requires restart for the name to appear in Music Assistant
-                // because the SDK's ClientName is set at player creation time
+                // Note: a player's name only reaches Music Assistant via the Sendspin
+                // client/hello on (re)connect, and MA keys players by client_id (derived
+                // from the name). A rename therefore requires a restart to re-announce
+                // under the new name-derived id; the UI auto-restarts to apply it.
                 if (!string.IsNullOrEmpty(request.Name) && request.Name != name)
                 {
                     var renamed = manager.RenamePlayer(name, request.Name);
@@ -570,6 +572,6 @@ public static class PlayersEndpoint
             }, logger, "rename player", name);
         })
         .WithName("RenamePlayer")
-        .WithDescription("Rename a player to a new name. Note: Restart the player for the name change to appear in Music Assistant.");
+        .WithDescription("Rename a player to a new name. The new name reaches Music Assistant only after a restart, which re-announces the player under its new name-derived client id.");
     }
 }
