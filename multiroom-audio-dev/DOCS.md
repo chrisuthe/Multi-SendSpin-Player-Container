@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-c733631
+## Development Build: sha-f54b4fd
 
 **Current Dev Build Changes** (recent)
 
+- fix: stop a cleared off-delay box from failing trigger sink saves (#250) (#268)
+- fix: stop republishing unchanged retained MQTT topics (#256) (#269)
 - feat: allow a relay trigger to reference multiple sinks (#250) (#255)
 - feat: improve MQTT discovery for HA automations (#249) (#254)
 - fix: stop reporting benign startup sample discard as a buffer overflow (#233) (#253)
@@ -13,8 +15,6 @@
 - docs: add 5.2.0 changelog (MQTT bridge, amp overrides, SDK 9.1.0)
 - Merge pull request #239 from chrisuthe/fix/mqtt-unique-client-id
 - fix: use a unique MQTT client ID to stop broker takeover loop
-- Merge pull request #237 from chrisuthe/fix/mqtt-dev-addon-options
-- fix: expose MQTT options in dev add-on config
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
