@@ -21,7 +21,7 @@ public class HaDiscovery
 
     public record DiscoveryMessage(string Topic, string Payload);
 
-private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
+    private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
     {
         return new DiscoveryMessage(_topics.DiscoveryTopic(component, deviceId), "");
     }
@@ -41,8 +41,8 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
         using (var w = new Utf8JsonWriter(stream))
         {
             w.WriteStartObject();
-            w.WritePropertyName("dev"); 
-            w.WriteStartObject();       
+            w.WritePropertyName("dev");
+            w.WriteStartObject();
             w.WriteString("ids", deviceId); // Identifiers
             w.WriteString("name", "Multi-Room Audio");
             w.WriteString("mf", "Multi-Room Audio");// Manufacturer
@@ -61,16 +61,16 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WriteStartObject();
 
             // Ready Sensor
-            w.WritePropertyName($"{deviceId}_State"); 
+            w.WritePropertyName($"{deviceId}_State");
             w.WriteStartObject();
             w.WriteString("name", $"{p.Name} State");
             w.WriteString("unique_id", $"{deviceId}_State");
-            w.WriteString("p", "sensor");                
+            w.WriteString("p", "sensor");
             w.WriteString("value_template", "{{ value_json.state }}");
             w.WriteEndObject();
 
             // Player Server Sensor
-            w.WritePropertyName($"{deviceId}_server"); 
+            w.WritePropertyName($"{deviceId}_server");
             w.WriteStartObject();
             w.WriteString("name", $"{p.Name} Server");
             w.WriteString("unique_id", $"{deviceId}_server");
@@ -79,22 +79,22 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WriteString("entity_category", "diagnostic");
             w.WriteString("enabled_by_default", "false");
             w.WriteEndObject();
-            
+
             // Clock Synced Sensor
-            w.WritePropertyName($"{deviceId}_clock_synced"); 
+            w.WritePropertyName($"{deviceId}_clock_synced");
             w.WriteStartObject();
             w.WriteString("name", $"{p.Name} Clocke Synced");
             w.WriteString("unique_id", $"{deviceId}_clock_synced");
             w.WriteString("p", "binary_sensor");
             w.WriteString("value_template", "{{ value_json.clock_synced }}");
-            w.WriteString("payload_on", "ON");                
+            w.WriteString("payload_on", "ON");
             w.WriteString("payload_off", "OFF");
             w.WriteString("entity_category", "diagnostic");
             w.WriteString("enabled_by_default", "false");
             w.WriteEndObject();
-            
+
             // Reconnect Pending Sensor
-            w.WritePropertyName($"{deviceId}_reconnect_pending"); 
+            w.WritePropertyName($"{deviceId}_reconnect_pending");
             w.WriteStartObject();
             w.WriteString("name", $"{p.Name} Reconnecting");
             w.WriteString("unique_id", $"{deviceId}_reconnect_pending");
@@ -105,9 +105,9 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WriteString("entity_category", "diagnostic");
             w.WriteString("enabled_by_default", "false");
             w.WriteEndObject();
-            
+
             // Reconnect Attempts Sensor
-            w.WritePropertyName($"{deviceId}_reconnect_attempts"); 
+            w.WritePropertyName($"{deviceId}_reconnect_attempts");
             w.WriteStartObject();
             w.WriteString("name", $"{p.Name} Reconnect Attempts");
             w.WriteString("unique_id", $"{deviceId}_reconnect_attempts");
@@ -116,9 +116,9 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WriteString("entity_category", "diagnostic");
             w.WriteString("enabled_by_default", "false");
             w.WriteEndObject();
-            
+
             // Ready Sensor
-            w.WritePropertyName($"{deviceId}_offset"); 
+            w.WritePropertyName($"{deviceId}_offset");
             w.WriteStartObject();
             w.WriteString("name", $"{p.Name} Delay Offset");
             w.WriteString("unique_id", $"{deviceId}_offset");
@@ -131,9 +131,9 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WriteString("mode", "box");
             w.WriteString("entity_category", "config");
             w.WriteEndObject();
-            
+
             // Restart Sensor
-            w.WritePropertyName($"{deviceId}_restart"); 
+            w.WritePropertyName($"{deviceId}_restart");
             w.WriteStartObject();
             w.WriteString("name", $"{p.Name} Restart");
             w.WriteString("unique_id", $"{deviceId}_restart");
@@ -143,10 +143,10 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WriteString("entity_category", "config");
             w.WriteString("enabled_by_default", "false");
             w.WriteEndObject();
-                    
+
             //End Components
             w.WriteEndObject();
-            
+
             w.WriteString("state_topic", stateTopic);
             w.WriteString("availability_topic", _topics.BridgeAvailabilityTopic);
             w.WriteString("payload_available", "online");
@@ -154,13 +154,13 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WriteEndObject();
         }
         var payload = System.Text.Encoding.UTF8.GetString(stream.ToArray());
-        
+
         DiscoveryMessage Entity(string component, string key)
             => BuildRemovalMessage(component, $"mra_{id}_{key}");
-        
+
         return new List<DiscoveryMessage>
         {
-            new DiscoveryMessage(_topics.DeviceDiscoveryTopic(deviceId), payload),        
+            new DiscoveryMessage(_topics.DeviceDiscoveryTopic(deviceId), payload),
             Entity("sensor", "state"),
             Entity("sensor", "server"),
             Entity("binary_sensor", "clock_synced"),
@@ -186,8 +186,8 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
         using (var w = new Utf8JsonWriter(stream))
         {
             w.WriteStartObject();
-            w.WritePropertyName("dev"); 
-            w.WriteStartObject();       
+            w.WritePropertyName("dev");
+            w.WriteStartObject();
             w.WriteString("ids", deviceId); // Identifiers
             w.WriteString("name", "Multi-Room Audio");
             w.WriteString("mf", "Multi-Room Audio");// Manufacturer
@@ -205,63 +205,63 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WritePropertyName("components"); // components
             w.WriteStartObject();
 
-                // Ready Sensor
-                w.WritePropertyName($"{deviceId}_ready"); 
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Ready");
-                w.WriteString("unique_id", $"{deviceId}_ready");
-                w.WriteString("p", "binary_sensor");
-                w.WriteString("value_template", "{{ value_json.ready }}");
-                w.WriteString("payload_on", "ON");
-                w.WriteString("payload_off", "OFF");
-                w.WriteString("device_class", "running");
-                w.WriteEndObject();
+            // Ready Sensor
+            w.WritePropertyName($"{deviceId}_ready");
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Ready");
+            w.WriteString("unique_id", $"{deviceId}_ready");
+            w.WriteString("p", "binary_sensor");
+            w.WriteString("value_template", "{{ value_json.ready }}");
+            w.WriteString("payload_on", "ON");
+            w.WriteString("payload_off", "OFF");
+            w.WriteString("device_class", "running");
+            w.WriteEndObject();
 
-                // Version Sensor
-                w.WritePropertyName($"{deviceId}_version"); 
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Version");
-                w.WriteString("unique_id", $"{deviceId}_version");
-                w.WriteString("p", "sensor");
-                w.WriteString("value_template", "{{ value_json.version }}");
-                w.WriteString("entity_category", "diagnostic");
-                w.WriteString("enabled_by_default", "false");
-                w.WriteEndObject();
+            // Version Sensor
+            w.WritePropertyName($"{deviceId}_version");
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Version");
+            w.WriteString("unique_id", $"{deviceId}_version");
+            w.WriteString("p", "sensor");
+            w.WriteString("value_template", "{{ value_json.version }}");
+            w.WriteString("entity_category", "diagnostic");
+            w.WriteString("enabled_by_default", "false");
+            w.WriteEndObject();
 
-                // player Count sensor
-                w.WritePropertyName($"{deviceId}_player_count"); 
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Players");
-                w.WriteString("unique_id", $"{deviceId}_player_count");
-                w.WriteString("p", "sensor");
-                w.WriteString("value_template", "{{ value_json.player_count }}");
-                w.WriteEndObject();
+            // player Count sensor
+            w.WritePropertyName($"{deviceId}_player_count");
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Players");
+            w.WriteString("unique_id", $"{deviceId}_player_count");
+            w.WriteString("p", "sensor");
+            w.WriteString("value_template", "{{ value_json.player_count }}");
+            w.WriteEndObject();
 
-                // Board Connected Sensor
-                w.WritePropertyName($"{label}_audio_backend"); 
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Audio Backend");
-                w.WriteString("unique_id", $"{label}_audio_backend");
-                w.WriteString("p", "sensor");
-                w.WriteString("value_template", "{{ value_json.audio_backend }}");
-                w.WriteString("entity_category", "diagnostic");
-                w.WriteString("enabled_by_default", "false");
-                w.WriteEndObject();
+            // Board Connected Sensor
+            w.WritePropertyName($"{label}_audio_backend");
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Audio Backend");
+            w.WriteString("unique_id", $"{label}_audio_backend");
+            w.WriteString("p", "sensor");
+            w.WriteString("value_template", "{{ value_json.audio_backend }}");
+            w.WriteString("entity_category", "diagnostic");
+            w.WriteString("enabled_by_default", "false");
+            w.WriteEndObject();
 
-                // Environment sensor
-                w.WritePropertyName($"{deviceId}_environment"); 
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Environment");
-                w.WriteString("unique_id", $"{deviceId}_environment");
-                w.WriteString("p", "sensor");
-                w.WriteString("value_template", "{{ value_json.environment }}");
-                w.WriteString("entity_category", "diagnostic");
-                w.WriteString("enabled_by_default", "false");
-                w.WriteEndObject();
-                
+            // Environment sensor
+            w.WritePropertyName($"{deviceId}_environment");
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Environment");
+            w.WriteString("unique_id", $"{deviceId}_environment");
+            w.WriteString("p", "sensor");
+            w.WriteString("value_template", "{{ value_json.environment }}");
+            w.WriteString("entity_category", "diagnostic");
+            w.WriteString("enabled_by_default", "false");
+            w.WriteEndObject();
+
             //End Components
             w.WriteEndObject();
-            
+
             w.WriteString("state_topic", stateTopic);
             w.WriteString("availability_topic", _topics.BridgeAvailabilityTopic);
             w.WriteString("payload_available", "online");
@@ -269,7 +269,7 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             w.WriteEndObject();
         }
         var payload = System.Text.Encoding.UTF8.GetString(stream.ToArray());
-        
+
         DiscoveryMessage Entity(string component, string key)
             => BuildRemovalMessage(component, $"mra_bridge_{id}_{key}");
 
@@ -303,8 +303,8 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
         using (var w = new Utf8JsonWriter(stream))
         {
             w.WriteStartObject();
-            w.WritePropertyName("dev"); 
-            w.WriteStartObject();       
+            w.WritePropertyName("dev");
+            w.WriteStartObject();
             w.WriteString("ids", $"mra_amp_{zone}"); // Identifiers
             w.WriteString("name", label!);
             w.WriteString("mf", "Multi-Room Audio");// Manufacturer
@@ -321,61 +321,61 @@ private DiscoveryMessage BuildRemovalMessage(string component, string deviceId)
             // Start Components
             w.WritePropertyName("components"); // components
             w.WriteStartObject();
-                // Poser Sensor
-                w.WritePropertyName($"{deviceId}_power"); // start of power binary sensor
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Power");
-                w.WriteString("unique_id", $"{deviceId}_power");
-                w.WriteString("p", "binary_sensor");
-                w.WriteString("value_template", "{{ value_json.power }}");
-                w.WriteString("payload_on", "ON");
-                w.WriteString("payload_off", "OFF");
-                w.WriteString("device_class", "power");
-                w.WriteEndObject();
+            // Poser Sensor
+            w.WritePropertyName($"{deviceId}_power"); // start of power binary sensor
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Power");
+            w.WriteString("unique_id", $"{deviceId}_power");
+            w.WriteString("p", "binary_sensor");
+            w.WriteString("value_template", "{{ value_json.power }}");
+            w.WriteString("payload_on", "ON");
+            w.WriteString("payload_off", "OFF");
+            w.WriteString("device_class", "power");
+            w.WriteEndObject();
 
-                // Scheduled Off Sensor
-                w.WritePropertyName($"{deviceId}_scheduled_off"); // start of Scheduled Off sensor
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Scheduled Off");
-                w.WriteString("unique_id", $"{deviceId}_scheduled_off");
-                w.WriteString("p", "sensor");
-                w.WriteString("value_template", "{{ value_json.scheduled_off }}");
-                w.WriteString("device_class", "timestamp");
-                w.WriteString("entity_category", "diagnostic");
-                w.WriteString("enabled_by_default", "false");
-                w.WriteEndObject();
+            // Scheduled Off Sensor
+            w.WritePropertyName($"{deviceId}_scheduled_off"); // start of Scheduled Off sensor
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Scheduled Off");
+            w.WriteString("unique_id", $"{deviceId}_scheduled_off");
+            w.WriteString("p", "sensor");
+            w.WriteString("value_template", "{{ value_json.scheduled_off }}");
+            w.WriteString("device_class", "timestamp");
+            w.WriteString("entity_category", "diagnostic");
+            w.WriteString("enabled_by_default", "false");
+            w.WriteEndObject();
 
-                // Override Switch
-                w.WritePropertyName($"{deviceId}_override"); // start of Override Switch
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Override");
-                w.WriteString("unique_id", $"{deviceId}_override");
-                w.WriteString("p", "switch");
-                w.WriteString("command_topic", _topics.AmpCommandTopic(boardId, t.Channel, "override"));
-                w.WriteString("value_template", "{{ value_json.override }}");
-                w.WriteString("state_on", "ON");
-                w.WriteString("state_off", "OFF");
-                w.WriteString("payload_on", "ON");
-                w.WriteString("payload_off", "OFF");
-                w.WriteEndObject();
+            // Override Switch
+            w.WritePropertyName($"{deviceId}_override"); // start of Override Switch
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Override");
+            w.WriteString("unique_id", $"{deviceId}_override");
+            w.WriteString("p", "switch");
+            w.WriteString("command_topic", _topics.AmpCommandTopic(boardId, t.Channel, "override"));
+            w.WriteString("value_template", "{{ value_json.override }}");
+            w.WriteString("state_on", "ON");
+            w.WriteString("state_off", "OFF");
+            w.WriteString("payload_on", "ON");
+            w.WriteString("payload_off", "OFF");
+            w.WriteEndObject();
 
-                // Board Connected Sensor
-                w.WritePropertyName($"{deviceId}_board_connected"); // start of Board Connected Binary Sensor
-                w.WriteStartObject();
-                w.WriteString("name", $"{label} Board Connected");
-                w.WriteString("unique_id", $"{deviceId}_board_connected");
-                w.WriteString("p", "binary_sensor");
-                w.WriteString("value_template", "{{ value_json.board_connected }}");
-                w.WriteString("payload_on", "ON");
-                w.WriteString("payload_off", "OFF");
-                w.WriteString("device_class", "connectivity");
-                w.WriteString("entity_category", "diagnostic");
-                w.WriteString("enabled_by_default", "false");
-                w.WriteEndObject();
-            
+            // Board Connected Sensor
+            w.WritePropertyName($"{deviceId}_board_connected"); // start of Board Connected Binary Sensor
+            w.WriteStartObject();
+            w.WriteString("name", $"{label} Board Connected");
+            w.WriteString("unique_id", $"{deviceId}_board_connected");
+            w.WriteString("p", "binary_sensor");
+            w.WriteString("value_template", "{{ value_json.board_connected }}");
+            w.WriteString("payload_on", "ON");
+            w.WriteString("payload_off", "OFF");
+            w.WriteString("device_class", "connectivity");
+            w.WriteString("entity_category", "diagnostic");
+            w.WriteString("enabled_by_default", "false");
+            w.WriteEndObject();
+
             //End Components
             w.WriteEndObject();
-            
+
             w.WriteString("state_topic", stateTopic);
             w.WriteString("availability_topic", _topics.BridgeAvailabilityTopic);
             w.WriteString("payload_available", "online");
