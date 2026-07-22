@@ -1,29 +1,29 @@
 # Multi-Room Audio Controller
 
 <!-- VERSION_INFO_START -->
-## Latest Release: 5.2.0
+## Latest Release: 5.2.2
 
 
+
+Rolls up everything since 5.2.0 (the 5.2.1 combine-sink fix was never tagged).
 
 ### Highlights
-- **Home Assistant MQTT Bridge** — Players and amp zones auto-register in Home Assistant via MQTT discovery, with live state publishing, command handling, and container availability via Last Will & Testament. Enable and configure through the new MQTT add-on options or environment variables.
-- **Virtual Relay Boards & Sticky Amp Overrides** — Create virtual relay boards and manually override amp power (sticky on/off) from the Triggers UI or via Home Assistant, independent of player activity.
-- **SendSpin SDK 9.1.0** — Upgraded from 7.3.0 with improved multi-room sync
-- **Custom Sink Volume Control** — Volume control for combined/remapped custom sinks
+- **Perceptual volume** — Player volume now follows a cubic taper instead of linear amplitude, so the slider matches how loudness is actually heard. Any given percentage is quieter than before, so raise your players once after upgrading (#263)
+- **Quieter MQTT** — Unchanged retained topics are no longer republished on every state change, cutting the message storm Home Assistant sees (#256)
+- **Multi-sink relay triggers** — A single relay trigger can drive more than one zone (#250)
 
 ### Added
-- Home Assistant MQTT discovery config builders for players and amp zones, state payload publishers, and command parsing/handling
-- MQTT settings model, config service with env/HAOS override precedence, and `GET/PUT` MQTT settings API endpoint
-- MQTT options in both the stable and dev HAOS add-on config (`mqtt_enabled`, `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password`, `mqtt_tls`)
-- Container availability signal published over MQTT (online/offline via LWT)
-- Virtual relay board type with factory/connect wiring
-- Sticky amp override: trigger override endpoint, `TriggerResponse.IsOverridden`, and `TriggersChanged` event
-- Virtual board and amp override controls in the Triggers UI
-- Custom sink volume control (#220)
-- `PlayersChanged` event raised alongside SignalR broadcasts to keep MQTT state in sync
-- Timer/player sync test project wired into CI
+- Cubic `VolumeCurve` applied to player gain across all volume paths — UI/API, startup, HID buttons, and server-initiated changes (#263)
+- Retained-payload cache that suppresses byte-identical MQTT republishes, cleared on every reconnect so a restarted broker is re-primed in full (#256)
+- Multiple custom sinks per relay trigger, with a chip-based picker in the main UI and onboarding wizard; legacy single-sink config migrates automatically (#250)
+- Player State advertised as an enum with the full state set so Home Assistant offers the values in automation triggers (#249)
 
 ### Fixed
+- Combine sinks built from custom remap sinks now reload correctly after an add-on restart. Startup loading is ordered by actual sink dependencies (topological sort) instead of a fixed combine-then-remap order (#247)
+- Stopped sink migration from treating references to other custom sinks as missing hardware, removing a misleading "slave sink not found" warning on startup (#247)
+- A cleared off-delay box no longer fails a trigger save — the delay falls back to its last saved value instead of serializing as `null` and taking the sink assignment down with it in a 400 (#250)
+- UI trigger saves no longer clear a channel's zone name (#271)
+- Benign one-time startup sample discard is no longer reported as a buffer overflow; the ERROR is gated on the SDK's overrun count actually advancing (#233)
 
 [View full changelog](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/CHANGELOG.md)
 <!-- VERSION_INFO_END -->
