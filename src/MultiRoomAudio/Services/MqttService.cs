@@ -25,6 +25,7 @@ public class MqttService
     private HaDiscovery? _discovery;
     private string _baseTopic = "multiroom-audio";
     private readonly SemaphoreSlim _publishLock = new(1, 1);
+    private readonly RetainedPublishCache _retained = new();
     private CancellationTokenSource? _reconnectCts;
     private volatile bool _shuttingDown;
 
@@ -119,6 +120,12 @@ public class MqttService
         await _client!.ConnectAsync(_options!, ct);
         LastError = null;
         _logger.LogInformation("MQTT bridge connected to broker");
+
+        // A broker that restarted may have lost its retained set, so forget what we think it
+        // holds and let the announce below re-prime every topic in full.
+        await _publishLock.WaitAsync(ct);
+        try { _retained.Clear(); }
+        finally { _publishLock.Release(); }
 
         await _client.SubscribeAsync(_topics!.PlayerCommandSubscription, MqttQualityOfServiceLevel.AtLeastOnce, ct);
         await _client.SubscribeAsync(_topics!.AmpCommandSubscription, MqttQualityOfServiceLevel.AtLeastOnce, ct);
@@ -282,6 +289,10 @@ public class MqttService
         await _publishLock.WaitAsync(ct);
         try
         {
+            // The broker already retains the last value, so re-sending identical bytes is
+            // pure noise for subscribers (#256).
+            if (!_retained.ShouldPublish(topic, payload, retain)) return;
+
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(topic)
                 .WithPayload(payload)
@@ -289,6 +300,7 @@ public class MqttService
                 .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
                 .Build();
             await _client.PublishAsync(message, ct);
+            _retained.Record(topic, payload, retain);
         }
         finally
         {
