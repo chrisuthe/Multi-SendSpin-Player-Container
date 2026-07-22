@@ -124,7 +124,8 @@ public class MqttService
         // A broker that restarted may have lost its retained set, so forget what we think it
         // holds and let the announce below re-prime every topic in full.
         await _publishLock.WaitAsync(ct);
-        try { _retained.Clear(); }
+        try
+        { _retained.Clear(); }
         finally { _publishLock.Release(); }
 
         await _client.SubscribeAsync(_topics!.PlayerCommandSubscription, MqttQualityOfServiceLevel.AtLeastOnce, ct);
@@ -299,7 +300,8 @@ public class MqttService
         {
             // The broker already retains the last value, so re-sending identical bytes is
             // pure noise for subscribers (#256).
-            if (!_retained.ShouldPublish(topic, payload, retain)) return;
+            if (!_retained.ShouldPublish(topic, payload, retain))
+                return;
 
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(topic)

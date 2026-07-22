@@ -77,7 +77,8 @@ public class HaDiscovery
             w.WriteString("device_class", "enum");
             w.WritePropertyName("options");
             w.WriteStartArray();
-            foreach (var s in PlayerStateOptions) w.WriteStringValue(s);
+            foreach (var s in PlayerStateOptions)
+                w.WriteStringValue(s);
             w.WriteEndArray();
             w.WriteEndObject();
 
