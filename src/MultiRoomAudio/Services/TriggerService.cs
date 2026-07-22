@@ -509,6 +509,10 @@ public class TriggerService : IAsyncDisposable
     /// <summary>
     /// Configure a trigger channel on a specific board.
     /// </summary>
+    /// <param name="zoneName">
+    /// Null leaves the existing zone name unchanged; an empty/whitespace string clears it.
+    /// Callers that omit the field (the web UI does) must not wipe a name set via the API.
+    /// </param>
     public bool ConfigureTrigger(string boardId, int channel, List<string> customSinkNames, int offDelaySeconds, string? zoneName)
     {
         var boardConfig = _config.Boards.FirstOrDefault(b => b.BoardId == boardId);
@@ -541,7 +545,13 @@ public class TriggerService : IAsyncDisposable
 
             trigger.CustomSinkNames = sinks;
             trigger.OffDelaySeconds = offDelaySeconds;
-            trigger.ZoneName = zoneName;
+
+            // Null means "not supplied" — preserve whatever is stored. Only an explicit
+            // empty string clears the name.
+            if (zoneName != null)
+            {
+                trigger.ZoneName = string.IsNullOrWhiteSpace(zoneName) ? null : zoneName;
+            }
 
             // If unassigning (no sinks), turn off the relay and cancel timer.
             if (sinks.Count == 0)
@@ -560,7 +570,7 @@ public class TriggerService : IAsyncDisposable
 
             SaveConfiguration();
             _logger.LogInformation("Trigger {BoardId}/{Channel} configured: sinks=[{Sinks}], delay={Delay}s, zone={Zone}",
-                boardId, channel, string.Join(", ", sinks), offDelaySeconds, zoneName ?? "(none)");
+                boardId, channel, string.Join(", ", sinks), offDelaySeconds, trigger.ZoneName ?? "(none)");
 
             return true;
         }

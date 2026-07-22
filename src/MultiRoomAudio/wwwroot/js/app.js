@@ -5615,6 +5615,8 @@ async function saveTriggerSinks(boardId, channel) {
     const names = t ? (t.customSinkNames || []) : [];
     const delayInput = document.getElementById(`trigger-delay-${boardIdSafe}-${channel}`);
     const delay = coerceOffDelay(delayInput ? delayInput.value : null, t ? t.offDelaySeconds : 60);
+    // Round-trip the zone name (set via API/MQTT, no UI field) so this save doesn't drop it.
+    const zoneName = t ? (t.zoneName ?? null) : null;
 
     try {
         const url = boardId.includes('/')
@@ -5623,7 +5625,7 @@ async function saveTriggerSinks(boardId, channel) {
         const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: delay })
+            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: delay, zoneName })
         });
         if (!response.ok) {
             const error = await response.json();
@@ -5646,6 +5648,8 @@ async function updateTriggerDelay(boardId, channel, delay) {
     const t = getTrigger(boardId, channel);
     const names = t ? (t.customSinkNames || []) : [];
     const offDelaySeconds = coerceOffDelay(delay, t ? t.offDelaySeconds : 60);
+    // Round-trip the zone name (set via API/MQTT, no UI field) so this save doesn't drop it.
+    const zoneName = t ? (t.zoneName ?? null) : null;
 
     try {
         const url = boardId.includes('/')
@@ -5654,7 +5658,7 @@ async function updateTriggerDelay(boardId, channel, delay) {
         const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds })
+            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds, zoneName })
         });
 
         if (!response.ok) {
