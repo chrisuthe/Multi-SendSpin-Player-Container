@@ -1,10 +1,12 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-31fe54e
+## Development Build: sha-e4abd45
 
 **Current Dev Build Changes** (recent)
 
+- fix: apply a cubic volume taper instead of linear amplitude (#263) (#270)
+- fix: stop UI trigger saves from clearing the zone name (#271)
 - fix: stop a cleared off-delay box from failing trigger sink saves (#250) (#268)
 - fix: stop republishing unchanged retained MQTT topics (#256) (#269)
 - feat: allow a relay trigger to reference multiple sinks (#250) (#255)
@@ -13,8 +15,6 @@
 - Merge pull request #248 from chrisuthe/fix/combine-sink-resume
 - fix: load custom sinks in dependency order so combine-of-remaps survives restart
 - docs: add 5.2.0 changelog (MQTT bridge, amp overrides, SDK 9.1.0)
-- Merge pull request #239 from chrisuthe/fix/mqtt-unique-client-id
-- fix: use a unique MQTT client ID to stop broker takeover loop
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
