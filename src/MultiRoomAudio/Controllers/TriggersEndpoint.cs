@@ -478,7 +478,8 @@ public static class TriggersEndpoint
 
             try
             {
-                service.ConfigureTrigger(boardId, channel, new List<string>(), 60, null);
+                // Empty (not null) zone name: unassigning must clear the name, not preserve it.
+                service.ConfigureTrigger(boardId, channel, new List<string>(), 60, "");
                 logger.LogInformation("Trigger channel {BoardId}/{Channel} unassigned", boardId, channel);
                 return Results.Ok(new SuccessResponse(true, $"Trigger channel {boardId}/{channel} unassigned"));
             }
@@ -741,7 +742,8 @@ public static class TriggersEndpoint
 
             try
             {
-                service.ConfigureTrigger(firstBoard.BoardId, channel, new List<string>(), 60, null);
+                // Empty (not null) zone name: unassigning must clear the name, not preserve it.
+                service.ConfigureTrigger(firstBoard.BoardId, channel, new List<string>(), 60, "");
                 logger.LogInformation("Trigger channel {Channel} unassigned on board {BoardId}",
                     channel, firstBoard.BoardId);
                 return Results.Ok(new SuccessResponse(true, $"Trigger channel {channel} unassigned"));

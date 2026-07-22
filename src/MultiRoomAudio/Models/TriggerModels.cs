@@ -457,7 +457,8 @@ public class TriggerConfigureRequest
     public int OffDelaySeconds { get; set; } = 60;
 
     /// <summary>
-    /// Optional friendly name for this zone.
+    /// Optional friendly name for this zone. Omit (or send null) to leave the current
+    /// name unchanged; send an empty string to clear it.
     /// </summary>
     [StringLength(100, ErrorMessage = "Zone name must be 100 characters or less.")]
     public string? ZoneName { get; set; }

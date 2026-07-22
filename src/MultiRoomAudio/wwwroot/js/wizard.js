@@ -1631,6 +1631,8 @@ const Wizard = {
     async wizardSaveTriggerSinks(boardId, channel) {
         const t = this.wizardGetTrigger(boardId, channel);
         const names = t ? (t.customSinkNames || []) : [];
+        // Round-trip the zone name (set via API/MQTT, no UI field) so this save doesn't drop it.
+        const zoneName = t ? (t.zoneName ?? null) : null;
 
         try {
             // Ensure the feature is enabled before the first assignment.
@@ -1646,7 +1648,7 @@ const Wizard = {
                 : `./api/triggers/boards/${encodeURIComponent(boardId)}/${channel}`;
             const response = await fetch(url, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: 60 })
+                body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: 60, zoneName })
             });
             if (!response.ok) {
                 const error = await response.json();
