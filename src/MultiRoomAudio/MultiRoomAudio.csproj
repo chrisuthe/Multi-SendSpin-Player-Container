@@ -24,7 +24,7 @@
     <PackageReference Include="HidSharp" Version="2.1.0" />
 
     <!-- Configuration -->
-    <PackageReference Include="YamlDotNet" Version="17.0.1" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
 
     <!-- Real-time communication -->
     <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.11" />
