@@ -16,51 +16,55 @@ public class HaDiscoveryTests
         DateTime.UnixEpoch, DateTime.UnixEpoch, null, true, null,
         IsPendingReconnection: false, ReconnectionAttempts: 0);
 
+    private static JsonElement DeviceMessage(System.Collections.Generic.IReadOnlyList<HaDiscovery.DiscoveryMessage> msgs)
+    {
+        var device = msgs.Single(m => !string.IsNullOrEmpty(m.Payload));
+        return JsonDocument.Parse(device.Payload).RootElement.Clone();
+    }
+
     [Fact]
     public void Player_EmitsRestartButtonWithCommandTopic()
     {
-        var msgs = _d.ForPlayer(Player());
-        var button = msgs.Single(m => m.Topic.Contains("/button/"));
+        var root = DeviceMessage(_d.ForPlayerDevice(Player()));
+        var components = root.GetProperty("components");
+        var restart = components.EnumerateObject().Single(e => e.Value.GetProperty("p").GetString() == "button");
 
-        using var doc = JsonDocument.Parse(button.Payload);
-        var root = doc.RootElement;
-        Assert.Equal("multiroom-audio/player/abc123/restart/set", root.GetProperty("command_topic").GetString());
+        Assert.Equal("multiroom-audio/player/abc123/restart/set", restart.Value.GetProperty("command_topic").GetString());
         Assert.Equal("multiroom-audio/bridge/availability", root.GetProperty("availability_topic").GetString());
-        Assert.StartsWith("mra_abc123_", root.GetProperty("unique_id").GetString());
+        Assert.StartsWith("mra_player_abc123_", restart.Value.GetProperty("unique_id").GetString());
     }
 
     [Fact]
     public void Player_OffsetNumberHasCommandTopicAndRange()
     {
-        var number = _d.ForPlayer(Player()).Single(m => m.Topic.Contains("/number/"));
-        using var doc = JsonDocument.Parse(number.Payload);
-        var root = doc.RootElement;
-        Assert.Equal("multiroom-audio/player/abc123/offset/set", root.GetProperty("command_topic").GetString());
-        Assert.Equal(-5000, root.GetProperty("min").GetInt32());
-        Assert.Equal(5000, root.GetProperty("max").GetInt32());
+        var root = DeviceMessage(_d.ForPlayerDevice(Player()));
+        var components = root.GetProperty("components");
+        var offset = components.EnumerateObject().Single(e => e.Value.GetProperty("p").GetString() == "number");
+
+        Assert.Equal("multiroom-audio/player/abc123/offset/set", offset.Value.GetProperty("command_topic").GetString());
+        Assert.Equal(-5000, offset.Value.GetProperty("min").GetInt32());
+        Assert.Equal(5000, offset.Value.GetProperty("max").GetInt32());
     }
 
     [Fact]
     public void Player_AllEntitiesShareDeviceIdentifier()
     {
-        var ids = _d.ForPlayer(Player()).Select(m =>
-        {
-            using var doc = JsonDocument.Parse(m.Payload);
-            return doc.RootElement.GetProperty("device").GetProperty("identifiers")[0].GetString();
-        }).Distinct().ToList();
-        Assert.Single(ids);
-        Assert.Equal("mra_player_abc123", ids[0]);
+        var root = DeviceMessage(_d.ForPlayerDevice(Player()));
+        Assert.Equal("mra_player_abc123", root.GetProperty("dev").GetProperty("ids").GetString());
+
+        var components = root.GetProperty("components");
+        Assert.All(components.EnumerateObject(), e =>
+            Assert.StartsWith("mra_player_abc123_", e.Value.GetProperty("unique_id").GetString()));
     }
 
     [Fact]
     public void Container_EmitsReadyBinarySensor()
     {
-        var msgs = _d.ForContainer("instance1");
-        Assert.Contains(msgs, m =>
-        {
-            if (!m.Topic.Contains("/binary_sensor/")) return false;
-            using var doc = System.Text.Json.JsonDocument.Parse(m.Payload);
-            return doc.RootElement.GetProperty("value_template").GetString()!.Contains("value_json.ready");
-        });
+        var root = DeviceMessage(_d.ForContainerDevice("instance1"));
+        var components = root.GetProperty("components");
+
+        Assert.Contains(components.EnumerateObject(), e =>
+            e.Value.GetProperty("p").GetString() == "binary_sensor" &&
+            e.Value.GetProperty("value_template").GetString()!.Contains("value_json.ready"));
     }
 }
