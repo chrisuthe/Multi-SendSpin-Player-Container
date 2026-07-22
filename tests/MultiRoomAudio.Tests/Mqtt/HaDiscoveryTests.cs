@@ -67,4 +67,63 @@ public class HaDiscoveryTests
             e.Value.GetProperty("p").GetString() == "binary_sensor" &&
             e.Value.GetProperty("value_template").GetString()!.Contains("value_json.ready"));
     }
+
+    // Finds a component within a device payload by the tail of its unique_id (e.g. "version").
+    private static JsonElement Component(JsonElement device, string keySuffix)
+        => device.GetProperty("components").EnumerateObject()
+            .Single(e => e.Value.GetProperty("unique_id").GetString()!
+                .EndsWith($"_{keySuffix}", System.StringComparison.OrdinalIgnoreCase))
+            .Value;
+
+    [Theory]
+    [InlineData("version")]
+    [InlineData("audio_backend")]
+    [InlineData("environment")]
+    public void Container_DiagnosticSensorsDisabledByDefault(string key)
+    {
+        var device = DeviceMessage(_d.ForContainerDevice("instance1"));
+        var component = Component(device, key);
+        Assert.False(component.GetProperty("enabled_by_default").GetBoolean());
+    }
+
+    [Theory]
+    // #249/#257: player diagnostic entities register but stay disabled to keep HA's recorder
+    // workload down; the bridge pushes state frequently and these are rarely watched.
+    [InlineData("server")]
+    [InlineData("clock_synced")]
+    [InlineData("reconnect_pending")]
+    [InlineData("reconnect_attempts")]
+    public void Player_DiagnosticSensorsDisabledByDefault(string key)
+    {
+        var device = DeviceMessage(_d.ForPlayerDevice(Player()));
+        var component = Component(device, key);
+        Assert.Equal("diagnostic", component.GetProperty("entity_category").GetString());
+        Assert.False(component.GetProperty("enabled_by_default").GetBoolean());
+    }
+
+    [Theory]
+    // Controls stay enabled - a restart button or offset control nobody can see defeats its
+    // purpose. State is the primary sensor and is also enabled.
+    [InlineData("State")]
+    [InlineData("offset")]
+    [InlineData("restart")]
+    public void Player_ControlsAndStateRemainEnabled(string key)
+    {
+        var device = DeviceMessage(_d.ForPlayerDevice(Player()));
+        var component = Component(device, key);
+        Assert.False(component.TryGetProperty("enabled_by_default", out var v) && !v.GetBoolean(),
+            $"component '{key}' should not be disabled by default");
+    }
+
+    [Fact]
+    public void Player_StateSensorIsEnumWithAllPlayerStateOptions()
+    {
+        var device = DeviceMessage(_d.ForPlayerDevice(Player()));
+        var state = Component(device, "State");
+        Assert.Equal("enum", state.GetProperty("device_class").GetString());
+
+        var options = state.GetProperty("options").EnumerateArray().Select(e => e.GetString()!).ToList();
+        var expected = Enum.GetNames<PlayerState>().Select(n => n.ToLowerInvariant()).ToList();
+        Assert.Equal(expected, options);
+    }
 }

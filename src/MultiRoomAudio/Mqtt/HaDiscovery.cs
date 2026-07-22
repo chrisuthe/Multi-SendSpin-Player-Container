@@ -10,6 +10,10 @@ namespace MultiRoomAudio.Mqtt;
 /// </summary>
 public class HaDiscovery
 {
+    /// <summary>Possible values of the player State sensor, derived from <see cref="PlayerState"/> to stay in sync with the published payload.</summary>
+    private static readonly string[] PlayerStateOptions =
+        Enum.GetNames<PlayerState>().Select(n => n.ToLowerInvariant()).ToArray();
+
     private readonly MqttTopics _topics;
     private readonly string _version;
 
@@ -67,6 +71,14 @@ public class HaDiscovery
             w.WriteString("unique_id", $"{deviceId}_State");
             w.WriteString("p", "sensor");
             w.WriteString("value_template", "{{ value_json.state }}");
+            // Advertised as an enum with the full state set so Home Assistant offers the
+            // values in automation triggers (#249). Carried over from the per-entity
+            // discovery builders this device payload replaced.
+            w.WriteString("device_class", "enum");
+            w.WritePropertyName("options");
+            w.WriteStartArray();
+            foreach (var s in PlayerStateOptions) w.WriteStringValue(s);
+            w.WriteEndArray();
             w.WriteEndObject();
 
             // Player Server Sensor
@@ -77,7 +89,7 @@ public class HaDiscovery
             w.WriteString("p", "sensor");
             w.WriteString("value_template", "{{ value_json.server_name }}");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             // Clock Synced Sensor
@@ -90,7 +102,7 @@ public class HaDiscovery
             w.WriteString("payload_on", "ON");
             w.WriteString("payload_off", "OFF");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             // Reconnect Pending Sensor
@@ -103,7 +115,7 @@ public class HaDiscovery
             w.WriteString("payload_on", "ON");
             w.WriteString("payload_off", "OFF");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             // Reconnect Attempts Sensor
@@ -114,7 +126,7 @@ public class HaDiscovery
             w.WriteString("p", "sensor");
             w.WriteString("value_template", "{{ value_json.reconnect_attempts }}");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             // Ready Sensor
@@ -141,7 +153,6 @@ public class HaDiscovery
             w.WriteString("command_topic", _topics.PlayerCommandTopic(p.ClientId, "restart"));
             w.WriteString("payload_press", "PRESS");
             w.WriteString("entity_category", "config");
-            w.WriteString("enabled_by_default", "false");
             w.WriteEndObject();
 
             //End Components
@@ -225,7 +236,7 @@ public class HaDiscovery
             w.WriteString("p", "sensor");
             w.WriteString("value_template", "{{ value_json.version }}");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             // player Count sensor
@@ -245,7 +256,7 @@ public class HaDiscovery
             w.WriteString("p", "sensor");
             w.WriteString("value_template", "{{ value_json.audio_backend }}");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             // Environment sensor
@@ -256,7 +267,7 @@ public class HaDiscovery
             w.WriteString("p", "sensor");
             w.WriteString("value_template", "{{ value_json.environment }}");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             //End Components
@@ -342,7 +353,7 @@ public class HaDiscovery
             w.WriteString("value_template", "{{ value_json.scheduled_off }}");
             w.WriteString("device_class", "timestamp");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             // Override Switch
@@ -370,7 +381,7 @@ public class HaDiscovery
             w.WriteString("payload_off", "OFF");
             w.WriteString("device_class", "connectivity");
             w.WriteString("entity_category", "diagnostic");
-            w.WriteString("enabled_by_default", "false");
+            w.WriteBoolean("enabled_by_default", false);
             w.WriteEndObject();
 
             //End Components

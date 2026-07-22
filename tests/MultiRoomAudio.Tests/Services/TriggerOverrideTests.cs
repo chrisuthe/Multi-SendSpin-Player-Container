@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using MultiRoomAudio.Models;
@@ -16,7 +17,7 @@ public class TriggerOverrideBehaviorTests
         svc.SetEnabled(true);
         var boardId = "VIRTUAL:test01";
         svc.AddBoard(boardId, "Test Zone", channelCount: 2, boardType: RelayBoardType.Virtual);
-        svc.ConfigureTrigger(boardId, channel: 1, customSinkName: "sink1", offDelaySeconds: 30, zoneName: "Zone 1");
+        svc.ConfigureTrigger(boardId, channel: 1, customSinkNames: new List<string> { "sink1" }, offDelaySeconds: 30, zoneName: "Zone 1");
         await Task.CompletedTask;
         return (svc, boardId);
     }
@@ -88,7 +89,9 @@ public class TriggerModelsTests
     public void TriggerResponse_IsOverridden_DefaultsFalse()
     {
         var r = new TriggerResponse(
-            Channel: 1, CustomSinkName: null, CustomSinkDisplayName: null,
+            Channel: 1,
+            CustomSinkNames: new List<string>(),
+            CustomSinkDisplayNames: new List<string>(),
             OffDelaySeconds: 60, ZoneName: null, RelayState: RelayState.Off,
             IsActive: false, LastActivated: null, ScheduledOffTime: null);
         Assert.False(r.IsOverridden);

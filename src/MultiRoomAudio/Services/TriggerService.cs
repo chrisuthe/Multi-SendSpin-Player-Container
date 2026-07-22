@@ -227,20 +227,22 @@ public class TriggerService : IAsyncDisposable
 
             var channelState = _channelStates.GetValueOrDefault((boardId, channel)) ?? new TriggerChannelState();
 
-            // Get display name for the sink
-            string? sinkDisplayName = null;
-            if (!string.IsNullOrEmpty(config.CustomSinkName))
-            {
-                var sink = _sinksService.GetSink(config.CustomSinkName);
-                sinkDisplayName = sink?.Description ?? sink?.Name ?? config.CustomSinkName;
-            }
+            // Resolve display names for each assigned sink.
+            var sinkNames = config.CustomSinkNames ?? new List<string>();
+            var sinkDisplayNames = sinkNames
+                .Select(n =>
+                {
+                    var sink = _sinksService.GetSink(n);
+                    return sink?.Description ?? sink?.Name ?? n;
+                })
+                .ToList();
 
             var relayState = relayBoard?.GetRelay(channel) ?? RelayState.Unknown;
 
             triggers.Add(new TriggerResponse(
                 Channel: channel,
-                CustomSinkName: config.CustomSinkName,
-                CustomSinkDisplayName: sinkDisplayName,
+                CustomSinkNames: sinkNames,
+                CustomSinkDisplayNames: sinkDisplayNames,
                 OffDelaySeconds: config.OffDelaySeconds,
                 ZoneName: config.ZoneName,
                 RelayState: relayState,
@@ -506,7 +508,11 @@ public class TriggerService : IAsyncDisposable
     /// <summary>
     /// Configure a trigger channel on a specific board.
     /// </summary>
-    public bool ConfigureTrigger(string boardId, int channel, string? customSinkName, int offDelaySeconds, string? zoneName)
+    /// <param name="zoneName">
+    /// Null leaves the existing zone name unchanged; an empty/whitespace string clears it.
+    /// Callers that omit the field (the web UI does) must not wipe a name set via the API.
+    /// </param>
+    public bool ConfigureTrigger(string boardId, int channel, List<string> customSinkNames, int offDelaySeconds, string? zoneName)
     {
         var boardConfig = _config.Boards.FirstOrDefault(b => b.BoardId == boardId);
         if (boardConfig == null)
@@ -515,9 +521,10 @@ public class TriggerService : IAsyncDisposable
         if (channel < 1 || channel > boardConfig.ChannelCount)
             throw new ArgumentOutOfRangeException(nameof(channel), $"Channel must be between 1 and {boardConfig.ChannelCount}");
 
+        var sinks = customSinkNames ?? new List<string>();
+
         lock (_configLock)
         {
-            // Find or create the trigger config
             var trigger = boardConfig.Triggers.FirstOrDefault(t => t.Channel == channel);
             if (trigger == null)
             {
@@ -525,23 +532,28 @@ public class TriggerService : IAsyncDisposable
                 boardConfig.Triggers.Add(trigger);
             }
 
-            // Validate custom sink exists (if specified)
-            if (!string.IsNullOrEmpty(customSinkName))
+            // Validate each sink exists (warn but do not fail — a sink may be created later).
+            foreach (var sinkName in sinks)
             {
-                var sink = _sinksService.GetSink(customSinkName);
-                if (sink == null)
+                if (_sinksService.GetSink(sinkName) == null)
                 {
                     _logger.LogWarning("Custom sink '{SinkName}' not found for trigger {BoardId}/{Channel}",
-                        customSinkName, boardId, channel);
+                        sinkName, boardId, channel);
                 }
             }
 
-            trigger.CustomSinkName = customSinkName;
+            trigger.CustomSinkNames = sinks;
             trigger.OffDelaySeconds = offDelaySeconds;
-            trigger.ZoneName = zoneName;
 
-            // If unassigning, turn off the relay and cancel timer
-            if (string.IsNullOrEmpty(customSinkName))
+            // Null means "not supplied" — preserve whatever is stored. Only an explicit
+            // empty string clears the name.
+            if (zoneName != null)
+            {
+                trigger.ZoneName = string.IsNullOrWhiteSpace(zoneName) ? null : zoneName;
+            }
+
+            // If unassigning (no sinks), turn off the relay and cancel timer.
+            if (sinks.Count == 0)
             {
                 CancelOffTimer(boardId, channel);
                 if (_relayBoards.TryGetValue(boardId, out var board))
@@ -556,8 +568,8 @@ public class TriggerService : IAsyncDisposable
             }
 
             SaveConfiguration();
-            _logger.LogInformation("Trigger {BoardId}/{Channel} configured: sink={Sink}, delay={Delay}s, zone={Zone}",
-                boardId, channel, customSinkName ?? "(none)", offDelaySeconds, zoneName ?? "(none)");
+            _logger.LogInformation("Trigger {BoardId}/{Channel} configured: sinks=[{Sinks}], delay={Delay}s, zone={Zone}",
+                boardId, channel, string.Join(", ", sinks), offDelaySeconds, trigger.ZoneName ?? "(none)");
 
             return true;
         }
@@ -702,17 +714,19 @@ public class TriggerService : IAsyncDisposable
         if (!_config.Enabled || string.IsNullOrEmpty(deviceId))
             return;
 
-        // Find the trigger for this device across all boards
+        // Activate EVERY channel that lists this sink (full many-to-many).
         foreach (var boardConfig in _config.Boards)
         {
-            var trigger = boardConfig.Triggers.FirstOrDefault(t =>
-                !string.IsNullOrEmpty(t.CustomSinkName) &&
-                string.Equals(t.CustomSinkName, deviceId, StringComparison.OrdinalIgnoreCase));
+            if (!_boardStates.ContainsKey(boardConfig.BoardId))
+                continue;
 
-            if (trigger != null && _boardStates.ContainsKey(boardConfig.BoardId))
+            foreach (var trigger in boardConfig.Triggers)
             {
-                ActivateTrigger(boardConfig.BoardId, trigger.Channel, playerName);
-                return;
+                if (trigger.CustomSinkNames.Any(s =>
+                        string.Equals(s, deviceId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    ActivateTrigger(boardConfig.BoardId, trigger.Channel, playerName);
+                }
             }
         }
     }
@@ -727,14 +741,16 @@ public class TriggerService : IAsyncDisposable
 
         foreach (var boardConfig in _config.Boards)
         {
-            var trigger = boardConfig.Triggers.FirstOrDefault(t =>
-                !string.IsNullOrEmpty(t.CustomSinkName) &&
-                string.Equals(t.CustomSinkName, deviceId, StringComparison.OrdinalIgnoreCase));
+            if (!_boardStates.ContainsKey(boardConfig.BoardId))
+                continue;
 
-            if (trigger != null && _boardStates.ContainsKey(boardConfig.BoardId))
+            foreach (var trigger in boardConfig.Triggers)
             {
-                DeactivateTrigger(boardConfig.BoardId, trigger.Channel, trigger.OffDelaySeconds, playerName);
-                return;
+                if (trigger.CustomSinkNames.Any(s =>
+                        string.Equals(s, deviceId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    DeactivateTrigger(boardConfig.BoardId, trigger.Channel, trigger.OffDelaySeconds, playerName);
+                }
             }
         }
     }
@@ -750,29 +766,31 @@ public class TriggerService : IAsyncDisposable
 
             foreach (var boardConfig in _config.Boards)
             {
-                var affectedTriggers = boardConfig.Triggers
-                    .Where(t => string.Equals(t.CustomSinkName, sinkName, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                foreach (var trigger in affectedTriggers)
+                foreach (var trigger in boardConfig.Triggers)
                 {
-                    _logger.LogInformation("Unassigning trigger {BoardId}/{Channel} - sink '{SinkName}' was deleted",
-                        boardConfig.BoardId, trigger.Channel, sinkName);
+                    var removed = trigger.CustomSinkNames
+                        .RemoveAll(s => string.Equals(s, sinkName, StringComparison.OrdinalIgnoreCase));
+                    if (removed == 0)
+                        continue;
 
-                    trigger.CustomSinkName = null;
-
-                    // Turn off relay and cancel timer
-                    CancelOffTimer(boardConfig.BoardId, trigger.Channel);
-                    if (_relayBoards.TryGetValue(boardConfig.BoardId, out var board))
-                    {
-                        board.SetRelay(trigger.Channel, false);
-                    }
-                    if (_channelStates.TryGetValue((boardConfig.BoardId, trigger.Channel), out var state))
-                    {
-                        state.IsActive = false;
-                        state.ActivePlayerCount = 0;
-                    }
                     affected = true;
+                    _logger.LogInformation("Removed sink '{SinkName}' from trigger {BoardId}/{Channel} (deleted)",
+                        sinkName, boardConfig.BoardId, trigger.Channel);
+
+                    // Only turn the channel off when no sinks remain on it.
+                    if (trigger.CustomSinkNames.Count == 0)
+                    {
+                        CancelOffTimer(boardConfig.BoardId, trigger.Channel);
+                        if (_relayBoards.TryGetValue(boardConfig.BoardId, out var board))
+                        {
+                            board.SetRelay(trigger.Channel, false);
+                        }
+                        if (_channelStates.TryGetValue((boardConfig.BoardId, trigger.Channel), out var state))
+                        {
+                            state.IsActive = false;
+                            state.ActivePlayerCount = 0;
+                        }
+                    }
                 }
             }
 
@@ -1352,7 +1370,7 @@ public class TriggerService : IAsyncDisposable
                 foreach (var board in config.Boards)
                 {
                     board.Triggers = board.Triggers
-                        .Where(t => !string.IsNullOrEmpty(t.CustomSinkName) ||
+                        .Where(t => (t.CustomSinkNames?.Count ?? 0) > 0 ||
                                     !string.IsNullOrEmpty(t.ZoneName) ||
                                     t.OffDelaySeconds != 60)
                         .ToList();

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Mqtt;
@@ -8,7 +9,8 @@ namespace MultiRoomAudio.Tests.Mqtt;
 public class AmpStatePayloadsTests
 {
     private static TriggerResponse Zone(RelayState s, bool overridden) => new(
-        Channel: 1, CustomSinkName: "sink", CustomSinkDisplayName: "Sink",
+        Channel: 1, CustomSinkNames: new List<string> { "sink" },
+        CustomSinkDisplayNames: new List<string> { "Sink" },
         OffDelaySeconds: 30, ZoneName: "Living Room", RelayState: s,
         IsActive: s == RelayState.On, LastActivated: null, ScheduledOffTime: null,
         IsOverridden: overridden);

@@ -1,5 +1,31 @@
 # Changelog
 
+## [5.2.2] - Volume Curve, MQTT Volume & Trigger Fixes
+
+Rolls up everything since 5.2.0 (the 5.2.1 combine-sink fix was never tagged).
+
+### Highlights
+- **Perceptual volume** — Player volume now follows a cubic taper instead of linear amplitude, so the slider matches how loudness is actually heard. Any given percentage is quieter than before, so raise your players once after upgrading (#263)
+- **Quieter MQTT** — Unchanged retained topics are no longer republished on every state change, cutting the message storm Home Assistant sees (#256)
+- **Multi-sink relay triggers** — A single relay trigger can drive more than one zone (#250)
+
+### Added
+- Cubic `VolumeCurve` applied to player gain across all volume paths — UI/API, startup, HID buttons, and server-initiated changes (#263)
+- Retained-payload cache that suppresses byte-identical MQTT republishes, cleared on every reconnect so a restarted broker is re-primed in full (#256)
+- Multiple custom sinks per relay trigger, with a chip-based picker in the main UI and onboarding wizard; legacy single-sink config migrates automatically (#250)
+- Player State advertised as an enum with the full state set so Home Assistant offers the values in automation triggers (#249)
+
+### Fixed
+- Combine sinks built from custom remap sinks now reload correctly after an add-on restart. Startup loading is ordered by actual sink dependencies (topological sort) instead of a fixed combine-then-remap order (#247)
+- Stopped sink migration from treating references to other custom sinks as missing hardware, removing a misleading "slave sink not found" warning on startup (#247)
+- A cleared off-delay box no longer fails a trigger save — the delay falls back to its last saved value instead of serializing as `null` and taking the sink assignment down with it in a 400 (#250)
+- UI trigger saves no longer clear a channel's zone name (#271)
+- Benign one-time startup sample discard is no longer reported as a buffer overflow; the ERROR is gated on the SDK's overrun count actually advancing (#233)
+
+### Changed
+- Home Assistant discovery consolidated into device-based payloads; player and container diagnostic entities register but are disabled by default to reduce recorder workload, while controls (State, Delay Offset, Restart) stay enabled (#257, #249)
+- `enabled_by_default` emitted as a JSON boolean rather than a string
+
 ## [5.2.0] - Home Assistant MQTT Bridge & Amp Override Controls
 
 ### Highlights

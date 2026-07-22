@@ -1098,7 +1098,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     {
         // Apply startup volume locally - player is authoritative for its own volume
         // Hardware volume is set to 80% on container startup to avoid clipping
-        context.Player.Volume = context.Config.Volume / 100.0f;
+        context.Player.Volume = VolumeCurve.ToGain(context.Config.Volume);
         _logger.LogInformation("VOLUME [Create] Player '{Name}': startup volume {Volume}% applied locally",
             name, context.Config.Volume);
 
@@ -1444,7 +1444,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.Config.Volume = volume;
 
         // 2. Apply volume locally - player is authoritative for its own volume
-        context.Player.Volume = volume / 100.0f;
+        context.Player.Volume = VolumeCurve.ToGain(volume);
 
         // 3. Inform MA of our volume (command + state echo)
         if (IsPlayerInActiveState(context.State))
@@ -1553,7 +1553,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         context.Config.Volume = volume;
 
         // 2. Apply volume locally - player is authoritative for its own volume
-        context.Player.Volume = volume / 100.0f;
+        context.Player.Volume = VolumeCurve.ToGain(volume);
 
         // 3. Inform MA of our volume
         if (IsPlayerInActiveState(context.State))
@@ -3036,7 +3036,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 context.Config.Volume = serverVolume;
 
                 // Apply volume locally - player is authoritative for its own volume
-                context.Player.Volume = serverVolume / 100.0f;
+                context.Player.Volume = VolumeCurve.ToGain(serverVolume);
 
                 // Note: SDK 5.4.0 auto-acknowledges by sending client/state,
                 // so we don't need to call SendPlayerStateAsync manually

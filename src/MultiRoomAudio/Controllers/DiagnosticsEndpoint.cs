@@ -342,7 +342,7 @@ public static class DiagnosticsEndpoint
             {
                 foreach (var board in status.Boards)
                 {
-                    var channelsInUse = board.Triggers.Count(t => t.CustomSinkName != null);
+                    var channelsInUse = board.Triggers.Count(t => t.CustomSinkNames.Count > 0);
                     sb.AppendLine($"  {board.BoardId} - {board.BoardType} - {board.State} - {channelsInUse}/{board.ChannelCount} channels");
                 }
             }
@@ -377,7 +377,7 @@ public static class DiagnosticsEndpoint
             var playersWithDevices = players.Players.Count(p => !string.IsNullOrEmpty(p.Device));
             var playingCount = players.Players.Count(p => p.State == PlayerState.Playing);
             var connectedBoards = triggerStatus.Boards.Count(b => b.State == TriggerFeatureState.Connected);
-            var assignedChannels = triggerStatus.Boards.SelectMany(b => b.Triggers).Count(t => t.CustomSinkName != null);
+            var assignedChannels = triggerStatus.Boards.SelectMany(b => b.Triggers).Count(t => t.CustomSinkNames.Count > 0);
 
             sb.AppendLine($"  Audio Devices:  {hardwareDeviceCount} total, {playersWithDevices} with players");
             sb.AppendLine($"  Custom Sinks:   {sinks.Count}");
@@ -710,7 +710,9 @@ public static class DiagnosticsEndpoint
                 sb.AppendLine("  Channel Mappings:");
                 foreach (var trigger in board.Triggers)
                 {
-                    var assignedTo = trigger.CustomSinkName ?? "(unassigned)";
+                    var assignedTo = trigger.CustomSinkNames.Count > 0
+                        ? string.Join(", ", trigger.CustomSinkNames)
+                        : "(unassigned)";
                     var stateStr = trigger.RelayState == RelayState.On ? "ON" : "OFF";
                     sb.AppendLine($"    Ch {trigger.Channel}: {stateStr} -> {assignedTo}");
                 }

@@ -85,11 +85,10 @@ public class CustomSinksService : IAsyncDisposable
         // Migrate old configs that don't have identifiers or have stale sink names
         configs = MigrateConfigurations(configs);
 
-        // Sort by dependency order: combine sinks first, then remap sinks
-        // (remap sinks might depend on combine sinks as their master)
-        var sorted = configs
-            .OrderBy(c => c.Type == CustomSinkType.Combine ? 0 : 1)
-            .ToList();
+        // Sort so each sink is loaded only after the custom sinks it references.
+        // Both directions occur: a remap can use a combine as its master, and a combine
+        // can use remaps as its slaves. A topological sort handles either topology (#247).
+        var sorted = SortByDependencyOrder(configs);
 
         var loadedCount = 0;
         var failedCount = 0;
@@ -685,9 +684,17 @@ public class CustomSinksService : IAsyncDisposable
 
         var needsSave = false;
 
+        // Names of all custom sinks. References that name another custom sink are resolved by
+        // load ordering (SortByDependencyOrder), not hardware migration - skip them below so we
+        // don't spuriously warn or mis-map a custom-sink name onto a hardware device.
+        var customSinkNames = new HashSet<string>(
+            configs.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+
         foreach (var config in configs)
         {
-            if (config.Type == CustomSinkType.Remap && !string.IsNullOrEmpty(config.MasterSink))
+            if (config.Type == CustomSinkType.Remap
+                && !string.IsNullOrEmpty(config.MasterSink)
+                && !customSinkNames.Contains(config.MasterSink))
             {
                 // Check if master sink exists
                 var masterExists = currentDevices.Any(d => d.Id.Equals(config.MasterSink, StringComparison.OrdinalIgnoreCase));
@@ -797,6 +804,15 @@ public class CustomSinksService : IAsyncDisposable
                 for (int i = 0; i < config.Slaves.Count; i++)
                 {
                     var slave = config.Slaves[i];
+
+                    // A slave that names another custom sink isn't a hardware device - keep it
+                    // as-is and let load ordering satisfy the dependency.
+                    if (customSinkNames.Contains(slave))
+                    {
+                        resolvedSlaves.Add(slave);
+                        continue;
+                    }
+
                     var slaveExists = currentDevices.Any(d => d.Id.Equals(slave, StringComparison.OrdinalIgnoreCase));
 
                     if (!slaveExists && i < slaveIdentifiers.Count && slaveIdentifiers[i] != null)
@@ -909,6 +925,94 @@ public class CustomSinksService : IAsyncDisposable
         }
 
         return configs;
+    }
+
+    /// <summary>
+    /// Orders custom sinks so each one is loaded only after the other custom sinks it references.
+    /// A combine sink references its <see cref="CustomSinkConfiguration.Slaves"/>; a remap sink
+    /// references its <see cref="CustomSinkConfiguration.MasterSink"/>. Both directions occur
+    /// (a combine of remaps, or a remap of a combine), so a fixed type-based order is insufficient.
+    /// References to hardware sinks (not custom sinks) are ignored; dependency cycles fall back to
+    /// the original order for the affected sinks.
+    /// </summary>
+    private List<CustomSinkConfiguration> SortByDependencyOrder(List<CustomSinkConfiguration> configs)
+    {
+        var ordered = OrderByDependencies(configs, out var cycleNames);
+        foreach (var name in cycleNames)
+        {
+            _logger.LogWarning(
+                "Dependency cycle detected involving custom sink '{Name}'; loading in fallback order",
+                name);
+        }
+        return ordered;
+    }
+
+    /// <summary>
+    /// Pure topological sort over the custom-sink dependency graph. Separated from logging so it can
+    /// be unit tested. <paramref name="cycleNames"/> lists sinks where a dependency cycle forced a
+    /// fallback (one edge dropped); cycles are not expected in valid configurations.
+    /// </summary>
+    internal static List<CustomSinkConfiguration> OrderByDependencies(
+        List<CustomSinkConfiguration> configs,
+        out List<string> cycleNames)
+    {
+        var byName = new Dictionary<string, CustomSinkConfiguration>(StringComparer.OrdinalIgnoreCase);
+        foreach (var config in configs)
+            byName[config.Name] = config;
+
+        var ordered = new List<CustomSinkConfiguration>(configs.Count);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var inProgress = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var cycles = new List<string>();
+
+        void Visit(CustomSinkConfiguration config)
+        {
+            if (visited.Contains(config.Name))
+                return;
+
+            if (!inProgress.Add(config.Name))
+            {
+                // Cycle: stop descending. The sink is still emitted by whichever call started it.
+                cycles.Add(config.Name);
+                return;
+            }
+
+            foreach (var dependency in GetCustomSinkDependencies(config, byName))
+                Visit(dependency);
+
+            inProgress.Remove(config.Name);
+            if (visited.Add(config.Name))
+                ordered.Add(config);
+        }
+
+        foreach (var config in configs)
+            Visit(config);
+
+        cycleNames = cycles;
+        return ordered;
+    }
+
+    /// <summary>
+    /// Returns the custom sinks that <paramref name="config"/> depends on (i.e. references that name
+    /// another custom sink in the set). References to hardware sinks are not returned.
+    /// </summary>
+    private static IEnumerable<CustomSinkConfiguration> GetCustomSinkDependencies(
+        CustomSinkConfiguration config,
+        IReadOnlyDictionary<string, CustomSinkConfiguration> byName)
+    {
+        var references = config.Type == CustomSinkType.Combine
+            ? config.Slaves ?? Enumerable.Empty<string>()
+            : new[] { config.MasterSink ?? string.Empty };
+
+        foreach (var reference in references)
+        {
+            if (!string.IsNullOrEmpty(reference)
+                && byName.TryGetValue(reference, out var dependency)
+                && !ReferenceEquals(dependency, config))
+            {
+                yield return dependency;
+            }
+        }
     }
 
     /// <summary>
