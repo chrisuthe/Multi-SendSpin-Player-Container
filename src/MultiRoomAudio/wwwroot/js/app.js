@@ -5596,13 +5596,25 @@ async function removeTriggerSink(boardId, channel, sinkName) {
 const appAddTriggerSink = addTriggerSink;
 const appRemoveTriggerSink = removeTriggerSink;
 
+// Resolve an off-delay to a value the API will accept. An empty or non-numeric input
+// parses to NaN, which JSON.stringify writes as null - the API then rejects the whole
+// request because offDelaySeconds is a non-nullable int, so the sink assignment is lost
+// too. Fall back to the last saved delay instead of failing the save.
+function coerceOffDelay(rawValue, fallback) {
+    const parsed = parseInt(rawValue, 10);
+    if (Number.isFinite(parsed)) {
+        return Math.min(3600, Math.max(0, parsed));
+    }
+    return Number.isFinite(fallback) ? fallback : 60;
+}
+
 // Persist the channel's full sink list (+ current delay) and re-render its chips.
 async function saveTriggerSinks(boardId, channel) {
     const boardIdSafe = boardId.replace(/[^a-zA-Z0-9]/g, '_');
     const t = getTrigger(boardId, channel);
     const names = t ? (t.customSinkNames || []) : [];
     const delayInput = document.getElementById(`trigger-delay-${boardIdSafe}-${channel}`);
-    const delay = delayInput ? parseInt(delayInput.value, 10) : 60;
+    const delay = coerceOffDelay(delayInput ? delayInput.value : null, t ? t.offDelaySeconds : 60);
 
     try {
         const url = boardId.includes('/')
@@ -5617,6 +5629,7 @@ async function saveTriggerSinks(boardId, channel) {
             const error = await response.json();
             throw new Error(error.message || 'Failed to update trigger');
         }
+        if (t) t.offDelaySeconds = delay;
         const container = document.getElementById(`trigger-sink-${boardIdSafe}-${channel}`);
         if (container) {
             container.innerHTML = renderSinkChips(boardId, channel, names, triggerSinksList, false);
@@ -5632,6 +5645,7 @@ async function saveTriggerSinks(boardId, channel) {
 async function updateTriggerDelay(boardId, channel, delay) {
     const t = getTrigger(boardId, channel);
     const names = t ? (t.customSinkNames || []) : [];
+    const offDelaySeconds = coerceOffDelay(delay, t ? t.offDelaySeconds : 60);
 
     try {
         const url = boardId.includes('/')
@@ -5640,7 +5654,7 @@ async function updateTriggerDelay(boardId, channel, delay) {
         const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds: parseInt(delay, 10) })
+            body: JSON.stringify({ channel, customSinkNames: names, offDelaySeconds })
         });
 
         if (!response.ok) {
@@ -5648,6 +5662,7 @@ async function updateTriggerDelay(boardId, channel, delay) {
             throw new Error(error.message || 'Failed to update trigger');
         }
 
+        if (t) t.offDelaySeconds = offDelaySeconds;
         showAlert('Delay updated', 'success', 2000);
     } catch (error) {
         console.error('Error updating trigger delay:', error);
