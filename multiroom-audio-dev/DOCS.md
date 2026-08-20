@@ -1,20 +1,15 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-3452b55
+## Development Build: sha-4881a77
 
 **Current Dev Build Changes** (recent)
 
+- chore: upgrade SendSpin.SDK 9.1.0 -> 9.2.0
+- style: satisfy dotnet format on merged MQTT changes
+- Merge dev into main for v5.2.2 release
 - fix: apply a cubic volume taper instead of linear amplitude (#263) (#270)
 - fix: stop UI trigger saves from clearing the zone name (#271)
-- fix: stop a cleared off-delay box from failing trigger sink saves (#250) (#268)
-- fix: stop republishing unchanged retained MQTT topics (#256) (#269)
-- feat: allow a relay trigger to reference multiple sinks (#250) (#255)
-- feat: improve MQTT discovery for HA automations (#249) (#254)
-- fix: stop reporting benign startup sample discard as a buffer overflow (#233) (#253)
-- Merge pull request #248 from chrisuthe/fix/combine-sink-resume
-- fix: load custom sinks in dependency order so combine-of-remaps survives restart
-- docs: add 5.2.0 changelog (MQTT bridge, amp overrides, SDK 9.1.0)
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
