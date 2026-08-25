@@ -163,7 +163,6 @@ public class SinkResetTests
 
         // The failing card is reported as not cycled, but the other four still are.
         Assert.Equal(4, cycled);
-        Assert.Equal(10, SuspendCalls(pactl).Count);
         Assert.Contains("suspend-sink alsa_output.pci-0000_08_00.6.analog-surround-51 0", SuspendCalls(pactl));
     }
 
@@ -261,6 +260,198 @@ public class SinkResetTests
         Assert.Equal(0, await service.ResetCardSinksAsync("alsa_card.pci-0000_04_00.0"));
 
         Assert.Empty(pactl.Calls);
+    }
+
+    /// <summary>
+    /// Fake with a swappable listing and failure rule, for tests that need a second pass to see a
+    /// different world than the first.
+    /// </summary>
+    private sealed class ScriptedPactl
+    {
+        private readonly object _lock = new();
+
+        public string Listing { get; set; } = Issue281SinksShort;
+
+        public Func<string, PactlResult>? Fail { get; set; }
+
+        public Func<string, Task>? OnCall { get; set; }
+
+        public List<string> Calls { get; } = new();
+
+        public async Task<PactlResult> RunAsync(string[] arguments, CancellationToken cancellationToken)
+        {
+            // Yield so concurrent callers actually interleave rather than running to completion inline.
+            await Task.Yield();
+
+            var joined = string.Join(" ", arguments);
+            lock (_lock)
+            {
+                Calls.Add(joined);
+            }
+
+            if (OnCall is not null)
+                await OnCall(joined);
+
+            if (arguments is ["list", "sinks", "short"])
+                return new PactlResult(0, Listing, string.Empty);
+
+            return Fail?.Invoke(joined) ?? new PactlResult(0, string.Empty, string.Empty);
+        }
+
+        public List<string> SuspendCallsFor(string sink)
+        {
+            lock (_lock)
+            {
+                return Calls
+                    .Where(c => c.StartsWith($"suspend-sink {sink} ", StringComparison.Ordinal))
+                    .ToList();
+            }
+        }
+    }
+
+    private static SinkResetService Service(ScriptedPactl pactl, int settleDelayMs = 0) =>
+        new(
+            new CapturingLogger<SinkResetService>(),
+            mockHardware: false,
+            enabled: true,
+            pactl.RunAsync,
+            settleDelayMs,
+            () => DateTimeOffset.UnixEpoch);
+
+    [Fact]
+    public async Task ResumeFailure_IsRetriedRatherThanLeavingTheSinkSuspended()
+    {
+        var pactl = new ScriptedPactl
+        {
+            Fail = call => call == $"suspend-sink {XfiSink} 0"
+                ? new PactlResult(1, string.Empty, "Connection failure")
+                : new PactlResult(0, string.Empty, string.Empty)
+        };
+
+        await Service(pactl).ResetSinkByIndexAsync(1);
+
+        // One suspend, then every resume attempt — the half that must not be given up on.
+        Assert.Equal(
+            [$"suspend-sink {XfiSink} 1", $"suspend-sink {XfiSink} 0", $"suspend-sink {XfiSink} 0", $"suspend-sink {XfiSink} 0"],
+            pactl.SuspendCallsFor(XfiSink));
+    }
+
+    [Fact]
+    public async Task ASinkStrandedBySuspend_IsRecoveredOnTheNextPass()
+    {
+        // Without this, a single transient resume failure would silence the card for the life of
+        // the container: it is left SUSPENDED, and IsResettable skips every SUSPENDED sink.
+        var pactl = new ScriptedPactl
+        {
+            Fail = call => call == $"suspend-sink {XfiSink} 0"
+                ? new PactlResult(1, string.Empty, "Connection failure")
+                : new PactlResult(0, string.Empty, string.Empty)
+        };
+        var service = Service(pactl);
+
+        await service.ResetSinkByIndexAsync(1);
+
+        // PulseAudio now reports the card as suspended, and the transient failure has cleared.
+        pactl.Listing = Issue281SinksShort.Replace("s32le 8ch 96000Hz\tRUNNING", "s32le 8ch 96000Hz\tSUSPENDED");
+        pactl.Fail = null;
+        pactl.Calls.Clear();
+
+        await service.ResetAllHardwareSinksAsync();
+
+        // Recovered by a bare resume — never re-suspended, since it is already closed.
+        Assert.Equal([$"suspend-sink {XfiSink} 0"], pactl.SuspendCallsFor(XfiSink));
+    }
+
+    [Fact]
+    public async Task RecoveredSink_IsNotChasedForever()
+    {
+        var pactl = new ScriptedPactl
+        {
+            Fail = call => call == $"suspend-sink {XfiSink} 0"
+                ? new PactlResult(1, string.Empty, "Connection failure")
+                : new PactlResult(0, string.Empty, string.Empty)
+        };
+        var service = Service(pactl);
+
+        await service.ResetSinkByIndexAsync(1);
+
+        // Something else brought it back — a manual pactl, or a PulseAudio restart.
+        pactl.Fail = null;
+        await service.ResetAllHardwareSinksAsync();
+        pactl.Calls.Clear();
+
+        await service.ResetAllHardwareSinksAsync();
+
+        // A normal cycle, with no lingering recovery resume in front of it.
+        Assert.Equal(
+            [$"suspend-sink {XfiSink} 1", $"suspend-sink {XfiSink} 0"],
+            pactl.SuspendCallsFor(XfiSink));
+    }
+
+    [Fact]
+    public async Task CancellationBetweenTheHalves_StillResumesTheSink()
+    {
+        // Container shutdown lands here: without an uncancellable resume the card stays silent
+        // across the restart.
+        using var cts = new CancellationTokenSource();
+        var pactl = new ScriptedPactl();
+        pactl.OnCall = call =>
+        {
+            if (call == $"suspend-sink {XfiSink} 1")
+                cts.Cancel();
+            return Task.CompletedTask;
+        };
+
+        await Service(pactl, settleDelayMs: 5).ResetSinkByIndexAsync(1, cts.Token);
+
+        Assert.Equal(
+            [$"suspend-sink {XfiSink} 1", $"suspend-sink {XfiSink} 0"],
+            pactl.SuspendCallsFor(XfiSink));
+    }
+
+    [Fact]
+    public async Task OverlappingResets_CannotEnterTheSameSinkAtOnce()
+    {
+        // A profile change and the sink-appeared event it causes can both target the same sink.
+        // If they interleave, one cycle's resume lands right after the other's suspend and the
+        // device never closes — the cycle silently stops doing the one thing it exists to do.
+        // Hold the first cycle inside its suspend, then prove a second cannot start one.
+        var firstSuspendSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var pactl = new ScriptedPactl();
+        pactl.OnCall = async call =>
+        {
+            if (call != $"suspend-sink {XfiSink} 1")
+                return;
+
+            firstSuspendSeen.TrySetResult();
+            await release.Task;
+        };
+
+        var service = Service(pactl);
+
+        var first = service.ResetCardSinksAsync("alsa_card.pci-0000_04_00.0");
+        await firstSuspendSeen.Task;
+
+        // The first cycle now owns the sink, parked between its suspend and its resume.
+        var second = service.ResetAllHardwareSinksAsync();
+        await Task.Delay(100);
+
+        Assert.Single(pactl.SuspendCallsFor(XfiSink));
+
+        release.TrySetResult();
+        await Task.WhenAll(first, second);
+
+        // Both cycles ran, one after the other, each a complete suspend/resume pair.
+        Assert.Equal(
+            [
+                $"suspend-sink {XfiSink} 1",
+                $"suspend-sink {XfiSink} 0",
+                $"suspend-sink {XfiSink} 1",
+                $"suspend-sink {XfiSink} 0",
+            ],
+            pactl.SuspendCallsFor(XfiSink));
     }
 
     [Theory]
