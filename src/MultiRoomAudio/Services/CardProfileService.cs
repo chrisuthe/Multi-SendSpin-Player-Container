@@ -19,7 +19,6 @@ public class CardProfileService
     private readonly VolumeCommandRunner _volumeRunner;
     private readonly ConfigurationService _config;
     private readonly BackendFactory _backend;
-    private readonly SinkResetService _sinkReset;
     private readonly string _configPath;
     private readonly IDeserializer _deserializer;
     private readonly ISerializer _serializer;
@@ -30,15 +29,13 @@ public class CardProfileService
         EnvironmentService environment,
         VolumeCommandRunner volumeRunner,
         ConfigurationService config,
-        BackendFactory backend,
-        SinkResetService sinkReset)
+        BackendFactory backend)
     {
         _logger = logger;
         _environment = environment;
         _volumeRunner = volumeRunner;
         _config = config;
         _backend = backend;
-        _sinkReset = sinkReset;
         _configPath = Path.Combine(environment.ConfigPath, "card-profiles.yaml");
 
         // Configure logger for the enumerator
@@ -324,10 +321,6 @@ public class CardProfileService
         await Task.Delay(500);
 
         await ApplyBootMutePreferenceAsync(card, defaultUnmute: true);
-
-        // The profile change recreated this card's sinks, so they can re-hit the broken
-        // ALSA mmap+timer open (#281). Cycle them before anyone plays to them.
-        await _sinkReset.ResetCardSinksAsync(card.Name);
 
         return new CardProfileResponse(
             Success: true,

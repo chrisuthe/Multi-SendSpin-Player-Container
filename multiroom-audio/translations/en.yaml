@@ -5,9 +5,9 @@ configuration:
       Set the logging verbosity for the add-on.
       Debug provides the most detail for troubleshooting.
   reset_sinks:
-    name: Reset Audio Sinks
+    name: Reset Audio Sinks on Startup
     description: >-
-      Suspend and resume each sound card's sink at startup, whenever a sink
-      appears, and after a card profile change. Works around a kernel bug where a
-      card accepts audio but plays nothing until it is cycled. Turning this off
-      disables all three, and affected cards will need cycling by hand.
+      Suspend and resume each sound card's sink when the add-on starts. Works
+      around a kernel bug where a card accepts audio but plays nothing until it
+      is cycled. If a card goes silent later, restarting the add-on cycles it
+      again. Leave this on unless it causes trouble.

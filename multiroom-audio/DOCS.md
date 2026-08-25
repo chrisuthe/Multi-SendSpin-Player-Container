@@ -60,7 +60,7 @@ multi-room audio from a single server.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `log_level` | string | `info` | Logging verbosity (debug, info, warning, error) |
-| `reset_sinks` | bool | `true` | Suspend and resume each sound card's sink at startup, on sink appearance, and after a profile change. Works around a kernel bug where a card accepts audio but plays nothing until it is cycled (#281). Turn off only if it causes trouble |
+| `reset_sinks` | bool | `true` | Suspend and resume each sound card's sink when the add-on starts. Works around a kernel bug where a card accepts audio but plays nothing until it is cycled (#281). A card that goes silent later is cycled again by restarting the add-on. Turn off only if it causes trouble |
 
 ### Example Configuration
 

@@ -1,20 +1,25 @@
-using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using MultiRoomAudio.Audio.PulseAudio;
 
 namespace MultiRoomAudio.Services;
 
 /// <summary>
-/// Suspends and immediately resumes hardware sinks so cards that opened on the broken ALSA
-/// mmap+timer transfer path start moving audio again (#281).
+/// Suspends and immediately resumes hardware sinks at startup, so cards that opened on the broken
+/// ALSA mmap+timer transfer path start moving audio again (#281).
 /// </summary>
 /// <remarks>
 /// The stall is a kernel regression (391e69143d0a, fixed upstream by e9418da50d9e): the sink
 /// accepts samples and reports RUNNING while nothing reaches the DAC. A suspend/resume forces
-/// PulseAudio to re-open the device and re-negotiate the transfer mode. HAOS's PulseAudio loads
-/// no module-suspend-on-idle, so once a sink is cycled it stays open on the good path — a single
-/// cycle per open is enough, which is why this runs at startup and on the events that re-open a
-/// device rather than per stream.
+/// PulseAudio to re-open the device and re-negotiate the transfer mode.
+/// <para>
+/// Startup is deliberately the only trigger. HAOS's PulseAudio loads no module-suspend-on-idle, so
+/// a sink stays open once opened and one cycle per open is enough. Cycling on sink-appeared events
+/// and card profile changes as well was tried and dropped: those overlap each other and the startup
+/// pass, which needed a per-sink cooldown, a per-sink mutex and cross-pass recovery state to keep
+/// straight — a lot of machinery guarding against pactl failures that only arose because of the
+/// extra suspends. The trade is that a PulseAudio restart or a profile change which re-opens a
+/// device on the bad path needs an add-on restart to clear.
+/// </para>
 /// </remarks>
 public partial class SinkResetService
 {
@@ -35,14 +40,8 @@ public partial class SinkResetService
     /// <summary>Pause between suspend and resume, giving PulseAudio time to close the device.</summary>
     private const int DefaultSettleDelayMs = 250;
 
-    /// <summary>Attempts made to resume a sink before it is recorded as stranded.</summary>
+    /// <summary>Attempts made to resume a sink before giving up and telling the operator.</summary>
     private const int ResumeAttempts = 3;
-
-    /// <summary>
-    /// Window during which a sink will not be cycled again by a sink-appeared event. A PulseAudio
-    /// restart recreates every sink at once, so the burst collapses to one cycle per sink.
-    /// </summary>
-    private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(30);
 
     private const string ResetSinksEnv = "RESET_SINKS";
 
@@ -60,22 +59,6 @@ public partial class SinkResetService
     private readonly bool _enabled;
     private readonly PactlRunner _runner;
     private readonly int _settleDelayMs;
-    private readonly Func<DateTimeOffset> _now;
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _lastCycled = new(StringComparer.Ordinal);
-
-    /// <summary>
-    /// Sinks this service suspended but could not resume. A suspended sink is silent and
-    /// <see cref="IsResettable"/> skips it, so without this the workaround could mute a healthy
-    /// card for good after one transient pactl failure. Every later pass retries these first.
-    /// </summary>
-    private readonly ConcurrentDictionary<string, byte> _awaitingResume = new(StringComparer.Ordinal);
-
-    /// <summary>
-    /// One gate per sink, so overlapping triggers (a profile change and the sink-appeared event it
-    /// causes, or a restored card and the startup pass) cannot interleave their halves and land a
-    /// resume immediately after a suspend — which would never close the device the cycle exists to reopen.
-    /// </summary>
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _sinkGates = new(StringComparer.Ordinal);
 
     public SinkResetService(ILogger<SinkResetService> logger, EnvironmentService environment)
         : this(
@@ -83,8 +66,7 @@ public partial class SinkResetService
             environment.IsMockHardware,
             ParseResetSinks(Environment.GetEnvironmentVariable(ResetSinksEnv)),
             (args, ct) => PactlCommandRunner.RunAsync(args, ct),
-            DefaultSettleDelayMs,
-            () => DateTimeOffset.UtcNow)
+            DefaultSettleDelayMs)
     {
         if (!_enabled)
         {
@@ -97,15 +79,13 @@ public partial class SinkResetService
         bool mockHardware,
         bool enabled,
         PactlRunner runner,
-        int settleDelayMs,
-        Func<DateTimeOffset> now)
+        int settleDelayMs)
     {
         _logger = logger;
         _mockHardware = mockHardware;
         _enabled = enabled;
         _runner = runner;
         _settleDelayMs = settleDelayMs;
-        _now = now;
     }
 
     /// <summary>
@@ -119,53 +99,58 @@ public partial class SinkResetService
           value.Equals("no", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Cycles every open hardware sink. Called from the <c>sinkreset</c> startup phase, after the
-    /// custom sinks are attached (so masters are genuinely open) and before players start.
+    /// Cycles every open hardware sink. Called once from the <c>sinkreset</c> startup phase, after
+    /// the custom sinks are attached (so masters are genuinely open) and before players start.
     /// </summary>
-    public Task<int> ResetAllHardwareSinksAsync(CancellationToken cancellationToken = default) =>
-        ResetAsync(_ => true, "startup", respectCooldown: false, announceEmpty: true, cancellationToken);
-
-    /// <summary>
-    /// Cycles the sink PulseAudio just announced, if it is a hardware sink. Covers a supervisor
-    /// PulseAudio restart or a card hotplug re-opening devices without an add-on restart.
-    /// </summary>
-    public Task<int> ResetSinkByIndexAsync(uint index, CancellationToken cancellationToken = default) =>
-        ResetAsync(s => s.Index == index, $"sink #{index} appeared", respectCooldown: true, announceEmpty: false, cancellationToken);
-
-    /// <summary>
-    /// Cycles the hardware sinks belonging to a card. A profile change tears down and recreates
-    /// them, so they can land back on the broken open.
-    /// </summary>
-    public Task<int> ResetCardSinksAsync(string cardName, CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>How many sinks completed a full suspend/resume.</returns>
+    public async Task<int> ResetAllHardwareSinksAsync(CancellationToken cancellationToken = default)
     {
-        var identifier = ExtractCardIdentifier(cardName);
-        if (string.IsNullOrEmpty(identifier))
+        if (!_enabled)
         {
-            _logger.LogDebug("Cannot derive a device identifier from card '{Card}'; skipping sink reset", cardName);
-            return Task.FromResult(0);
+            _logger.LogDebug("Sink reset skipped: {Env}=false", ResetSinksEnv);
+            return 0;
         }
 
-        return ResetAsync(
-            s => s.Name.Contains(identifier, StringComparison.OrdinalIgnoreCase),
-            $"card '{cardName}' profile change",
-            respectCooldown: false,
-            announceEmpty: false,
-            cancellationToken);
-    }
+        if (_mockHardware)
+        {
+            _logger.LogDebug("Sink reset skipped: mock hardware mode");
+            return 0;
+        }
 
-    /// <summary>
-    /// Strips the card-name prefix to leave the device identifier shared with its sink names,
-    /// e.g. "alsa_card.pci-0000_04_00.0" → "pci-0000_04_00.0".
-    /// </summary>
-    private static string ExtractCardIdentifier(string cardName)
-    {
-        if (string.IsNullOrWhiteSpace(cardName))
-            return string.Empty;
+        var listing = await _runner(["list", "sinks", "short"], cancellationToken);
+        if (!listing.Success)
+        {
+            _logger.LogWarning("Sink reset skipped: could not list sinks: {Error}", listing.Error);
+            return 0;
+        }
 
-        const string prefix = "alsa_card.";
-        return cardName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            ? cardName[prefix.Length..]
-            : cardName;
+        var all = ParseSinksShort(listing.Output);
+        var candidates = all.Where(IsResettable).ToList();
+
+        if (candidates.Count == 0)
+        {
+            // A PipeWire host reports its own driver name rather than module-alsa-card.c, so nothing
+            // is ever selected and the workaround is inert. Worth saying out loud.
+            _logger.LogInformation(
+                "No open {Driver} sinks among {Total} sink(s) — nothing to suspend/resume",
+                HardwareDriver, all.Count);
+            return 0;
+        }
+
+        var cycled = 0;
+        foreach (var sink in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (await CycleAsync(sink, cancellationToken))
+                cycled++;
+        }
+
+        _logger.LogInformation("Suspend/resume cycled {Count} of {Total} hardware sink(s)",
+            cycled, candidates.Count);
+
+        return cycled;
     }
 
     /// <summary>
@@ -205,163 +190,61 @@ public partial class SinkResetService
         string.Equals(sink.Driver, HardwareDriver, StringComparison.OrdinalIgnoreCase) &&
         !string.Equals(sink.State, SuspendedState, StringComparison.OrdinalIgnoreCase);
 
-    private async Task<int> ResetAsync(
-        Func<PactlSinkRow, bool> selector,
-        string reason,
-        bool respectCooldown,
-        bool announceEmpty,
-        CancellationToken cancellationToken)
-    {
-        if (!_enabled)
-        {
-            _logger.LogDebug("Sink reset ({Reason}) skipped: {Env}=false", reason, ResetSinksEnv);
-            return 0;
-        }
-
-        if (_mockHardware)
-        {
-            _logger.LogDebug("Sink reset ({Reason}) skipped: mock hardware mode", reason);
-            return 0;
-        }
-
-        var listing = await _runner(["list", "sinks", "short"], cancellationToken);
-        if (!listing.Success)
-        {
-            _logger.LogWarning("Sink reset ({Reason}) skipped: could not list sinks: {Error}",
-                reason, listing.Error);
-            return 0;
-        }
-
-        var all = ParseSinksShort(listing.Output);
-
-        // Before anything else, rescue sinks an earlier pass left suspended.
-        await RecoverStrandedSinksAsync(all);
-
-        var candidates = all.Where(IsResettable).Where(selector).ToList();
-
-        if (candidates.Count == 0)
-        {
-            // Worth surfacing on the startup pass: a PipeWire host reports its own driver name
-            // rather than module-alsa-card.c, so nothing is ever selected and the workaround is inert.
-            if (announceEmpty && all.Count > 0)
-            {
-                _logger.LogInformation(
-                    "No open {Driver} sinks among {Total} sink(s) — nothing to suspend/resume",
-                    HardwareDriver, all.Count);
-            }
-            else
-            {
-                _logger.LogDebug("Sink reset ({Reason}): no open hardware sinks among {Total} sink(s)",
-                    reason, all.Count);
-            }
-
-            return 0;
-        }
-
-        var cycled = 0;
-        foreach (var sink in candidates)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (await CycleAsync(sink, reason, respectCooldown, cancellationToken))
-                cycled++;
-        }
-
-        if (cycled > 0)
-        {
-            _logger.LogInformation("Suspend/resume cycled {Count} hardware sink(s) ({Reason})", cycled, reason);
-        }
-
-        return cycled;
-    }
-
-    private bool InCooldown(string sinkName) =>
-        _lastCycled.TryGetValue(sinkName, out var last) && _now() - last < Cooldown;
-
     /// <summary>
     /// Runs the suspend/resume pair for one sink. Swallows every failure so a card that refuses
     /// the cycle does not stop the remaining sinks from being cycled.
     /// </summary>
-    private async Task<bool> CycleAsync(
-        PactlSinkRow sink,
-        string reason,
-        bool respectCooldown,
-        CancellationToken cancellationToken)
+    private async Task<bool> CycleAsync(PactlSinkRow sink, CancellationToken cancellationToken)
     {
         if (!PactlCommandRunner.ValidateName(sink.Name, out var nameError))
         {
-            _logger.LogWarning("Sink reset ({Reason}): refusing to cycle '{Sink}': {Error}",
-                reason, sink.Name, nameError);
+            _logger.LogWarning("Refusing to cycle sink '{Sink}': {Error}", sink.Name, nameError);
             return false;
         }
 
-        // Serialize per sink: a concurrent cycle could otherwise resume this one mid-settle.
-        var gate = _sinkGates.GetOrAdd(sink.Name, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(CancellationToken.None);
+        _logger.LogInformation("Cycling sink '{Sink}' (state {State})", sink.Name, sink.State);
+
+        // Two separate questions: did the suspend definitely land (so this counts as a cycle),
+        // and could it possibly have landed (so the sink might now be silent)?
+        var suspendConfirmed = false;
+        var mayBeSuspended = false;
         try
         {
-            // Tested under the gate, not before it: a burst of events for one sink would otherwise
-            // all read _lastCycled before any of them wrote it, and then cycle in turn.
-            if (respectCooldown && InCooldown(sink.Name))
+            var suspend = await _runner(["suspend-sink", sink.Name, "1"], cancellationToken);
+            suspendConfirmed = suspend.Success;
+            mayBeSuspended = suspend.Success;
+
+            if (!suspend.Success)
             {
-                _logger.LogDebug("Sink reset ({Reason}): '{Sink}' cycled recently, skipping", reason, sink.Name);
-                return false;
+                _logger.LogWarning("Suspending sink '{Sink}' failed: {Error}", sink.Name, suspend.Error);
             }
 
-            // Stamp before the cycle so a failure still absorbs the rest of an event burst.
-            _lastCycled[sink.Name] = _now();
-
-            _logger.LogInformation("Cycling sink '{Sink}' (state {State}, {Reason})", sink.Name, sink.State, reason);
-
-            // Two separate questions: did the suspend definitely land (so this counts as a cycle),
-            // and could it possibly have landed (so the sink might need recovering)?
-            var suspendConfirmed = false;
-            var mayBeSuspended = false;
-            try
-            {
-                var suspend = await _runner(["suspend-sink", sink.Name, "1"], cancellationToken);
-                suspendConfirmed = suspend.Success;
-                mayBeSuspended = suspend.Success;
-
-                if (!suspend.Success)
-                {
-                    _logger.LogWarning("Suspending sink '{Sink}' failed: {Error}", sink.Name, suspend.Error);
-                }
-
-                await Task.Delay(_settleDelayMs, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                // Includes cancellation: shutdown must not skip the resume below. pactl may already
-                // have reached PulseAudio before this threw, so assume the suspend might have landed —
-                // a spurious recovery marker costs one idempotent resume, a missing one costs a card.
-                mayBeSuspended = true;
-                _logger.LogWarning(ex, "Suspending sink '{Sink}' failed", sink.Name);
-            }
-
-            // Always resume, and never on the caller's token — a sink left suspended is silent, and
-            // IsResettable would skip it on every later pass.
-            var resumed = await ResumeAsync(sink.Name);
-            if (resumed)
-            {
-                _awaitingResume.TryRemove(sink.Name, out _);
-                _logger.LogInformation("Sink '{Sink}' suspended and resumed", sink.Name);
-            }
-            else if (mayBeSuspended)
-            {
-                _awaitingResume[sink.Name] = 0;
-                _logger.LogError(
-                    "Sink '{Sink}' may be left suspended and silent — the next reset pass retries it; " +
-                    "to recover it now, run: pactl suspend-sink {SinkName} 0",
-                    sink.Name, sink.Name);
-            }
-
-            return suspendConfirmed && resumed;
+            await Task.Delay(_settleDelayMs, cancellationToken);
         }
-        finally
+        catch (Exception ex)
         {
-            gate.Release();
+            // Includes cancellation: shutdown must not skip the resume below. pactl may already
+            // have reached PulseAudio before this threw, so assume the suspend might have landed.
+            mayBeSuspended = true;
+            _logger.LogWarning(ex, "Suspending sink '{Sink}' failed", sink.Name);
         }
+
+        // Always resume, and never on the caller's token — a sink left suspended is silent until
+        // something resumes it, and nothing else will.
+        var resumed = await ResumeAsync(sink.Name);
+        if (resumed)
+        {
+            _logger.LogInformation("Sink '{Sink}' suspended and resumed", sink.Name);
+        }
+        else if (mayBeSuspended)
+        {
+            _logger.LogError(
+                "Sink '{Sink}' may be left suspended and silent — to recover it, " +
+                "run: pactl suspend-sink {SinkName} 0",
+                sink.Name, sink.Name);
+        }
+
+        return suspendConfirmed && resumed;
     }
 
     /// <summary>
@@ -392,45 +275,6 @@ public partial class SinkResetService
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// Retries the resume for any sink an earlier pass suspended but failed to bring back, so a
-    /// transient pactl failure costs one pass of silence rather than the life of the container.
-    /// The marker is only cleared once a resume has actually succeeded.
-    /// </summary>
-    private async Task RecoverStrandedSinksAsync(IReadOnlyList<PactlSinkRow> sinks)
-    {
-        if (_awaitingResume.IsEmpty)
-            return;
-
-        foreach (var sink in sinks)
-        {
-            if (!_awaitingResume.ContainsKey(sink.Name))
-                continue;
-
-            // Resume before clearing the marker, without consulting the listing's state. That row
-            // was read before the gate was taken, so a concurrent cycle may have suspended the sink
-            // since — and trusting a stale RUNNING would drop the marker on a sink that is actually
-            // silent, with nothing left to recover it. Resuming an unsuspended sink is a no-op, so
-            // the redundant call is far cheaper than the state check is risky.
-            _logger.LogWarning("Sink '{Sink}' was left suspended by an earlier reset — resuming it", sink.Name);
-
-            var gate = _sinkGates.GetOrAdd(sink.Name, _ => new SemaphoreSlim(1, 1));
-            await gate.WaitAsync(CancellationToken.None);
-            try
-            {
-                if (await ResumeAsync(sink.Name))
-                {
-                    _awaitingResume.TryRemove(sink.Name, out _);
-                    _logger.LogInformation("Sink '{Sink}' recovered from a stranded suspend", sink.Name);
-                }
-            }
-            finally
-            {
-                gate.Release();
-            }
-        }
     }
 }
 
