@@ -926,8 +926,21 @@ async function refreshStatus(force = false, manual = false) {
     }
 }
 
+// Map a persisted format preference onto one of this device's option ids, mirroring how the
+// server resolves it. Legacy values ("all", and two-part "codec-rate" with no bit depth) are
+// still valid on the wire but never appear verbatim in the options list.
+function resolveFormatId(saved, options, defaultFormatId) {
+    if (!saved || saved === 'all') return defaultFormatId;
+    if (options.some(o => o.id === saved)) return saved;
+
+    // "flac-48000" -> the best depth this device offers at that codec/rate (options are best-first)
+    const withDepth = options.find(o => o.id.startsWith(`${saved}-`));
+    return withDepth ? withDepth.id : saved;
+}
+
 // Populate the advertised-format dropdown from what the selected device can actually do.
 // `desiredValue` keeps a player's saved format selected even when it predates this list.
+// Returns the option id that ended up selected, or null if the fetch failed.
 async function refreshFormats(deviceId = null, desiredValue = null) {
     const formatSelect = document.getElementById('advertisedFormat');
     if (!formatSelect) return null;
@@ -953,16 +966,18 @@ async function refreshFormats(deviceId = null, desiredValue = null) {
             formatSelect.appendChild(option);
         });
 
-        // A saved format the device no longer offers must stay visible, not silently change
-        if (keepValue && !formats.some(f => f.id === keepValue)) {
+        const resolved = resolveFormatId(keepValue, formats, defaultFormatId);
+
+        // A saved format this device genuinely cannot do must stay visible, not silently change
+        if (resolved && !formats.some(f => f.id === resolved)) {
             const option = document.createElement('option');
-            option.value = keepValue;
-            option.textContent = `${keepValue} (not supported by this device)`;
+            option.value = resolved;
+            option.textContent = `${resolved} (not supported by this device)`;
             formatSelect.insertBefore(option, formatSelect.firstChild);
         }
 
-        formatSelect.value = keepValue || defaultFormatId || '';
-        return defaultFormatId;
+        formatSelect.value = resolved || defaultFormatId || '';
+        return formatSelect.value;
     } catch (error) {
         console.error('Error refreshing formats:', error);
         return null;
@@ -1132,9 +1147,11 @@ async function openEditPlayerModal(playerName) {
 
         // Populate the advertised format dropdown from this player's device.
         // An unset format means "device default" - show it as such rather than guessing an id.
+        // Track the id that was actually selected, so re-saving an untouched legacy value
+        // ("flac-48000", "all") does not read as a change and needlessly restart the player.
         const savedFormat = player.advertisedFormat || '';
-        const defaultFormatId = await refreshFormats(player.device, savedFormat);
-        document.getElementById('playerForm').dataset.originalFormat = savedFormat || defaultFormatId || '';
+        const selectedFormat = await refreshFormats(player.device, savedFormat);
+        document.getElementById('playerForm').dataset.originalFormat = selectedFormat ?? savedFormat;
 
         // Set modal to Edit mode
         document.getElementById('playerModalIcon').className = 'fas fa-edit me-2';
