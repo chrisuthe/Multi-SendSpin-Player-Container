@@ -163,6 +163,9 @@ builder.Services.AddSingleton<DefaultPaParser>();
 // Startup diagnostics service
 builder.Services.AddSingleton<StartupDiagnosticsService>();
 
+// Suspend/resume workaround for cards that open on the broken ALSA mmap+timer path (#281)
+builder.Services.AddSingleton<SinkResetService>();
+
 // Service singletons (no longer IHostedService — initialization is handled by StartupOrchestrator)
 builder.Services.AddSingleton<CardProfileService>();
 builder.Services.AddSingleton<CustomSinksService>();

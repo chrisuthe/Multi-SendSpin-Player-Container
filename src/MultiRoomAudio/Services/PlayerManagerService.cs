@@ -41,6 +41,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private readonly VolumeCommandRunner _volumeRunner;
     private readonly BackendFactory _backendFactory;
     private readonly TriggerService _triggerService;
+    private readonly SinkResetService _sinkReset;
     private readonly IServiceProvider _serviceProvider;
     private readonly VersionService _versionService;
     private readonly ConcurrentDictionary<string, PlayerContext> _players = new();
@@ -457,6 +458,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         VolumeCommandRunner volumeRunner,
         BackendFactory backendFactory,
         TriggerService triggerService,
+        SinkResetService sinkReset,
         IServiceProvider serviceProvider,
         VersionService versionService,
         PulseAudioSubscriptionService? subscriptionService = null)
@@ -469,6 +471,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _volumeRunner = volumeRunner;
         _backendFactory = backendFactory;
         _triggerService = triggerService;
+        _sinkReset = sinkReset;
         _serviceProvider = serviceProvider;
         _versionService = versionService;
         _subscriptionService = subscriptionService;
@@ -2705,6 +2708,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         Task.Run(async () =>
         {
             await Task.Delay(500);
+
+            // A newly opened hardware sink can land on the broken ALSA mmap+timer path (#281),
+            // e.g. after the supervisor restarts PulseAudio or a card is hotplugged.
+            await _sinkReset.ResetSinkByIndexAsync(args.Index);
 
             // Notify UI that device list has changed
             await _hubContext.BroadcastDeviceListChangedAsync();

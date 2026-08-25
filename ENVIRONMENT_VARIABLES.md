@@ -208,6 +208,24 @@ USE_AUDIO_CLOCK=false
 USE_AUDIO_CLOCK=true
 ```
 
+### RESET_SINKS
+
+Suspend and resume hardware sinks so cards that opened on the broken ALSA mmap+timer path start moving audio again.
+
+- **Type:** Boolean
+- **Default:** `true`
+- **Valid Values:** `false`, `0`, `no` (case-insensitive) to disable; anything else, including unset, enables
+- **Description:** Some sound cards - notably the Creative X-Fi Titanium - open in a transfer mode where audio silently fails to reach the DAC: the sink accepts samples and reports `RUNNING` while nothing plays. `pactl suspend-sink <sink> 1` followed by `pactl suspend-sink <sink> 0` forces PulseAudio to re-open the device and re-negotiate, which restores sound. When enabled (default), every open hardware sink is cycled at three points: the `sinkreset` startup phase, when PulseAudio announces a new sink (per-sink 30 second cooldown so a PulseAudio restart does not cycle repeatedly), and after a sound card profile change. Only sinks whose driver is `module-alsa-card.c` are touched - remap and combine sinks are left alone - and sinks already `SUSPENDED` are skipped. The root cause is a kernel regression (391e69143d0a, fixed upstream by e9418da50d9e), so this can be turned off once the fix reaches your kernel.
+
+**Examples:**
+```bash
+# Default - cycle hardware sinks (recommended)
+RESET_SINKS=true
+
+# Back the workaround out
+RESET_SINKS=false
+```
+
 ## HAOS-Specific Variables
 
 ### SUPERVISOR_TOKEN

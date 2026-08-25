@@ -41,10 +41,12 @@ panel_title: Multi-Room Audio
 # User-configurable options
 options:
   log_level: info
+  reset_sinks: true
   mqtt_enabled: false
 
 schema:
   log_level: list(debug|info|warning|error)
+  reset_sinks: bool?
   mqtt_enabled: bool
   mqtt_host: str?
   mqtt_port: port?
