@@ -12,6 +12,9 @@ public record AudioFormatOption(
 /// <summary>
 /// Response containing available audio format options.
 /// </summary>
+/// <param name="Formats">Selectable formats, best quality first.</param>
+/// <param name="DefaultFormatId">Id of the format a player with no saved preference advertises.</param>
 public record AudioFormatsResponse(
-    List<AudioFormatOption> Formats
+    List<AudioFormatOption> Formats,
+    string? DefaultFormatId = null
 );

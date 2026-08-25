@@ -247,7 +247,7 @@
                         </div>
                         <div class="mb-3">
                             <label for="audioDevice" class="form-label">Audio Device</label>
-                            <select class="form-select" id="audioDevice">
+                            <select class="form-select" id="audioDevice" onchange="refreshFormats(this.value, '')">
                                 <option value="">Default Device</option>
                             </select>
                             <button type="button" class="btn btn-link btn-sm p-0 mt-1" onclick="refreshDevices()">
@@ -271,12 +271,12 @@
                             </div>
                             <small class="text-muted">Player always restarts when device reconnects. This controls whether playback resumes automatically.</small>
                         </div>
-                        <div class="mb-3" id="advertisedFormatGroup" style="display: none;">
+                        <div class="mb-3" id="advertisedFormatGroup">
                             <label for="advertisedFormat" class="form-label">Advertised Format</label>
                             <select class="form-select" id="advertisedFormat">
-                                <option value="all">All Formats (default)</option>
+                                <option value="" disabled selected>Select a device first...</option>
                             </select>
-                            <small class="text-muted">Format to advertise to the server. Player will restart when changed.</small>
+                            <small class="text-muted">Preferred format offered to the server, chosen from what the device supports. Player will restart when changed.</small>
                         </div>
                     </form>
                 </div>

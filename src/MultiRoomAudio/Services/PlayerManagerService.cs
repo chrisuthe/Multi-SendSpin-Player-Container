@@ -968,12 +968,11 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// <returns>Record containing all SDK components.</returns>
     private PlayerComponents CreateSdkComponents(PlayerCreateRequest request)
     {
-        // Probe device capabilities (used for reporting in Stats for Nerds)
+        // Probe device capabilities: drives both format advertisement and Stats for Nerds reporting
         var deviceCapabilities = _backendFactory.GetDeviceCapabilities(request.Device);
 
-        // Apply format filtering (always defaults to flac-48000 for maximum compatibility)
-        var audioFormats = GetDefaultFormats();
-        audioFormats = FilterFormatsByPreference(audioFormats, request.AdvertisedFormat);
+        // Advertise everything the DAC can do, with the player's preference at index 0
+        var audioFormats = BuildAdvertisedFormats(request.Name, request.AdvertisedFormat, deviceCapabilities);
 
         // Create capabilities with player role
         var clientCapabilities = new ClientCapabilities
@@ -3258,91 +3257,36 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         return ClientIdGenerator.Generate(name);
     }
 
-    private static List<AudioFormat> GetDefaultFormats()
-    {
-        // Advertise hi-res formats to SendSpin/Music Assistant server
-        // Server will send highest quality available that we support
-        return new List<AudioFormat>
-        {
-            // Hi-res FLAC (preferred for quality)
-            new AudioFormat { Codec = "flac", SampleRate = 192000, Channels = 2 },
-            new AudioFormat { Codec = "flac", SampleRate = 96000, Channels = 2 },
-            new AudioFormat { Codec = "flac", SampleRate = 48000, Channels = 2 },
-            new AudioFormat { Codec = "flac", SampleRate = 44100, Channels = 2 },
-            // Hi-res PCM
-            new AudioFormat { Codec = "pcm", SampleRate = 192000, Channels = 2, BitDepth = 32 },
-            new AudioFormat { Codec = "pcm", SampleRate = 96000, Channels = 2, BitDepth = 32 },
-            new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 32 },
-            new AudioFormat { Codec = "pcm", SampleRate = 192000, Channels = 2, BitDepth = 24 },
-            new AudioFormat { Codec = "pcm", SampleRate = 96000, Channels = 2, BitDepth = 24 },
-            new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 24 },
-            new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 16 },
-            new AudioFormat { Codec = "pcm", SampleRate = 44100, Channels = 2, BitDepth = 16 },
-            // Opus for efficiency when streaming
-            new AudioFormat { Codec = "opus", SampleRate = 48000, Channels = 2, Bitrate = 256 },
-        };
-    }
-
     /// <summary>
-    /// Filters advertised audio formats based on user preference.
-    /// Defaults to flac-48000 for maximum MA compatibility when no format specified.
+    /// Builds the format list a player advertises, derived from its DAC and ordered by the player's preference.
     /// </summary>
-    /// <param name="allFormats">List of all supported formats.</param>
-    /// <param name="advertisedFormat">Format preference string (e.g., "flac-192000", "pcm-96000-24"). If null/empty, defaults to "flac-48000".</param>
-    /// <returns>Filtered list containing only the preferred format, or all formats if preference is "all".</returns>
-    private List<AudioFormat> FilterFormatsByPreference(List<AudioFormat> allFormats, string? advertisedFormat)
+    /// <param name="playerName">Player name, for logging.</param>
+    /// <param name="advertisedFormat">Persisted preference string, or null for the device default.</param>
+    /// <param name="capabilities">Probed device capabilities, or null when unavailable.</param>
+    /// <returns>The full advertisable list with the preferred entry first.</returns>
+    private List<AudioFormat> BuildAdvertisedFormats(
+        string playerName,
+        string? advertisedFormat,
+        DeviceCapabilities? capabilities)
     {
-        // Default to flac-48000 for maximum compatibility with all MA builds
-        if (string.IsNullOrWhiteSpace(advertisedFormat))
+        var allFormats = AudioFormatCatalog.BuildFormats(capabilities);
+
+        var preferred = AudioFormatCatalog.ResolvePreferred(allFormats, advertisedFormat, capabilities);
+        if (preferred == null)
         {
-            advertisedFormat = "flac-48000";
+            preferred = AudioFormatCatalog.ResolveDefault(allFormats, capabilities);
+            _logger.LogWarning(
+                "Player '{Name}': device cannot do advertised format '{Format}', falling back to {Fallback}",
+                playerName, advertisedFormat, AudioFormatCatalog.ToFormatId(preferred));
         }
 
-        // If explicitly set to "all", return all formats
-        if (advertisedFormat.Equals("all", StringComparison.OrdinalIgnoreCase))
-        {
-            return allFormats;
-        }
+        var ordered = AudioFormatCatalog.WithPreferredFirst(allFormats, preferred);
 
-        // Parse format string (e.g., "flac-192000" or "pcm-96000-24")
-        var parts = advertisedFormat.Split('-');
-        if (parts.Length < 2)
-        {
-            _logger.LogWarning("Invalid advertised format '{Format}', using all formats", advertisedFormat);
-            return allFormats;
-        }
+        _logger.LogInformation(
+            "Player '{Name}': advertising {Count} formats, preferred {Preferred}",
+            playerName, ordered.Count, AudioFormatCatalog.ToFormatId(preferred));
 
-        var codec = parts[0].ToLowerInvariant();
-        if (!int.TryParse(parts[1], out var sampleRate))
-        {
-            _logger.LogWarning("Invalid sample rate in format '{Format}', using all formats", advertisedFormat);
-            return allFormats;
-        }
-
-        int? bitDepth = null;
-        if (parts.Length >= 3 && int.TryParse(parts[2], out var parsedBitDepth))
-        {
-            bitDepth = parsedBitDepth;
-        }
-
-        // Find matching format
-        var matchingFormat = allFormats.FirstOrDefault(f =>
-            f.Codec.Equals(codec, StringComparison.OrdinalIgnoreCase) &&
-            f.SampleRate == sampleRate &&
-            (bitDepth == null || f.BitDepth == bitDepth));
-
-        if (matchingFormat != null)
-        {
-            _logger.LogInformation(
-                "Advertising single format: {Codec} {SampleRate}Hz{BitDepth}",
-                matchingFormat.Codec,
-                matchingFormat.SampleRate,
-                matchingFormat.BitDepth.HasValue ? $" {matchingFormat.BitDepth}-bit" : "");
-            return new List<AudioFormat> { matchingFormat };
-        }
-
-        _logger.LogWarning("Format '{Format}' not found, using all formats", advertisedFormat);
-        return allFormats;
+        return ordered;
     }
 
     /// <summary>

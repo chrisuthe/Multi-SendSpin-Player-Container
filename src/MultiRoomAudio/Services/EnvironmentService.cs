@@ -102,7 +102,7 @@ public class EnvironmentService
 
         if (_enableAdvancedFormats)
         {
-            _logger.LogInformation("ENABLE_ADVANCED_FORMATS mode enabled - per-player format selection available");
+            _logger.LogInformation("ENABLE_ADVANCED_FORMATS is set but no longer does anything - format selection is always available");
         }
 
         // Detect buffer seconds setting

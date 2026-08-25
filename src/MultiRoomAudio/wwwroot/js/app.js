@@ -4,7 +4,6 @@
 let players = {};
 let devices = [];
 let formats = [];
-let advancedFormatsEnabled = false;
 let connection = null;
 let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
@@ -585,10 +584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Load data that doesn't depend on startup completion
-    await Promise.all([
-        checkAdvancedFormats(),
-        refreshBuildInfo()
-    ]);
+    await refreshBuildInfo();
 
     // Only load player/device data if startup is already complete
     if (startupComplete) {
@@ -930,44 +926,46 @@ async function refreshStatus(force = false, manual = false) {
     }
 }
 
-async function checkAdvancedFormats() {
-    try {
-        const response = await fetch('./api/players/formats');
-        advancedFormatsEnabled = response.ok;
+// Populate the advertised-format dropdown from what the selected device can actually do.
+// `desiredValue` keeps a player's saved format selected even when it predates this list.
+async function refreshFormats(deviceId = null, desiredValue = null) {
+    const formatSelect = document.getElementById('advertisedFormat');
+    if (!formatSelect) return null;
 
-        if (advancedFormatsEnabled) {
-            document.getElementById('advertisedFormatGroup').style.display = 'block';
-        }
-    } catch (error) {
-        advancedFormatsEnabled = false;
-    }
-}
-
-async function refreshFormats() {
-    if (!advancedFormatsEnabled) return;
+    // null means "keep what's selected"; '' means "reset to the device's default"
+    const keepValue = desiredValue !== null ? desiredValue : formatSelect.value;
 
     try {
-        const response = await fetch('./api/players/formats');
+        const query = deviceId ? `?device=${encodeURIComponent(deviceId)}` : '';
+        const response = await fetch(`./api/players/formats${query}`);
         if (!response.ok) throw new Error('Failed to fetch formats');
 
         const data = await response.json();
         formats = data.formats || [];
+        const defaultFormatId = data.defaultFormatId || null;
 
-        const formatSelect = document.getElementById('advertisedFormat');
-        if (formatSelect) {
-            const currentValue = formatSelect.value;
-            formatSelect.innerHTML = '';
-            formats.forEach(format => {
-                const option = document.createElement('option');
-                option.value = format.id;
-                option.textContent = format.label;
-                option.title = format.description;
-                formatSelect.appendChild(option);
-            });
-            if (currentValue) formatSelect.value = currentValue;
+        formatSelect.replaceChildren();
+        formats.forEach(format => {
+            const option = document.createElement('option');
+            option.value = format.id;
+            option.textContent = format.label;
+            option.title = format.description;
+            formatSelect.appendChild(option);
+        });
+
+        // A saved format the device no longer offers must stay visible, not silently change
+        if (keepValue && !formats.some(f => f.id === keepValue)) {
+            const option = document.createElement('option');
+            option.value = keepValue;
+            option.textContent = `${keepValue} (not supported by this device)`;
+            formatSelect.insertBefore(option, formatSelect.firstChild);
         }
+
+        formatSelect.value = keepValue || defaultFormatId || '';
+        return defaultFormatId;
     } catch (error) {
         console.error('Error refreshing formats:', error);
+        return null;
     }
 }
 
@@ -1085,9 +1083,7 @@ async function openAddPlayerModal() {
 
     // Refresh devices and formats
     await refreshDevices();
-    if (advancedFormatsEnabled) {
-        await refreshFormats();
-    }
+    await refreshFormats(document.getElementById('audioDevice').value, '');
 
     const modal = new bootstrap.Modal(document.getElementById('playerModal'));
     modal.show();
@@ -1134,21 +1130,11 @@ async function openEditPlayerModal(playerName) {
             }
         }
 
-        // Set advertised format dropdown (if advanced formats enabled)
-        if (advancedFormatsEnabled) {
-            // Refresh formats first to populate options
-            await refreshFormats();
-
-            // Store original format for change detection (default to flac-48000 for compatibility)
-            const originalFormat = player.advertisedFormat || 'flac-48000';
-            document.getElementById('playerForm').dataset.originalFormat = originalFormat;
-
-            // Set dropdown value AFTER options are populated
-            const formatSelect = document.getElementById('advertisedFormat');
-            if (formatSelect) {
-                formatSelect.value = originalFormat;
-            }
-        }
+        // Populate the advertised format dropdown from this player's device.
+        // An unset format means "device default" - show it as such rather than guessing an id.
+        const savedFormat = player.advertisedFormat || '';
+        const defaultFormatId = await refreshFormats(player.device, savedFormat);
+        document.getElementById('playerForm').dataset.originalFormat = savedFormat || defaultFormatId || '';
 
         // Set modal to Edit mode
         document.getElementById('playerModalIcon').className = 'fas fa-edit me-2';
@@ -1205,17 +1191,12 @@ async function savePlayer() {
                 // so it doesn't affect current playback
             };
 
-            // Include advertised format if advanced formats enabled
-            if (advancedFormatsEnabled) {
-                const form = document.getElementById('playerForm');
-                const originalFormat = form.dataset.originalFormat || 'flac-48000';
-                const currentFormat = document.getElementById('advertisedFormat').value || 'flac-48000';
-
-                // Only include if changed from original
-                if (currentFormat !== originalFormat) {
-                    // Send the specific format
-                    updatePayload.advertisedFormat = currentFormat;
-                }
+            // Only send the format when the user actually changed it - it forces a restart
+            const form = document.getElementById('playerForm');
+            const originalFormat = form.dataset.originalFormat || '';
+            const currentFormat = document.getElementById('advertisedFormat').value || '';
+            if (currentFormat !== originalFormat) {
+                updatePayload.advertisedFormat = currentFormat;
             }
 
             const response = await fetch(`./api/players/${encodeURIComponent(editingName)}`, {
@@ -1292,12 +1273,9 @@ async function savePlayer() {
                 persist: true
             };
 
-            // Include advertised format if advanced formats enabled
-            if (advancedFormatsEnabled) {
-                const advertisedFormat = document.getElementById('advertisedFormat').value;
-                if (advertisedFormat) {
-                    payload.advertisedFormat = advertisedFormat;
-                }
+            const advertisedFormat = document.getElementById('advertisedFormat').value;
+            if (advertisedFormat) {
+                payload.advertisedFormat = advertisedFormat;
             }
 
             const response = await fetch('./api/players', {
@@ -1590,11 +1568,13 @@ async function showPlayerStats(name) {
     const serverAddress = player.connectedAddress || '—';
     const discoveryMethod = player.serverUrl ? 'Manual' : 'Auto-discovered';
 
-    // Advertised format display
-    const advertised = player.advertisedFormat || 'flac-48000';
-    const isAllFormats = advertised === 'all';
-    const advertisedDisplay = isAllFormats ? 'All Formats' : advertised;
-    const advertisedSubtitle = isAllFormats ? '<br><small class="text-muted">flac • pcm • opus, up to 192kHz</small>' : '';
+    // Advertised format display. Unset (and the legacy "all") both mean the device-derived default.
+    const advertised = player.advertisedFormat;
+    const usesDeviceDefault = !advertised || advertised === 'all';
+    const advertisedDisplay = usesDeviceDefault ? 'Device default' : advertised;
+    const advertisedSubtitle = usesDeviceDefault
+        ? '<br><small class="text-muted">FLAC 48kHz at the device\'s best depth (max 24-bit)</small>'
+        : '';
 
     // Output format - use device already looked up above
     const outputFormat = device

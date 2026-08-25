@@ -222,7 +222,7 @@ new ErrorResponse(false, "Error message")
 | `PA_SAMPLE_FORMAT` | `float32le` | PulseAudio sample format (Docker mode only) |
 | `SUPERVISOR_TOKEN` | (HAOS only) | Auto-set by Home Assistant supervisor |
 | `MOCK_HARDWARE` | `false` | Enable mock relay boards for testing without hardware |
-| `ENABLE_ADVANCED_FORMATS` | `false` | Show format selection UI (dev-only). All players default to flac-48000 regardless. |
+| `ENABLE_ADVANCED_FORMATS` | `false` | Deprecated no-op. The Advertised Format selector is always visible and always device-derived; this flag no longer gates it or `GET /api/players/formats`. |
 | `BUFFER_SECONDS` | `30` | Audio buffer size in seconds (5-30, step 5). Lower values reduce RAM on constrained hardware. |
 | `RESET_SINKS` | `true` | Suspend/resume hardware sinks (`module-alsa-card.c` only, skipping `SUSPENDED` ones) once, in the `sinkreset` startup phase. Works around the ALSA mmap+timer kernel regression that leaves cards silent (#281). Startup is the only trigger — a device re-opened on the bad path later needs an add-on restart. Set to `false`/`0`/`no` to disable. Surfaced as the `reset_sinks` add-on option. |
 | `USE_AUDIO_CLOCK` | `false` | Opt in to the PulseAudio DAC clock for sync timing. Default uses the SDK `MonotonicTimer` (VM-resilient, no output-prefill offset, better multi-room sync). Enable only for genuinely divergent DAC clocks. |
@@ -236,11 +236,32 @@ new ErrorResponse(false, "Error message")
 
 **Audio Format Selection:**
 
-- All players default to advertising "flac-48000" for maximum Music Assistant compatibility
-- This default applies regardless of `ENABLE_ADVANCED_FORMATS` setting
-- When `ENABLE_ADVANCED_FORMATS=true`, UI shows dropdown to select specific formats or "All Formats"
-- Format preference is persisted in players.yaml and survives restarts
-- Changing format triggers automatic player restart to re-announce with new format
+`AudioFormatCatalog` (`src/MultiRoomAudio/Audio/AudioFormatCatalog.cs`) builds the
+`supported_formats` list from the player device's probed `DeviceCapabilities`.
+
+- A player advertises the **whole** list its DAC can do — flac entries, then pcm, then opus,
+  best quality first. Music Assistant builds its per-player `preferred_sendspin_format`
+  dropdown from this list, so advertising one entry left it with one option (#280).
+- **Entry 0 is the contract.** The aiosendspin server takes `compatible[0]` and holds it for
+  the whole session; it does not scan the list for a track's native rate. The preference only
+  moves an entry to the front — it never truncates the list.
+- **Every flac and pcm entry carries an explicit `bit_depth`.** The SDK maps a null depth to
+  16 (`BitDepth = (f.BitDepth ?? 16)`), which is what silently truncated hi-res streams.
+  Opus has no depth — the spec ignores it for that codec.
+- **Default anchor: `flac / 48000 / min(device best depth, 24) / 2ch`.** The rate stays at
+  48kHz because buffer RAM scales with it (~11.5MB per player at 48kHz, ~23MB at 96kHz,
+  ~46MB at 192kHz at `BUFFER_SECONDS=30`); depth costs LAN bandwidth but no RAM, so 24-bit
+  is safe by default. A DAC with no 48kHz mode anchors on its nearest rate.
+- **Preference strings** persisted in `players.yaml`: `codec-rate` (`"flac-48000"` — depth
+  resolved from the device), `codec-rate-depth` (`"pcm-96000-24"`), `"auto"` (device native
+  best), `"all"` (legacy; same as the default anchor), or null. All legacy values keep working.
+- Devices whose capabilities cannot be probed fall back to a static list that still carries
+  explicit bit depths.
+- Changing format triggers an automatic player restart to re-announce.
+
+Advertising a rate does not guarantee the DAC receives it — PulseAudio may resample,
+especially under HAOS where the daemon belongs to the supervisor. Stats-for-Nerds
+`hardwareSampleRate` / `hardwareBitDepth` (and `pactl list sinks`) are the truth.
 
 ---
 
@@ -307,7 +328,7 @@ squeezelite-docker/
 | PUT | `/api/players/{name}/mute` | Mute/unmute player |
 | PUT | `/api/players/{name}/offset` | Set delay offset |
 | PUT | `/api/players/{name}/auto-resume` | Enable/disable auto-resume on device reconnect |
-| GET | `/api/players/formats` | Get available audio formats (only when ENABLE_ADVANCED_FORMATS=true) |
+| GET | `/api/players/formats?device={id}` | Get the audio formats a device can be advertised as supporting |
 
 ### Audio Devices
 
