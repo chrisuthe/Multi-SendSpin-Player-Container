@@ -237,6 +237,8 @@ public partial class SinkResetService
         // Always resume, and never on the caller's token — a sink left suspended is silent until
         // something resumes it, and nothing else will.
         var resumed = await ResumeAsync(sink.Name);
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (resumed)
         {
             _logger.LogInformation("Sink '{Sink}' suspended and resumed", sink.Name);
