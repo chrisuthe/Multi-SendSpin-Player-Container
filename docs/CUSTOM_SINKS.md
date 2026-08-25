@@ -190,9 +190,7 @@ Standard PulseAudio channel names:
 
 ### Technical Details
 
-Under the hood, this creates a PulseAudio `module-remap-sink`. This is the command the app
-issues, not a line to paste into `default.pa` - the quoting below is specific to passing a
-description through `pactl`:
+Under the hood, this creates a PulseAudio `module-remap-sink`:
 
 ```
 pactl load-module module-remap-sink \
@@ -205,10 +203,16 @@ pactl load-module module-remap-sink \
   remix=no
 ```
 
-The description is quoted twice on purpose: pactl's module argument parser strips the outer
-double quotes, then PulseAudio's proplist parser strips the inner single quotes. A single
-level of quoting fails with "Module initialization failed", which is why descriptions used
-to reach Home Assistant with underscores in place of spaces.
+The description is quoted twice on purpose: PulseAudio's module argument parser strips the
+outer double quotes, then its proplist parser strips the inner single quotes. A single level
+of quoting fails with "Module initialization failed", which is why descriptions used to
+reach Home Assistant with underscores in place of spaces.
+
+The same applies to a hand-written `default.pa` - `pactl` and `default.pa` go through the
+same argument parser, so a description with spaces needs both levels there too. The inner
+and outer quote styles can be swapped (`sink_properties='device.description="Bedroom Rear"'`
+works equally well), but one level of either, or a backslash-escaped space, silently fails
+to load the module.
 
 ---
 
