@@ -1,17 +1,17 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-876ff2c
+## Development Build: sha-fc75377
 
 **Current Dev Build Changes** (recent)
 
+- Suspend and resume hardware sinks so silent cards recover (#281) (#287)
 - Fix default.pa import losing sink descriptions with spaces (#286)
 - Standardize remap sink naming and disambiguate duplicate sound cards (#283)
 - chore: upgrade SendSpin.SDK 9.1.0 -> 9.2.0
 - style: satisfy dotnet format on merged MQTT changes
 - Merge dev into main for v5.2.2 release
 - fix: apply a cubic volume taper instead of linear amplitude (#263) (#270)
-- fix: stop UI trigger saves from clearing the zone name (#271)
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
