@@ -1590,7 +1590,7 @@ async function showPlayerStats(name) {
     const usesDeviceDefault = !advertised || advertised === 'all';
     const advertisedDisplay = usesDeviceDefault ? 'Device default' : advertised;
     const advertisedSubtitle = usesDeviceDefault
-        ? '<br><small class="text-muted">FLAC 48kHz at the device\'s best depth (max 24-bit)</small>'
+        ? '<br><small class="text-muted">FLAC at the device\'s best depth (max 24-bit), 48kHz or its nearest supported rate</small>'
         : '';
 
     // Output format - use device already looked up above

@@ -58,15 +58,23 @@ public static class PlayersEndpoint
             .WithOpenApi();
 
         // GET /api/players/formats - Format options the selected device can actually do
-        group.MapGet("/formats", (string? device, BackendFactory backendFactory, ILoggerFactory loggerFactory) =>
+        group.MapGet("/formats", (
+            string? device,
+            BackendFactory backendFactory,
+            DeviceMatchingService deviceMatching,
+            ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: GET /api/players/formats?device={Device}", device ?? "(none)");
 
-            // Null capabilities are fine - the catalog falls back to a static, explicitly bit-depthed list
+            // The enriched device carries ALSA-probed hardware capabilities; the backend probe is
+            // one fixed hi-res table for every sink, so it is only a fallback.
+            // Null capabilities are fine - the catalog falls back to a static, explicitly bit-depthed list.
             var capabilities = string.IsNullOrWhiteSpace(device)
                 ? null
-                : backendFactory.GetDeviceCapabilities(device);
+                : AudioFormatCatalog.CapabilitiesFor(
+                    deviceMatching.GetEnrichedDevice(device),
+                    backendFactory.GetDeviceCapabilities(device));
 
             return Results.Ok(new AudioFormatsResponse(
                 AudioFormatCatalog.BuildOptions(capabilities),
@@ -474,10 +482,13 @@ public static class PlayersEndpoint
                             currentName, savedConfig.Volume);
                     }
 
-                    // Persist device change
+                    // Persist device change. supported_formats is derived from the device, and
+                    // SwitchDeviceAsync only swaps the pipeline - the player has to restart to
+                    // re-announce, or MA keeps offering the previous device's formats.
                     if (request.Device != null && request.Device != savedConfig.Device)
                     {
                         savedConfig.Device = request.Device;
+                        needsRestart = true;
                         logger.LogInformation("API: Player {PlayerName} device persisted to '{Device}'",
                             currentName, savedConfig.Device == "" ? "(none)" : savedConfig.Device);
                     }

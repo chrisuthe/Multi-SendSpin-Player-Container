@@ -47,6 +47,22 @@ public static class AudioFormatCatalog
     private static readonly int[] FlacBitDepths = [24, 16];
 
     /// <summary>
+    /// Picks the capabilities to build a device's advertised formats from.
+    /// </summary>
+    /// <param name="device">The enriched device, whose <c>Capabilities</c> carry ALSA-probed hardware data.</param>
+    /// <param name="backendProbe">The backend's own probe, used only when the device has none.</param>
+    /// <returns>The best available capabilities, or null when neither source has any.</returns>
+    /// <remarks>
+    /// The enriched device is the only source that is actually per-device:
+    /// <see cref="PulseAudio.PulseAudioBackend.GetDeviceCapabilities"/> returns one fixed
+    /// hi-res table for every sink, so building formats from it would advertise 192kHz on a
+    /// 48kHz-only DAC. ALSA capabilities are attached during enrichment
+    /// (<see cref="Services.DeviceMatchingService"/>), which is why they win here.
+    /// </remarks>
+    public static DeviceCapabilities? CapabilitiesFor(AudioDevice? device, DeviceCapabilities? backendProbe) =>
+        device?.Capabilities ?? backendProbe;
+
+    /// <summary>
     /// Builds the full advertisable format list for a device, best quality first.
     /// </summary>
     /// <param name="capabilities">Probed device capabilities, or null when unavailable.</param>

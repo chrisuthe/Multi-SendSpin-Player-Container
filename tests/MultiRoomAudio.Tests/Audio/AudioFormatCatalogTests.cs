@@ -33,6 +33,62 @@ public class AudioFormatCatalogTests
         return AudioFormatCatalog.WithPreferredFirst(all, preferred);
     }
 
+    private static AudioDevice Device(DeviceCapabilities? capabilities) =>
+        new(
+            Index: 0,
+            Id: "alsa_output.test",
+            Name: "Test DAC",
+            MaxChannels: 2,
+            DefaultSampleRate: 48000,
+            DefaultLowLatencyMs: 20,
+            DefaultHighLatencyMs: 100,
+            IsDefault: false,
+            Capabilities: capabilities);
+
+    /// <summary>The fixed table PulseAudioBackend returns for every sink, regardless of device.</summary>
+    private static DeviceCapabilities BackendProbe() =>
+        Caps([44100, 48000, 88200, 96000, 176400, 192000], [16, 24, 32]);
+
+    // --- Capability source ------------------------------------------------------------------
+
+    [Fact]
+    public void CapabilitiesFor_PrefersTheDevicesOwnCapabilitiesOverTheBackendProbe()
+    {
+        // The regression this guards: building formats from the backend probe advertises
+        // 192kHz on every sink, because PulseAudioBackend returns one fixed table for all of them.
+        var dac = Caps([48000], [16, 24]);
+
+        var resolved = AudioFormatCatalog.CapabilitiesFor(Device(dac), BackendProbe());
+
+        Assert.Same(dac, resolved);
+    }
+
+    [Fact]
+    public void CapabilitiesFor_A48kOnlyDeviceNeverAdvertisesHiResEvenWhenTheProbeClaimsIt()
+    {
+        var resolved = AudioFormatCatalog.CapabilitiesFor(Device(Caps([48000], [16, 24])), BackendProbe());
+
+        var formats = AudioFormatCatalog.BuildFormats(resolved);
+
+        Assert.All(formats, f => Assert.Equal(48000, f.SampleRate));
+        Assert.DoesNotContain(formats, f => f.SampleRate is 88200 or 96000 or 176400 or 192000);
+    }
+
+    [Fact]
+    public void CapabilitiesFor_FallsBackToTheBackendProbeWhenTheDeviceHasNone()
+    {
+        var probe = BackendProbe();
+
+        Assert.Same(probe, AudioFormatCatalog.CapabilitiesFor(Device(null), probe));
+        Assert.Same(probe, AudioFormatCatalog.CapabilitiesFor(null, probe));
+    }
+
+    [Fact]
+    public void CapabilitiesFor_ReturnsNullWhenNeitherSourceHasCapabilities()
+    {
+        Assert.Null(AudioFormatCatalog.CapabilitiesFor(null, null));
+    }
+
     // --- Explicit bit depth on every entry -------------------------------------------------
 
     [Fact]

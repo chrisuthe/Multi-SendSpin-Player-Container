@@ -969,7 +969,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private PlayerComponents CreateSdkComponents(PlayerCreateRequest request)
     {
         // Probe device capabilities: drives both format advertisement and Stats for Nerds reporting
-        var deviceCapabilities = _backendFactory.GetDeviceCapabilities(request.Device);
+        var deviceCapabilities = ResolveDeviceCapabilities(request.Device);
 
         // Advertise everything the DAC can do, with the player's preference at index 0
         var audioFormats = BuildAdvertisedFormats(request.Name, request.AdvertisedFormat, deviceCapabilities);
@@ -3255,6 +3255,34 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     {
         // Use the ClientIdGenerator utility for consistent MD5-based IDs
         return ClientIdGenerator.Generate(name);
+    }
+
+    /// <summary>
+    /// Resolves the capabilities used for a player's advertised formats and stats reporting.
+    /// </summary>
+    /// <param name="deviceId">Sink name of the player's device, or null for the default device.</param>
+    /// <returns>The device's ALSA-probed capabilities, or the backend's own probe when it has none.</returns>
+    /// <remarks>
+    /// The backend probe is a single fixed hi-res table under PulseAudio, so it must not be the
+    /// primary source — only the enriched device carries per-device hardware data.
+    /// </remarks>
+    private DeviceCapabilities? ResolveDeviceCapabilities(string? deviceId)
+    {
+        AudioDevice? enriched = null;
+        if (!string.IsNullOrWhiteSpace(deviceId))
+        {
+            try
+            {
+                enriched = _serviceProvider.GetService<DeviceMatchingService>()?.GetEnrichedDevice(deviceId);
+            }
+            catch (Exception ex)
+            {
+                // Capability lookup must never block player creation
+                _logger.LogDebug(ex, "Could not resolve enriched capabilities for device '{Device}'", deviceId);
+            }
+        }
+
+        return AudioFormatCatalog.CapabilitiesFor(enriched, _backendFactory.GetDeviceCapabilities(deviceId));
     }
 
     /// <summary>
