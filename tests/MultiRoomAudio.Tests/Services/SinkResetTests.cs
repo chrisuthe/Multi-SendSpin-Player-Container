@@ -454,6 +454,56 @@ public class SinkResetTests
             pactl.SuspendCallsFor(XfiSink));
     }
 
+    /// <summary>
+    /// Clock that parks the first callers until <paramref name="gate"/> of them have arrived, so a
+    /// test can hold two racing cooldown checks inside the window at once. Falls back to a timeout
+    /// so it cannot hang when the code under test correctly serializes those callers.
+    /// </summary>
+    private sealed class RendezvousClock
+    {
+        private readonly TaskCompletionSource _arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly int _gate;
+        private int _arrivals;
+
+        public RendezvousClock(int gate) => _gate = gate;
+
+        public DateTimeOffset Read()
+        {
+            if (Interlocked.Increment(ref _arrivals) >= _gate)
+                _arrived.TrySetResult();
+            else
+                _arrived.Task.Wait(TimeSpan.FromMilliseconds(200));
+
+            return DateTimeOffset.UnixEpoch;
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentSinkEvents_StillCollapseToOneCycle()
+    {
+        // The cooldown is a check-then-act on _lastCycled. Held open, two events for the same sink
+        // both read it as clear, and the sink gets interrupted twice — so the check has to happen
+        // under the same gate as the write.
+        var clock = new RendezvousClock(gate: 2);
+        var pactl = new ScriptedPactl();
+        var service = new SinkResetService(
+            new CapturingLogger<SinkResetService>(),
+            mockHardware: false,
+            enabled: true,
+            pactl.RunAsync,
+            settleDelayMs: 0,
+            clock.Read);
+
+        var cycles = await Task.WhenAll(
+            service.ResetSinkByIndexAsync(1),
+            service.ResetSinkByIndexAsync(1));
+
+        Assert.Equal(1, cycles.Sum());
+        Assert.Equal(
+            [$"suspend-sink {XfiSink} 1", $"suspend-sink {XfiSink} 0"],
+            pactl.SuspendCallsFor(XfiSink));
+    }
+
     [Theory]
     [InlineData(null, true)]
     [InlineData("", true)]

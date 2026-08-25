@@ -263,13 +263,7 @@ public partial class SinkResetService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (respectCooldown && InCooldown(sink.Name))
-            {
-                _logger.LogDebug("Sink reset ({Reason}): '{Sink}' cycled recently, skipping", reason, sink.Name);
-                continue;
-            }
-
-            if (await CycleAsync(sink, reason, cancellationToken))
+            if (await CycleAsync(sink, reason, respectCooldown, cancellationToken))
                 cycled++;
         }
 
@@ -288,7 +282,11 @@ public partial class SinkResetService
     /// Runs the suspend/resume pair for one sink. Swallows every failure so a card that refuses
     /// the cycle does not stop the remaining sinks from being cycled.
     /// </summary>
-    private async Task<bool> CycleAsync(PactlSinkRow sink, string reason, CancellationToken cancellationToken)
+    private async Task<bool> CycleAsync(
+        PactlSinkRow sink,
+        string reason,
+        bool respectCooldown,
+        CancellationToken cancellationToken)
     {
         if (!PactlCommandRunner.ValidateName(sink.Name, out var nameError))
         {
@@ -302,6 +300,14 @@ public partial class SinkResetService
         await gate.WaitAsync(CancellationToken.None);
         try
         {
+            // Tested under the gate, not before it: a burst of events for one sink would otherwise
+            // all read _lastCycled before any of them wrote it, and then cycle in turn.
+            if (respectCooldown && InCooldown(sink.Name))
+            {
+                _logger.LogDebug("Sink reset ({Reason}): '{Sink}' cycled recently, skipping", reason, sink.Name);
+                return false;
+            }
+
             // Stamp before the cycle so a failure still absorbs the rest of an event burst.
             _lastCycled[sink.Name] = _now();
 
