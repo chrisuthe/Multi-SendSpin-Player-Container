@@ -141,7 +141,10 @@ const Wizard = {
         try {
             const response = await fetch('./api/sinks');
             if (response.ok) {
-                const sinks = await response.json();
+                // The endpoint returns { sinks, count }, not a bare array - calling map on
+                // the envelope threw into the catch below and left customSinks empty
+                const data = await response.json();
+                const sinks = data.sinks || [];
                 // Store sinks with their slaves/masterSink info for filtering
                 this.customSinks = sinks.map(s => ({
                     id: s.sinkName || s.name,

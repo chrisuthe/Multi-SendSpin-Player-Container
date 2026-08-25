@@ -7,6 +7,7 @@
 - Identical sound cards are now tellable apart. Where two cards or devices share a description, the Sound Cards list, the player device dropdowns, the remap master picker and the wizard's device lists append the ALSA card number - "Creative X-Fi Analog Surround 7.1 (card 1)" vs "... (card 4)". Devices with unique names are unchanged (#282)
 
 ### Fixed
+- The onboarding wizard sees pre-existing custom sinks again. It read `/api/sinks` as a bare array when the endpoint returns `{ sinks, count }`, so the list silently came back empty. Step 4 now offers sinks created before the wizard ran as player targets, and stops offering the hardware devices those sinks already consume as master or slave
 - Custom sink descriptions keep their spaces. They used to reach Home Assistant with underscores ("Front_Left_Front_Right") because PulseAudio's proplist parser rejected the unquoted value; quoting it twice gets it through intact. A description of only quote characters also no longer fails sink creation outright (#282)
 
 ### Changed

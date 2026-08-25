@@ -151,9 +151,12 @@ function buildRemapSinkDefaults(masterLabel, channels, existingNames = []) {
         return `${slug}${tail}`.slice(0, REMAP_SINK_NAME_MAX);
     };
 
+    // Trying one more ordinal than there are taken names guarantees a free one, so the
+    // bound can never make us hand back a name we know collides.
+    const limit = taken.size + 2;
     let ordinal = 1;
     let name = compose(ordinal);
-    while (taken.has(name) && ordinal < 100) {
+    while (taken.has(name) && ordinal < limit) {
         name = compose(++ordinal);
     }
 

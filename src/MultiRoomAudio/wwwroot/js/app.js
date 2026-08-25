@@ -3683,11 +3683,15 @@ function renderSoundCards(savedScrollTop = 0) {
         return soundCardDevices.find(d => d.id && d.id.includes(cardBase));
     };
 
-    // Two identical cards share a description, so fall back to the card number
+    // Two identical cards share a description, so fall back to the card number. device.cardIndex
+    // is the ALSA card number and card.index the PulseAudio one; numbering them from both at once
+    // can hand two cards the same "(card N)", so use ALSA only when every card has one. An
+    // off-profile card matches a placeholder device that carries no cardIndex.
+    const useAlsaCardNumbers = soundCards.every(c => findCardDevice(c)?.cardIndex != null);
     const cardLabel = makeCardDisambiguator(
         soundCards,
         c => c.description || c.name,
-        c => findCardDevice(c)?.cardIndex ?? c.index
+        c => useAlsaCardNumbers ? findCardDevice(c).cardIndex : c.index
     );
 
     const accordionHtml = soundCards.map((card, index) => {
