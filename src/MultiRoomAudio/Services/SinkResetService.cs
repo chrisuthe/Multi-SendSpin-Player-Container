@@ -145,6 +145,11 @@ public partial class SinkResetService
 
             if (await CycleAsync(sink, cancellationToken))
                 cycled++;
+
+            // CycleAsync swallows cancellation so its resume always runs. Surface it here, once the
+            // sink is safely back, or a pass interrupted on its last sink would return normally and
+            // the startup phase would be reported complete during a shutdown.
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         _logger.LogInformation("Suspend/resume cycled {Count} of {Total} hardware sink(s)",

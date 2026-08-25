@@ -29,6 +29,9 @@ public class SinkResetTests
 
     private const string XfiSink = "alsa_output.pci-0000_04_00.0.analog-surround-71";
 
+    /// <summary>The fifth and last hardware sink in the fixture — nothing follows it in the pass.</summary>
+    private const string LastHardwareSink = "alsa_output.pci-0000_08_00.6.analog-surround-51";
+
     /// <summary>
     /// Answers the sink listing from a fixture and records every pactl call, with hooks for making
     /// individual commands fail or throw.
@@ -214,17 +217,21 @@ public class SinkResetTests
         Assert.Contains($"suspend-sink {XfiSink} 0", pactl.SuspendCallsFor(XfiSink));
     }
 
-    [Fact]
-    public async Task CancellationBetweenTheHalves_StillResumesTheSink()
+    [Theory]
+    [InlineData(XfiSink)]
+    [InlineData(LastHardwareSink)]
+    public async Task CancellationBetweenTheHalves_ResumesTheSinkAndStillPropagates(string sink)
     {
         // Container shutdown lands here: without an uncancellable resume the card stays silent
-        // across the restart.
+        // across the restart. Cancelling on the last candidate is the case that matters for
+        // propagation — there is no next iteration to notice the token, so the pass would
+        // otherwise return normally and the startup phase would be reported complete.
         using var cts = new CancellationTokenSource();
         var pactl = new FakePactl
         {
             OnCall = call =>
             {
-                if (call == $"suspend-sink {XfiSink} 1")
+                if (call == $"suspend-sink {sink} 1")
                     cts.Cancel();
             }
         };
@@ -232,10 +239,10 @@ public class SinkResetTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => Service(pactl).ResetAllHardwareSinksAsync(cts.Token));
 
-        // The cycle in flight finished its resume before the pass gave up on the remaining sinks.
+        // The cycle in flight finished its resume before the pass gave up.
         Assert.Equal(
-            [$"suspend-sink {XfiSink} 1", $"suspend-sink {XfiSink} 0"],
-            pactl.SuspendCallsFor(XfiSink));
+            [$"suspend-sink {sink} 1", $"suspend-sink {sink} 0"],
+            pactl.SuspendCallsFor(sink));
     }
 
     [Fact]
