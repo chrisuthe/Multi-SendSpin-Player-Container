@@ -53,7 +53,6 @@ These options are available in dev builds for testing and debugging:
 |----------|---------|-------------|
 | `MOCK_HARDWARE` | `false` | Simulate audio devices and relay boards without hardware |
 | `LOG_LEVEL` | `info` | Logging verbosity: `debug`, `info`, `warning`, `error` |
-| `ENABLE_ADVANCED_FORMATS` | `false` | Show format selection UI (players default to flac-48000 regardless) |
 | `PA_SAMPLE_RATE` | `48000` | PulseAudio sample rate (applied at container startup) |
 | `PA_SAMPLE_FORMAT` | `float32le` | PulseAudio format: `s16le`, `s24le`, `s32le`, `float32le` |
 
@@ -66,7 +65,6 @@ services:
     environment:
       - MOCK_HARDWARE=true
       - LOG_LEVEL=debug
-      - ENABLE_ADVANCED_FORMATS=true
     # ... rest of config
 ```
 

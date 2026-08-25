@@ -69,9 +69,11 @@ public class PlayerCreateRequest
     public bool Persist { get; set; } = true;
 
     /// <summary>
-    /// Specific audio format to advertise. If null or empty, defaults to "flac-48000" for maximum MA compatibility.
-    /// Format string: "codec-samplerate-bitdepth" (e.g., "flac-192000", "pcm-96000-24").
-    /// UI selection only available when ENABLE_ADVANCED_FORMATS is enabled.
+    /// Format to advertise first in <c>supported_formats</c>. Null means the device default
+    /// (FLAC 48kHz at the device's best depth, capped at 24-bit).
+    /// Format string: <c>"codec-samplerate"</c> or <c>"codec-samplerate-bitdepth"</c>
+    /// (e.g. <c>"flac-48000"</c>, <c>"pcm-96000-24"</c>), or <c>"auto"</c> for the device's native best.
+    /// See <see cref="Audio.AudioFormatCatalog"/>.
     /// </summary>
     [StringLength(50, ErrorMessage = "AdvertisedFormat cannot exceed 50 characters.")]
     public string? AdvertisedFormat { get; set; }
@@ -160,9 +162,11 @@ public class PlayerUpdateRequest
     public int? BufferSizeMs { get; set; }
 
     /// <summary>
-    /// Specific audio format to advertise. If null or empty, defaults to "flac-48000" for maximum MA compatibility.
-    /// Format string: "codec-samplerate-bitdepth" (e.g., "flac-192000", "pcm-96000-24").
-    /// UI selection only available when ENABLE_ADVANCED_FORMATS is enabled.
+    /// Format to advertise first in <c>supported_formats</c>. Null means the device default
+    /// (FLAC 48kHz at the device's best depth, capped at 24-bit).
+    /// Format string: <c>"codec-samplerate"</c> or <c>"codec-samplerate-bitdepth"</c>
+    /// (e.g. <c>"flac-48000"</c>, <c>"pcm-96000-24"</c>), or <c>"auto"</c> for the device's native best.
+    /// See <see cref="Audio.AudioFormatCatalog"/>.
     /// </summary>
     [StringLength(50, ErrorMessage = "AdvertisedFormat cannot exceed 50 characters.")]
     public string? AdvertisedFormat { get; set; }

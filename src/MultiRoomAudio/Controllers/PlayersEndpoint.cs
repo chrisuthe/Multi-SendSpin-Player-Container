@@ -1,3 +1,4 @@
+using MultiRoomAudio.Audio;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Services;
 using MultiRoomAudio.Utilities;
@@ -56,40 +57,25 @@ public static class PlayersEndpoint
             .WithTags("Players")
             .WithOpenApi();
 
-        var environment = app.Services.GetRequiredService<EnvironmentService>();
-
-        // GET /api/players/formats - Get available audio format options (conditional)
-        // Only registered if ENABLE_ADVANCED_FORMATS is enabled
-        if (environment.EnableAdvancedFormats)
+        // GET /api/players/formats - Format options the selected device can actually do
+        group.MapGet("/formats", (
+            string? device,
+            DeviceMatchingService deviceMatching,
+            ILoggerFactory loggerFactory) =>
         {
-            group.MapGet("/formats", (ILoggerFactory loggerFactory) =>
-            {
-                var logger = loggerFactory.CreateLogger("PlayersEndpoint");
-                logger.LogDebug("API: GET /api/players/formats");
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
+            logger.LogDebug("API: GET /api/players/formats?device={Device}", device ?? "(default)");
 
-                var formats = new List<AudioFormatOption>
-                {
-                    new("flac-48000", "FLAC 48kHz", "CD quality lossless 48kHz (default, works with all MA builds)"),
-                    new("all", "All Formats", "Advertise all supported formats"),
-                    new("flac-192000", "FLAC 192kHz", "Hi-res lossless 192kHz"),
-                    new("flac-96000", "FLAC 96kHz", "Hi-res lossless 96kHz"),
-                    new("flac-44100", "FLAC 44.1kHz", "CD quality lossless 44.1kHz"),
-                    new("pcm-192000-32", "PCM 192kHz 32-bit", "Hi-res uncompressed 192kHz 32-bit"),
-                    new("pcm-96000-32", "PCM 96kHz 32-bit", "Hi-res uncompressed 96kHz 32-bit"),
-                    new("pcm-48000-32", "PCM 48kHz 32-bit", "CD quality uncompressed 48kHz 32-bit"),
-                    new("pcm-192000-24", "PCM 192kHz 24-bit", "Hi-res uncompressed 192kHz 24-bit"),
-                    new("pcm-96000-24", "PCM 96kHz 24-bit", "Hi-res uncompressed 96kHz 24-bit"),
-                    new("pcm-48000-24", "PCM 48kHz 24-bit", "CD quality uncompressed 48kHz 24-bit"),
-                    new("pcm-48000-16", "PCM 48kHz 16-bit", "Standard uncompressed 48kHz 16-bit"),
-                    new("pcm-44100-16", "PCM 44.1kHz 16-bit", "CD quality uncompressed 44.1kHz 16-bit"),
-                    new("opus-48000", "Opus 48kHz", "Efficient compressed 48kHz (256kbps)")
-                };
+            // Same resolution the player itself uses, so the options offered here are the ones it
+            // will advertise. Omitting the device means the default sink, not "no device".
+            var capabilities = deviceMatching.GetFormatCapabilities(device);
 
-                return Results.Ok(new AudioFormatsResponse(formats));
-            })
-            .WithName("GetAudioFormats")
-            .WithDescription("Get list of available audio formats for player configuration (dev-only feature)");
-        }
+            return Results.Ok(new AudioFormatsResponse(
+                AudioFormatCatalog.BuildOptions(capabilities),
+                AudioFormatCatalog.GetDefaultFormatId(capabilities)));
+        })
+        .WithName("GetAudioFormats")
+        .WithDescription("Get the audio formats a device can be advertised as supporting");
 
         // GET /api/players - List all players
         group.MapGet("/", (PlayerManagerService manager, ILoggerFactory loggerFactory) =>
@@ -490,10 +476,13 @@ public static class PlayersEndpoint
                             currentName, savedConfig.Volume);
                     }
 
-                    // Persist device change
+                    // Persist device change. supported_formats is derived from the device, and
+                    // SwitchDeviceAsync only swaps the pipeline - the player has to restart to
+                    // re-announce, or MA keeps offering the previous device's formats.
                     if (request.Device != null && request.Device != savedConfig.Device)
                     {
                         savedConfig.Device = request.Device;
+                        needsRestart = true;
                         logger.LogInformation("API: Player {PlayerName} device persisted to '{Device}'",
                             currentName, savedConfig.Device == "" ? "(none)" : savedConfig.Device);
                     }
@@ -504,15 +493,14 @@ public static class PlayersEndpoint
                         needsRestart = true;
                     }
 
-                    // Handle advertised format change (only when advanced formats enabled)
-                    if (environment.EnableAdvancedFormats &&
-                        request.AdvertisedFormat != null &&
+                    // Handle advertised format change
+                    if (request.AdvertisedFormat != null &&
                         request.AdvertisedFormat != savedConfig.AdvertisedFormat)
                     {
                         savedConfig.AdvertisedFormat = request.AdvertisedFormat == "" ? null : request.AdvertisedFormat;
                         needsRestart = true;
                         logger.LogInformation("API: Player {PlayerName} advertised format changed to '{Format}'",
-                            currentName, savedConfig.AdvertisedFormat ?? "all");
+                            currentName, savedConfig.AdvertisedFormat ?? "(device default)");
                     }
 
                     // Handle buffer size change
