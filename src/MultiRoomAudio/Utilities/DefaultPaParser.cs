@@ -22,10 +22,21 @@ public partial class DefaultPaParser
 
     /// <summary>
     /// Regex pattern to extract key=value pairs from module arguments.
-    /// Handles quoted values for properties like device.description="My Sink"
+    /// Handles both quote styles, because a value that itself contains quotes has to use the
+    /// other kind on the outside - PulseAudio only loads a description with spaces when it is
+    /// quoted twice, either sink_properties="device.description='My Sink'" or the reverse.
+    /// Captures: 1 = key, 2 = double-quoted value, 3 = single-quoted value, 4 = bare value.
     /// </summary>
-    [GeneratedRegex(@"(\w+)=(?:""([^""]*)""|([^\s]+))", RegexOptions.Compiled)]
+    [GeneratedRegex(@"(\w+)=(?:""([^""]*)""|'([^']*)'|([^\s]+))", RegexOptions.Compiled)]
     private static partial Regex KeyValuePattern();
+
+    /// <summary>
+    /// Regex pattern to pull device.description out of a sink_properties value, after the
+    /// outer quoting has already been stripped by <see cref="KeyValuePattern"/>.
+    /// Captures: 1 = single-quoted, 2 = double-quoted, 3 = unquoted or half-quoted remainder.
+    /// </summary>
+    [GeneratedRegex(@"device\.description=(?:'([^']*)'|""([^""]*)""|""?([^""]+)""?)", RegexOptions.Compiled)]
+    private static partial Regex DescriptionPattern();
 
     /// <summary>
     /// Marker comment added when we comment out a line.
@@ -115,19 +126,58 @@ public partial class DefaultPaParser
         return detected;
     }
 
-    private DetectedSink? ParseModuleArguments(string moduleType, string arguments, int startLine, int endLine, string rawLine)
+    /// <summary>
+    /// Split a load-module argument string into its key=value pairs, stripping one level of
+    /// quoting from each value. Pure - exposed for testing without a default.pa on disk.
+    /// </summary>
+    internal static Dictionary<string, string> ParseKeyValues(string arguments)
     {
         var keyValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (Match match in KeyValuePattern().Matches(arguments))
         {
             var key = match.Groups[1].Value;
-            // Use quoted value if present, otherwise use unquoted
-            var value = !string.IsNullOrEmpty(match.Groups[2].Value)
-                ? match.Groups[2].Value
-                : match.Groups[3].Value;
-            keyValues[key] = value;
+            // Whichever alternation matched wins; a bare value is the last resort.
+            var group = match.Groups[2].Success ? match.Groups[2]
+                : match.Groups[3].Success ? match.Groups[3]
+                : match.Groups[4];
+            keyValues[key] = group.Value;
         }
+
+        return keyValues;
+    }
+
+    /// <summary>
+    /// Extract the device.description value from a full argument string. Pure - exposed for
+    /// testing without a default.pa on disk.
+    /// </summary>
+    /// <returns>The description, or null if the arguments carry none.</returns>
+    internal static string? ParseDescriptionFromArguments(string arguments)
+    {
+        return ParseKeyValues(arguments).TryGetValue("sink_properties", out var properties)
+            ? ParseDescription(properties)
+            : null;
+    }
+
+    /// <summary>
+    /// Extract device.description from a sink_properties value whose outer quoting has
+    /// already been stripped.
+    /// </summary>
+    private static string? ParseDescription(string sinkProperties)
+    {
+        var match = DescriptionPattern().Match(sinkProperties);
+        if (!match.Success)
+            return null;
+
+        var group = match.Groups[1].Success ? match.Groups[1]
+            : match.Groups[2].Success ? match.Groups[2]
+            : match.Groups[3];
+        return group.Value;
+    }
+
+    private DetectedSink? ParseModuleArguments(string moduleType, string arguments, int startLine, int endLine, string rawLine)
+    {
+        var keyValues = ParseKeyValues(arguments);
 
         // Extract sink name (required)
         if (!keyValues.TryGetValue("sink_name", out var sinkName) || string.IsNullOrWhiteSpace(sinkName))
@@ -140,11 +190,7 @@ public partial class DefaultPaParser
         string? description = null;
         if (keyValues.TryGetValue("sink_properties", out var properties))
         {
-            var descMatch = Regex.Match(properties, @"device\.description=""?([^""]+)""?");
-            if (descMatch.Success)
-            {
-                description = descMatch.Groups[1].Value;
-            }
+            description = ParseDescription(properties);
         }
 
         var type = moduleType == "combine" ? CustomSinkType.Combine : CustomSinkType.Remap;
