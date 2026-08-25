@@ -2710,8 +2710,16 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             await Task.Delay(500);
 
             // A newly opened hardware sink can land on the broken ALSA mmap+timer path (#281),
-            // e.g. after the supervisor restarts PulseAudio or a card is hotplugged.
-            await _sinkReset.ResetSinkByIndexAsync(args.Index);
+            // e.g. after the supervisor restarts PulseAudio or a card is hotplugged. Never let
+            // this stop the pending-player restart below.
+            try
+            {
+                await _sinkReset.ResetSinkByIndexAsync(args.Index);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Sink reset for sink #{Index} failed", args.Index);
+            }
 
             // Notify UI that device list has changed
             await _hubContext.BroadcastDeviceListChangedAsync();

@@ -264,8 +264,8 @@ public partial class SinkResetService
         _lastCycled.TryGetValue(sinkName, out var last) && _now() - last < Cooldown;
 
     /// <summary>
-    /// Runs the suspend/resume pair for one sink. Never throws — a card that refuses the cycle
-    /// must not stop the remaining sinks from being cycled.
+    /// Runs the suspend/resume pair for one sink. Swallows every failure but cancellation, so a
+    /// card that refuses the cycle does not stop the remaining sinks from being cycled.
     /// </summary>
     private async Task<bool> CycleAsync(PactlSinkRow sink, string reason, CancellationToken cancellationToken)
     {
@@ -322,4 +322,4 @@ public partial class SinkResetService
 /// <param name="Name">Sink name.</param>
 /// <param name="Driver">Owning module, e.g. <c>module-alsa-card.c</c>.</param>
 /// <param name="State">Sink state, e.g. <c>RUNNING</c>, <c>IDLE</c>, <c>SUSPENDED</c>.</param>
-public record PactlSinkRow(uint Index, string Name, string Driver, string State);
+internal record PactlSinkRow(uint Index, string Name, string Driver, string State);
