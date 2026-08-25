@@ -1225,12 +1225,20 @@ const Wizard = {
     // Step 4: Create Players
     renderPlayers() {
         // Combine devices and custom sinks, excluding:
+        // - Duplicates: /api/devices already carries every loaded custom sink under the same
+        //   id, so without this a loaded sink renders twice - two checkboxes sharing one DOM
+        //   id, and collectPlayersToCreate() submitting the player twice. Sinks created in
+        //   this session have not reached /api/devices yet, so they still come through
+        //   customSinks.
         // - Hidden devices
         // - Devices used as master/slave by custom sinks (use the sink instead)
-        const allDevices = [...this.devices, ...this.customSinks].filter(d =>
-            !(this.deviceState[d.id]?.hidden || d.hidden) &&
-            !this.isDeviceUsedBySink(d.id)
-        );
+        const seen = new Set();
+        const allDevices = [...this.devices, ...this.customSinks].filter(d => {
+            if (seen.has(d.id)) return false;
+            seen.add(d.id);
+            return !(this.deviceState[d.id]?.hidden || d.hidden) &&
+                   !this.isDeviceUsedBySink(d.id);
+        });
 
         const playerHtml = allDevices.map(device => {
             const alias = this.deviceState[device.id]?.alias || device.alias || this.suggestName(device);

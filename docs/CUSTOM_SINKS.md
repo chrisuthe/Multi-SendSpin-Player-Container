@@ -124,9 +124,14 @@ new sink starts fresh. Editing an existing sink never rewrites its name or descr
 ### Duplicate Devices
 
 Two identical sound cards report the same description, which used to make them
-indistinguishable in the device lists. Where names collide, the UI appends the ALSA card
-number - `Creative X-Fi Analog Surround 7.1 (card 1)` and `... (card 4)`. Devices with
-unique names are shown unchanged.
+indistinguishable in the device lists. Where names collide, the UI appends the card number -
+`Creative X-Fi Analog Surround 7.1 (card 1)` and `... (card 4)`. Devices with unique names
+are shown unchanged.
+
+The number is the ALSA card number, the one `aplay -l` shows. A card whose profile is off
+has no sink to read it from, so if any card in the list is in that state the whole list
+falls back to PulseAudio card indices instead - mixing the two numbering systems in one list
+could otherwise give two different cards the same number.
 
 ### Example: 4-Channel DAC Split
 
@@ -185,7 +190,9 @@ Standard PulseAudio channel names:
 
 ### Technical Details
 
-Under the hood, this creates a PulseAudio `module-remap-sink`:
+Under the hood, this creates a PulseAudio `module-remap-sink`. This is the command the app
+issues, not a line to paste into `default.pa` - the quoting below is specific to passing a
+description through `pactl`:
 
 ```
 pactl load-module module-remap-sink \
