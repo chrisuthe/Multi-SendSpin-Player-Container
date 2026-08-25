@@ -383,13 +383,15 @@
                                 <div class="mb-3">
                                     <label for="remapSinkName" class="form-label">Sink Name</label>
                                     <input type="text" class="form-control" id="remapSinkName"
-                                           required placeholder="zone1_stereo">
+                                           required placeholder="zone1_stereo"
+                                           oninput="markRemapFieldEdited('name')">
                                     <small class="text-muted">Letters, numbers, underscores, hyphens only</small>
                                 </div>
                                 <div class="mb-3">
                                     <label for="remapSinkDesc" class="form-label">Description (optional)</label>
                                     <input type="text" class="form-control" id="remapSinkDesc"
-                                           placeholder="Surround Card - Front Speakers">
+                                           placeholder="Surround Card - Front Speakers"
+                                           oninput="markRemapFieldEdited('desc')">
                                 </div>
                                 <div class="mb-3">
                                     <label for="remapMasterDevice" class="form-label">Master Device</label>

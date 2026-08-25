@@ -141,7 +141,10 @@ const Wizard = {
         try {
             const response = await fetch('./api/sinks');
             if (response.ok) {
-                const sinks = await response.json();
+                // The endpoint returns { sinks, count }, not a bare array - calling map on
+                // the envelope threw into the catch below and left customSinks empty
+                const data = await response.json();
+                const sinks = data.sinks || [];
                 // Store sinks with their slaves/masterSink info for filtering
                 this.customSinks = sinks.map(s => ({
                     id: s.sinkName || s.name,
@@ -548,15 +551,17 @@ const Wizard = {
             `;
         }
 
+        // device.name already carries the correct name from the PulseAudio sink description,
+        // but two identical cards share it, so add the card number when it repeats.
+        // (card.index is the PulseAudio card index, a different numbering system from
+        // device.cardIndex - don't look one up by the other.)
+        const deviceLabel = makeCardDisambiguator(this.devices, d => d.name, d => d.cardIndex);
+
         const deviceHtml = this.devices.map(device => {
             const isHidden = this.deviceState[device.id]?.hidden || device.hidden || false;
             const alias = this.deviceState[device.id]?.alias || device.alias || '';
             const portHint = parseUsbPortHint(device.identifiers?.busPath);
-
-            // Use device.name directly - it already contains the correct name from PulseAudio sink description
-            // (Previous code tried to look up card by cardIndex, but cardIndex is ALSA card number
-            // while card.index is PulseAudio card index - different numbering systems!)
-            const displayName = device.name;
+            const displayName = deviceLabel(device);
 
             return `
                 <div class="list-group-item position-relative ${isHidden ? 'device-hidden' : ''}" id="device-row-${escapeHtml(device.id)}">
@@ -626,12 +631,60 @@ const Wizard = {
         `;
     },
 
+    // Autofill stops for a field once the user types in it
+    remapNameEdited: false,
+    remapDescEdited: false,
+
+    // Called from the remap name/description inputs' oninput handlers
+    markRemapFieldEdited(field) {
+        if (field === 'name') this.remapNameEdited = true;
+        else if (field === 'desc') this.remapDescEdited = true;
+    },
+
+    // Regenerate the default remap name/description from the current master device and
+    // channels, leaving alone whichever fields the user has already typed in.
+    autofillRemapNaming() {
+        if (this.remapNameEdited && this.remapDescEdited) return;
+
+        const masterSelect = document.getElementById('wizardRemapMaster');
+        const masterLabel = masterSelect?.selectedOptions[0]?.dataset?.label;
+        if (!masterLabel) return;
+
+        const isMono = document.getElementById('wizardOutputModeMono')?.checked;
+        const channels = isMono
+            ? [document.getElementById('wizardRemapMono')?.value]
+            : [
+                document.getElementById('wizardRemapLeft')?.value,
+                document.getElementById('wizardRemapRight')?.value
+            ];
+
+        // Sink names share one PulseAudio namespace with hardware sinks
+        const taken = [
+            ...this.customSinks.map(sink => sink.name),
+            ...this.devices.map(d => d.id)
+        ];
+        const defaults = buildRemapSinkDefaults(masterLabel, channels, taken);
+        if (!defaults.name) return;
+
+        if (!this.remapNameEdited) document.getElementById('wizardRemapName').value = defaults.name;
+        if (!this.remapDescEdited) document.getElementById('wizardRemapDesc').value = defaults.description;
+    },
+
     // Step 3: Custom Sinks (Optional)
     renderSinks() {
+        // A freshly rendered form starts with both fields eligible for autofill again
+        this.remapNameEdited = false;
+        this.remapDescEdited = false;
+
         // Build device checkboxes for combine sink (exclude hidden devices)
         const visibleDevices = this.devices.filter(d =>
             !d.id.includes('.monitor') &&
             !(this.deviceState[d.id]?.hidden || d.hidden)
+        );
+        const sinkDeviceLabel = makeCardDisambiguator(
+            visibleDevices,
+            d => this.deviceState[d.id]?.alias || d.alias || d.name,
+            d => d.cardIndex
         );
         const deviceCheckboxes = visibleDevices
             .map(d => `
@@ -640,7 +693,7 @@ const Wizard = {
                            value="${escapeHtml(d.id)}"
                            id="wizard-combine-${escapeHtml(d.id)}">
                     <label class="form-check-label" for="wizard-combine-${escapeHtml(d.id)}">
-                        ${escapeHtml(this.deviceState[d.id]?.alias || d.alias || d.name)}
+                        ${escapeHtml(sinkDeviceLabel(d))}
                     </label>
                 </div>
             `).join('');
@@ -648,8 +701,9 @@ const Wizard = {
         // Build device options for remap sink (exclude hidden and remap sinks)
         const multiChannelDevices = visibleDevices.filter(d => d.maxChannels >= 4 && d.sinkType !== 'Remap');
         const deviceOptions = multiChannelDevices.map(d => `
-            <option value="${escapeHtml(d.id)}" data-channels="${d.maxChannels}">
-                ${escapeHtml(this.deviceState[d.id]?.alias || d.alias || d.name)} (${d.maxChannels}ch)
+            <option value="${escapeHtml(d.id)}" data-channels="${d.maxChannels}"
+                    data-label="${escapeHtml(sinkDeviceLabel(d))}">
+                ${escapeHtml(sinkDeviceLabel(d))} (${d.maxChannels}ch)
             </option>
         `).join('');
 
@@ -769,13 +823,15 @@ const Wizard = {
                                         <div class="mb-3">
                                             <label class="form-label">Sink Name <span class="text-danger">*</span></label>
                                             <input type="text" class="form-control" id="wizardRemapName"
-                                                   placeholder="surround_rear">
+                                                   placeholder="surround_rear"
+                                                   oninput="Wizard.markRemapFieldEdited('name')">
                                             <small class="text-muted">Letters, numbers, underscores, hyphens only</small>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Description</label>
                                             <input type="text" class="form-control" id="wizardRemapDesc"
-                                                   placeholder="Surround Card - Rear Speakers">
+                                                   placeholder="Surround Card - Rear Speakers"
+                                                   oninput="Wizard.markRemapFieldEdited('desc')">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Master Device <span class="text-danger">*</span></label>
@@ -872,7 +928,8 @@ const Wizard = {
                 <div class="mb-3">
                     <label class="form-label">Source Channel</label>
                     <div class="d-flex align-items-center">
-                        <select class="form-select" id="wizardRemapMono">
+                        <select class="form-select" id="wizardRemapMono"
+                                onchange="Wizard.autofillRemapNaming()">
                             ${optionsHtml}
                         </select>
                         <button class="btn btn-outline-primary btn-sm ms-2"
@@ -890,7 +947,8 @@ const Wizard = {
                 <div class="mb-3">
                     <label class="form-label">Left Channel</label>
                     <div class="d-flex align-items-center">
-                        <select class="form-select" id="wizardRemapLeft">
+                        <select class="form-select" id="wizardRemapLeft"
+                                onchange="Wizard.autofillRemapNaming()">
                             ${optionsHtml}
                         </select>
                         <button class="btn btn-outline-primary btn-sm ms-2"
@@ -904,7 +962,8 @@ const Wizard = {
                 <div class="mb-3">
                     <label class="form-label">Right Channel</label>
                     <div class="d-flex align-items-center">
-                        <select class="form-select" id="wizardRemapRight">
+                        <select class="form-select" id="wizardRemapRight"
+                                onchange="Wizard.autofillRemapNaming()">
                             ${optionsHtml}
                         </select>
                         <button class="btn btn-outline-primary btn-sm ms-2"
@@ -919,6 +978,8 @@ const Wizard = {
             document.getElementById('wizardRemapLeft').value = 'front-left';
             document.getElementById('wizardRemapRight').value = 'front-right';
         }
+
+        this.autofillRemapNaming();
     },
 
     // Create a combine sink
@@ -1094,6 +1155,8 @@ const Wizard = {
             nameInput.value = '';
             descInput.value = '';
             masterSelect.value = '';
+            this.remapNameEdited = false;
+            this.remapDescEdited = false;
 
             // Update the sinks list
             this.updateSinksList();
@@ -1162,12 +1225,20 @@ const Wizard = {
     // Step 4: Create Players
     renderPlayers() {
         // Combine devices and custom sinks, excluding:
+        // - Duplicates: /api/devices already carries every loaded custom sink under the same
+        //   id, so without this a loaded sink renders twice - two checkboxes sharing one DOM
+        //   id, and collectPlayersToCreate() submitting the player twice. Sinks created in
+        //   this session have not reached /api/devices yet, so they still come through
+        //   customSinks.
         // - Hidden devices
         // - Devices used as master/slave by custom sinks (use the sink instead)
-        const allDevices = [...this.devices, ...this.customSinks].filter(d =>
-            !(this.deviceState[d.id]?.hidden || d.hidden) &&
-            !this.isDeviceUsedBySink(d.id)
-        );
+        const seen = new Set();
+        const allDevices = [...this.devices, ...this.customSinks].filter(d => {
+            if (seen.has(d.id)) return false;
+            seen.add(d.id);
+            return !(this.deviceState[d.id]?.hidden || d.hidden) &&
+                   !this.isDeviceUsedBySink(d.id);
+        });
 
         const playerHtml = allDevices.map(device => {
             const alias = this.deviceState[device.id]?.alias || device.alias || this.suggestName(device);

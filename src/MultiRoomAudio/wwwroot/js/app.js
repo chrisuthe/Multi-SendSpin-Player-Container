@@ -1025,6 +1025,13 @@ async function refreshDevices(currentDeviceId = null) {
             return true;
         });
 
+        // Identically-described cards are only tellable apart by their card number
+        const hardwareLabel = makeCardDisambiguator(
+            visibleDevices.filter(d => !d.sinkType),
+            d => d.name,
+            d => d.cardIndex
+        );
+
         // Update device selects
         const selects = document.querySelectorAll('#audioDevice, #editAudioDevice');
         selects.forEach(select => {
@@ -1039,9 +1046,9 @@ async function refreshDevices(currentDeviceId = null) {
                     // Custom sink: show "Sink: name (description)" if description exists
                     displayName = device.alias ? `Sink: ${device.name} (${device.alias})` : `Sink: ${device.name}`;
                 } else {
-                    // Hardware device: use device.name directly (already correct from PulseAudio)
-                    // (cardDescriptions map uses PulseAudio index but device.cardIndex is ALSA card number)
-                    const cardName = device.name;
+                    // Hardware device: device.name is already correct from PulseAudio, but
+                    // duplicate cards share it, so add the card number when it repeats.
+                    const cardName = hardwareLabel(device);
                     displayName = device.alias ? `Device: ${cardName} (${device.alias})` : `Device: ${cardName}`;
                 }
                 if (device.isDefault) displayName += ' (default)';
@@ -2750,6 +2757,54 @@ function getSinkStateBadgeClass(state) {
 let editingCombineSink = null;
 let editingRemapSink = null;
 
+// Autofill stops for a field once the user types in it, until the modal is reopened
+let remapNameEdited = false;
+let remapDescEdited = false;
+
+// Labels the master-device dropdown's entries; rebuilt whenever the dropdown is populated
+// so generated names carry the same "(card N)" suffix the user sees.
+let remapMasterLabel = (device) => device.alias || device.name;
+
+// Called from the name/description inputs' oninput handlers
+function markRemapFieldEdited(field) {
+    if (field === 'name') remapNameEdited = true;
+    else if (field === 'desc') remapDescEdited = true;
+}
+
+// Currently selected master channels, in output order (one entry in mono mode)
+function getSelectedRemapChannels() {
+    if (document.getElementById('outputModeMono')?.checked) {
+        return [document.getElementById('monoChannel')?.value];
+    }
+    return [
+        document.getElementById('leftChannel')?.value,
+        document.getElementById('rightChannel')?.value
+    ];
+}
+
+// Regenerate the default name/description from the current master device and channels,
+// leaving alone whichever fields the user has already typed in.
+function autofillRemapSinkNaming() {
+    if (editingRemapSink) return;
+    if (remapNameEdited && remapDescEdited) return;
+
+    const masterSelect = document.getElementById('remapMasterDevice');
+    const master = devices.find(d => d.id === masterSelect?.value);
+    if (!master) return;
+
+    // Sink names share one PulseAudio namespace with hardware sinks
+    const taken = [...Object.keys(customSinks), ...devices.map(d => d.id)];
+    const defaults = buildRemapSinkDefaults(
+        remapMasterLabel(master),
+        getSelectedRemapChannels(),
+        taken
+    );
+    if (!defaults.name) return;
+
+    if (!remapNameEdited) document.getElementById('remapSinkName').value = defaults.name;
+    if (!remapDescEdited) document.getElementById('remapSinkDesc').value = defaults.description;
+}
+
 // Cached modal instances to avoid creating duplicates
 let combineSinkModalInstance = null;
 let remapSinkModalInstance = null;
@@ -2829,6 +2884,10 @@ function openRemapSinkModal(editData = null) {
     // Track if editing
     editingRemapSink = editData;
 
+    // A fresh create starts with both fields eligible for autofill again
+    remapNameEdited = false;
+    remapDescEdited = false;
+
     // Update modal title based on mode
     const modalTitle = document.querySelector('#remapSinkModal .modal-title');
     if (modalTitle) {
@@ -2858,10 +2917,15 @@ function openRemapSinkModal(editData = null) {
         if (d.hidden && d.id !== currentMaster) return false;
         return true;
     });
+    remapMasterLabel = makeCardDisambiguator(
+        eligibleDevices,
+        d => d.alias || d.name,
+        d => d.cardIndex
+    );
     masterSelect.innerHTML = '<option value="">Select a device...</option>' +
         eligibleDevices.map(d => {
             const hiddenNote = d.hidden ? ' (hidden)' : '';
-            return `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)${hiddenNote}</option>`;
+            return `<option value="${escapeHtml(d.id)}">${escapeHtml(remapMasterLabel(d))} (${d.maxChannels}ch)${hiddenNote}</option>`;
         }).join('');
 
     // Set master device if editing
@@ -2962,7 +3026,8 @@ function updateChannelPicker() {
             <div class="channel-pair mb-2 d-flex align-items-center">
                 <span class="output-label">Output</span>
                 <i class="fas fa-arrow-left mx-2 text-muted"></i>
-                <select class="form-select form-select-sm channel-select" id="monoChannel">
+                <select class="form-select form-select-sm channel-select" id="monoChannel"
+                        onchange="autofillRemapSinkNaming()">
                     ${optionsHtml}
                 </select>
                 <button class="btn btn-outline-primary btn-sm ms-2"
@@ -2980,7 +3045,8 @@ function updateChannelPicker() {
             <div class="channel-pair mb-2 d-flex align-items-center">
                 <span class="output-label">Left Output</span>
                 <i class="fas fa-arrow-left mx-2 text-muted"></i>
-                <select class="form-select form-select-sm channel-select" id="leftChannel">
+                <select class="form-select form-select-sm channel-select" id="leftChannel"
+                        onchange="autofillRemapSinkNaming()">
                     ${optionsHtml}
                 </select>
                 <button class="btn btn-outline-primary btn-sm ms-2"
@@ -2993,7 +3059,8 @@ function updateChannelPicker() {
             <div class="channel-pair mb-2 d-flex align-items-center">
                 <span class="output-label">Right Output</span>
                 <i class="fas fa-arrow-left mx-2 text-muted"></i>
-                <select class="form-select form-select-sm channel-select" id="rightChannel">
+                <select class="form-select form-select-sm channel-select" id="rightChannel"
+                        onchange="autofillRemapSinkNaming()">
                     ${optionsHtml}
                 </select>
                 <button class="btn btn-outline-primary btn-sm ms-2"
@@ -3007,6 +3074,8 @@ function updateChannelPicker() {
         document.getElementById('leftChannel').value = 'front-left';
         document.getElementById('rightChannel').value = 'front-right';
     }
+
+    autofillRemapSinkNaming();
 }
 
 // Create or update combine sink
@@ -3606,6 +3675,25 @@ function renderSoundCards(savedScrollTop = 0) {
     // Only auto-expand if exactly 1 device AND no saved state
     const shouldAutoExpand = soundCards.length === 1 && !expandedDeviceState;
 
+    // Match a card to its device by name pattern:
+    // For ALSA cards: alsa_card.pci-0000_00_1f.3 -> alsa_output.pci-0000_00_1f.3.analog-stereo
+    // For Bluetooth: bluez_card.00_1A_7D_DA_71_13 -> bluez_sink.00_1A_7D_DA_71_13.a2dp_sink
+    const findCardDevice = (card) => {
+        const cardBase = card.name.replace('alsa_card.', '').replace('bluez_card.', '');
+        return soundCardDevices.find(d => d.id && d.id.includes(cardBase));
+    };
+
+    // Two identical cards share a description, so fall back to the card number. device.cardIndex
+    // is the ALSA card number and card.index the PulseAudio one; numbering them from both at once
+    // can hand two cards the same "(card N)", so use ALSA only when every card has one. An
+    // off-profile card matches a placeholder device that carries no cardIndex.
+    const useAlsaCardNumbers = soundCards.every(c => findCardDevice(c)?.cardIndex != null);
+    const cardLabel = makeCardDisambiguator(
+        soundCards,
+        c => c.description || c.name,
+        c => useAlsaCardNumbers ? findCardDevice(c).cardIndex : c.index
+    );
+
     const accordionHtml = soundCards.map((card, index) => {
         const cardKey = card.index.toString();
         const isExpanded = expandedDeviceState === cardKey || (shouldAutoExpand && index === 0);
@@ -3637,14 +3725,10 @@ function renderSoundCards(savedScrollTop = 0) {
         const busIcon = getBusTypeIcon(busType);
         const busLabel = getBusTypeLabel(busType);
 
-        // Find the device associated with this card by matching name patterns
-        // For ALSA cards: alsa_card.pci-0000_00_1f.3 -> alsa_output.pci-0000_00_1f.3.analog-stereo
-        // For Bluetooth: bluez_card.00_1A_7D_DA_71_13 -> bluez_sink.00_1A_7D_DA_71_13.a2dp_sink
-        const cardBase = card.name.replace('alsa_card.', '').replace('bluez_card.', '');
-        const device = soundCardDevices.find(d => d.id && d.id.includes(cardBase));
+        const device = findCardDevice(card);
         const deviceAlias = device?.alias || '';
         const deviceId = device?.id || '';
-        const deviceName = card.description || card.name;
+        const deviceName = cardLabel(card);
         const maxVolumeDisplay = card.maxVolume !== null && card.maxVolume !== undefined ? card.maxVolume : 100;
         const isHidden = device?.hidden || false;
 

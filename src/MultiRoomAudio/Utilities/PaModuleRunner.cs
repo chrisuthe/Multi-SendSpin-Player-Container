@@ -70,31 +70,41 @@ public partial class PaModuleRunner : IPaModuleRunner
     }
 
     /// <summary>
-    /// Sanitizes a description string for use in device.description property.
-    /// PulseAudio has a known bug where property values with spaces fail to parse
-    /// (see https://gitlab.freedesktop.org/pulseaudio/pulseaudio/-/issues/615).
-    /// We replace spaces with underscores as the standard workaround.
-    /// The original description with spaces is preserved in YAML/UI.
+    /// Strips characters that would break out of the quoting applied by
+    /// <see cref="BuildDescriptionArg"/>, or that PulseAudio cannot carry in a
+    /// property value at all.
     /// </summary>
-    private static string SanitizeDescription(string description)
+    internal static string SanitizeDescription(string description)
     {
         if (string.IsNullOrWhiteSpace(description))
             return description;
 
-        // Sanitize for PulseAudio property values
-        // PulseAudio has a bug where spaces in property values cause "Failed to parse proplist"
-        // See: https://gitlab.freedesktop.org/pulseaudio/pulseaudio/-/issues/615
-        // Replace spaces with underscores as the workaround
         return description
-            .Replace("\\", "")      // Remove backslashes (escape character)
-            .Replace("\"", "")      // Remove double quotes
-            .Replace("'", "")       // Remove single quotes
-            .Replace(" ", "_")      // Replace spaces with underscores (PulseAudio bug workaround)
-            .Replace("&", "_and_")  // Replace & with _and_ for readability
-            .Replace("\n", "_")     // Replace newlines with underscores
+            .Replace("\\", "")      // Escape character - would consume the following char
+            .Replace("\"", "")      // Would terminate the outer (modargs) quoting
+            .Replace("'", "")       // Would terminate the inner (proplist) quoting
+            .Replace("\n", " ")     // Proplist values are single-line
             .Replace("\r", "")      // Remove carriage returns
             .Replace("\0", "")      // Remove null chars
             .Trim();
+    }
+
+    /// <summary>
+    /// Builds the <c>sink_properties</c> argument that sets <c>device.description</c>.
+    /// </summary>
+    /// <remarks>
+    /// The value needs two levels of quoting to survive with spaces intact: pactl's module
+    /// argument parser strips the outer double quotes, then PulseAudio's proplist parser
+    /// strips the inner single quotes. A single level of either quote, or backslash-escaped
+    /// spaces, fails with "Module initialization failed" - which is what the old
+    /// space-to-underscore substitution was working around
+    /// (https://gitlab.freedesktop.org/pulseaudio/pulseaudio/-/issues/615).
+    /// Verified against PulseAudio 16.1, the version shipped in the container image.
+    /// </remarks>
+    internal static string BuildDescriptionArg(string description)
+    {
+        var safeDesc = SanitizeDescription(description);
+        return $"sink_properties=\"device.description='{safeDesc}'\"";
     }
 
     /// <summary>
@@ -145,9 +155,7 @@ public partial class PaModuleRunner : IPaModuleRunner
         // Add description if provided
         if (!string.IsNullOrWhiteSpace(description))
         {
-            var safeDesc = SanitizeDescription(description);
-            // No quotes needed - spaces are replaced with underscores due to PulseAudio bug
-            args.Add($"sink_properties=device.description={safeDesc}");
+            args.Add(BuildDescriptionArg(description));
         }
 
         _logger.LogInformation("Loading combine-sink '{SinkName}' with {SlaveCount} slaves. Args: {Args}",
@@ -242,9 +250,7 @@ public partial class PaModuleRunner : IPaModuleRunner
         // Add description if provided
         if (!string.IsNullOrWhiteSpace(description))
         {
-            var safeDesc = SanitizeDescription(description);
-            // No quotes needed - spaces are replaced with underscores due to PulseAudio bug
-            args.Add($"sink_properties=device.description={safeDesc}");
+            args.Add(BuildDescriptionArg(description));
         }
 
         _logger.LogInformation("Loading remap-sink '{SinkName}' from master '{Master}' with {Channels} channels. Args: {Args}",

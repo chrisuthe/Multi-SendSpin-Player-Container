@@ -103,6 +103,36 @@ A remap sink extracts specific channels from a multi-channel device and presents
 4. Click **Create**
 5. Use the **Test** button to verify audio plays on the correct channels
 
+### Default Naming
+
+Picking a master device and channel mapping fills in the name and description for you, so
+remap sinks are named consistently instead of falling back to PulseAudio's own
+`Remapped <card>` label.
+
+| Field | Generated from | Example |
+|-------|----------------|---------|
+| **Name** | Device slug + abbreviated channels | `Creative_X_Fi_Analog_Surround_7_1_fl_fr` |
+| **Description** | Device name + channel labels | `Creative X-Fi Analog Surround 7.1 Front Left Front Right` |
+
+Channel abbreviations are `fl`, `fr`, `fc`, `lfe`, `rl`, `rr`, `sl`, `sr`. A second sink on
+the same device and channels gets a `_2` suffix so it does not collide.
+
+Both fields stay in sync with the form until you type in them - the first manual edit to a
+field stops it regenerating, and the other field keeps updating. Reopening the dialog for a
+new sink starts fresh. Editing an existing sink never rewrites its name or description.
+
+### Duplicate Devices
+
+Two identical sound cards report the same description, which used to make them
+indistinguishable in the device lists. Where names collide, the UI appends the card number -
+`Creative X-Fi Analog Surround 7.1 (card 1)` and `... (card 4)`. Devices with unique names
+are shown unchanged.
+
+The number is the ALSA card number, the one `aplay -l` shows. A card whose profile is off
+has no sink to read it from, so if any card in the list is in that state the whole list
+falls back to PulseAudio card indices instead - mixing the two numbering systems in one list
+could otherwise give two different cards the same number.
+
 ### Example: 4-Channel DAC Split
 
 A 4-channel USB DAC with channels:
@@ -165,13 +195,24 @@ Under the hood, this creates a PulseAudio `module-remap-sink`:
 ```
 pactl load-module module-remap-sink \
   sink_name=bedroom \
-  sink_properties=device.description="Bedroom" \
+  sink_properties="device.description='Bedroom Rear Speakers'" \
   master=alsa_output.usb-4ch_DAC \
   channels=2 \
   channel_map=front-left,front-right \
   master_channel_map=rear-left,rear-right \
   remix=no
 ```
+
+The description is quoted twice on purpose: PulseAudio's module argument parser strips the
+outer double quotes, then its proplist parser strips the inner single quotes. A single level
+of quoting fails with "Module initialization failed", which is why descriptions used to
+reach Home Assistant with underscores in place of spaces.
+
+The same applies to a hand-written `default.pa` - `pactl` and `default.pa` go through the
+same argument parser, so a description with spaces needs both levels there too. The inner
+and outer quote styles can be swapped (`sink_properties='device.description="Bedroom Rear"'`
+works equally well), but one level of either, or a backslash-escaped space, silently fails
+to load the module.
 
 ---
 
@@ -231,8 +272,10 @@ This allows you to manage previously-created sinks through the web interface wit
 
 ### Naming Conventions
 
-- Use lowercase letters with underscores: `living_room`, `kitchen_dining`
-- Avoid spaces and special characters
+- For remap sinks, accept the generated name unless you have a reason not to - it already
+  encodes the device and channels
+- Otherwise use lowercase letters with underscores: `living_room`, `kitchen_dining`
+- Avoid spaces and special characters in names; descriptions may contain them
 - Keep names short but descriptive
 
 ### Order of Creation

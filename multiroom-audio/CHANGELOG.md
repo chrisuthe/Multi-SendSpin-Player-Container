@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Remap sinks name themselves. Picking a master device and channel mapping prefills both the sink name and the description - `Creative_X_Fi_Analog_Surround_7_1_fl_fr` / "Creative X-Fi Analog Surround 7.1 Front Left Front Right" - instead of leaving PulseAudio to invent "Remapped <card>". Both fields keep regenerating until you type in them, in the main UI and the onboarding wizard alike (#282)
+- Identical sound cards are now tellable apart. Where two cards or devices share a description, the Sound Cards list, the player device dropdowns, the remap master picker and the wizard's device lists append the ALSA card number - "Creative X-Fi Analog Surround 7.1 (card 1)" vs "... (card 4)". Devices with unique names are unchanged (#282)
+
+### Fixed
+- The onboarding wizard sees pre-existing custom sinks again. It read `/api/sinks` as a bare array when the endpoint returns `{ sinks, count }`, so the list silently came back empty. Step 4 now offers sinks created before the wizard ran as player targets, and stops offering the hardware devices those sinks already consume as master or slave
+- Custom sink descriptions keep their spaces. They used to reach Home Assistant with underscores ("Front_Left_Front_Right") because PulseAudio's proplist parser rejected the unquoted value; quoting it twice gets it through intact. A description of only quote characters also no longer fails sink creation outright (#282)
+
+### Changed
+- **After upgrading, existing custom sinks are renamed in Home Assistant and Music Assistant.** Sinks reload from `custom-sinks.yaml` on restart and now register their stored description verbatim, so underscores become spaces and `_and_` becomes `&`. Sink names, players and configuration are untouched - only the display name changes, and you may need to fix up entity names on the Home Assistant side
+
 ## [5.2.2] - Volume Curve, MQTT Volume & Trigger Fixes
 
 Rolls up everything since 5.2.0 (the 5.2.1 combine-sink fix was never tagged).
