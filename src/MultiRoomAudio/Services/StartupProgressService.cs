@@ -28,6 +28,7 @@ public class StartupProgressService
         {
             new("profiles", "Restoring sound card profiles"),
             new("sinks", "Loading custom audio sinks"),
+            new("sinkreset", "Resetting audio sinks"),
             new("devices", "Detecting audio devices"),
             new("players", "Starting audio players"),
             new("triggers", "Initializing 12V triggers"),

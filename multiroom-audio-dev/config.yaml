@@ -43,12 +43,14 @@ options:
   log_level: info
   mock_hardware: false
   enable_advanced_formats: false
+  reset_sinks: true
   mqtt_enabled: false
 
 schema:
   log_level: list(debug|info|warning|error)
   mock_hardware: bool?
   enable_advanced_formats: bool?
+  reset_sinks: bool?
   mqtt_enabled: bool
   mqtt_host: str?
   mqtt_port: port?

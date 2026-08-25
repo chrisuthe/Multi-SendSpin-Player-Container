@@ -39,6 +39,13 @@ if [ -f "/data/options.json" ] || [ -n "$SUPERVISOR_TOKEN" ]; then
             export ENABLE_ADVANCED_FORMATS=true
             echo "Advanced formats: enabled"
         fi
+
+        # Sink suspend/resume workaround (#281) - on by default, only ever set to back it out
+        RESET_SINKS=$(cat /data/options.json | grep -o '"reset_sinks"[[:space:]]*:[[:space:]]*[a-z]*' | sed 's/.*:[[:space:]]*//')
+        if [ "$RESET_SINKS" = "false" ]; then
+            export RESET_SINKS=false
+            echo "Sink suspend/resume on startup: disabled"
+        fi
     fi
 
     # HAOS supervisor mounts:

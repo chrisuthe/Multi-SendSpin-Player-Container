@@ -4,7 +4,7 @@ namespace MultiRoomAudio.Services;
 /// Coordinates startup initialization of all services as a background task.
 /// Runs after Kestrel starts so the web UI is immediately available.
 /// Phases execute sequentially to honor dependency ordering:
-/// CardProfiles → CustomSinks → Devices → Players → Triggers.
+/// CardProfiles → CustomSinks → SinkReset → Devices → Players → Triggers.
 /// </summary>
 /// <remarks>
 /// Dependencies are resolved lazily via IServiceProvider rather than constructor
@@ -22,6 +22,7 @@ public class StartupOrchestrator : BackgroundService
     private StartupProgressService _progress = null!;
     private CardProfileService _cardProfiles = null!;
     private CustomSinksService _customSinks = null!;
+    private SinkResetService _sinkReset = null!;
     private PlayerManagerService _playerManager = null!;
     private TriggerService _triggers = null!;
     private HidButtonService _hidButtons = null!;
@@ -50,6 +51,7 @@ public class StartupOrchestrator : BackgroundService
         _progress = _services.GetRequiredService<StartupProgressService>();
         _cardProfiles = _services.GetRequiredService<CardProfileService>();
         _customSinks = _services.GetRequiredService<CustomSinksService>();
+        _sinkReset = _services.GetRequiredService<SinkResetService>();
         _playerManager = _services.GetRequiredService<PlayerManagerService>();
         _triggers = _services.GetRequiredService<TriggerService>();
         _hidButtons = _services.GetRequiredService<HidButtonService>();
@@ -65,19 +67,24 @@ public class StartupOrchestrator : BackgroundService
             // Phase 2: Load custom audio sinks (must be before players)
             await RunPhaseAsync("sinks", () => _customSinks.InitializeAsync(stoppingToken), stoppingToken);
 
-            // Phase 3: Detect audio devices and set hardware volumes
+            // Phase 3: Suspend/resume hardware sinks so cards that opened on the broken ALSA
+            // mmap+timer path start moving audio (#281). Runs after custom sinks are attached
+            // (masters genuinely open) and before players start (no audio to interrupt).
+            await RunPhaseAsync("sinkreset", () => _sinkReset.ResetAllHardwareSinksAsync(stoppingToken), stoppingToken);
+
+            // Phase 4: Detect audio devices and set hardware volumes
             await RunPhaseAsync("devices", () => _playerManager.InitializeHardwareAsync(stoppingToken), stoppingToken);
 
-            // Phase 4: Autostart configured players
+            // Phase 5: Autostart configured players
             await RunPhaseAsync("players", () => _playerManager.AutostartPlayersAsync(stoppingToken), stoppingToken);
 
-            // Phase 5: Initialize 12V trigger relay boards
+            // Phase 6: Initialize 12V trigger relay boards
             await RunPhaseAsync("triggers", () => _triggers.InitializeAsync(stoppingToken), stoppingToken);
 
-            // Phase 6: Initialize HID button support for hardware volume/mute controls
+            // Phase 7: Initialize HID button support for hardware volume/mute controls
             await RunPhaseAsync("hidbuttons", () => _hidButtons.InitializeAsync(stoppingToken), stoppingToken);
 
-            // Phase 7: Connect MQTT bridge (publishes to Home Assistant). Non-blocking.
+            // Phase 8: Connect MQTT bridge (publishes to Home Assistant). Non-blocking.
             await RunPhaseAsync("mqtt", () => _mqtt.InitializeAsync(stoppingToken), stoppingToken);
 
             // All phases finished — republish container state so the HA "Ready" sensor reflects completion.

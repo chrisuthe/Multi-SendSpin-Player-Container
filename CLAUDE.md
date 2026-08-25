@@ -224,6 +224,7 @@ new ErrorResponse(false, "Error message")
 | `MOCK_HARDWARE` | `false` | Enable mock relay boards for testing without hardware |
 | `ENABLE_ADVANCED_FORMATS` | `false` | Show format selection UI (dev-only). All players default to flac-48000 regardless. |
 | `BUFFER_SECONDS` | `30` | Audio buffer size in seconds (5-30, step 5). Lower values reduce RAM on constrained hardware. |
+| `RESET_SINKS` | `true` | Suspend/resume hardware sinks (`module-alsa-card.c` only, skipping `SUSPENDED` ones) once, in the `sinkreset` startup phase. Works around the ALSA mmap+timer kernel regression that leaves cards silent (#281). Startup is the only trigger — a device re-opened on the bad path later needs an add-on restart. Set to `false`/`0`/`no` to disable. Surfaced as the `reset_sinks` add-on option. |
 | `USE_AUDIO_CLOCK` | `false` | Opt in to the PulseAudio DAC clock for sync timing. Default uses the SDK `MonotonicTimer` (VM-resilient, no output-prefill offset, better multi-room sync). Enable only for genuinely divergent DAC clocks. |
 
 **Audio Configuration Notes:**
