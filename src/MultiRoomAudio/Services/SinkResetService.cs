@@ -390,6 +390,7 @@ public partial class SinkResetService
     /// <summary>
     /// Retries the resume for any sink an earlier pass suspended but failed to bring back, so a
     /// transient pactl failure costs one pass of silence rather than the life of the container.
+    /// The marker is only cleared once a resume has actually succeeded.
     /// </summary>
     private async Task RecoverStrandedSinksAsync(IReadOnlyList<PactlSinkRow> sinks)
     {
@@ -401,14 +402,12 @@ public partial class SinkResetService
             if (!_awaitingResume.ContainsKey(sink.Name))
                 continue;
 
-            // Something else already brought it back (a manual pactl, a PulseAudio restart).
-            if (!string.Equals(sink.State, SuspendedState, StringComparison.OrdinalIgnoreCase))
-            {
-                _awaitingResume.TryRemove(sink.Name, out _);
-                continue;
-            }
-
-            _logger.LogWarning("Sink '{Sink}' is still suspended from an earlier reset — resuming it", sink.Name);
+            // Resume before clearing the marker, without consulting the listing's state. That row
+            // was read before the gate was taken, so a concurrent cycle may have suspended the sink
+            // since — and trusting a stale RUNNING would drop the marker on a sink that is actually
+            // silent, with nothing left to recover it. Resuming an unsuspended sink is a no-op, so
+            // the redundant call is far cheaper than the state check is risky.
+            _logger.LogWarning("Sink '{Sink}' was left suspended by an earlier reset — resuming it", sink.Name);
 
             var gate = _sinkGates.GetOrAdd(sink.Name, _ => new SemaphoreSlim(1, 1));
             await gate.WaitAsync(CancellationToken.None);

@@ -363,6 +363,32 @@ public class SinkResetTests
     }
 
     [Fact]
+    public async Task AStrandedMarker_IsNotClearedByAStaleRunningRow()
+    {
+        // Each pass lists the sinks once, up front. A sink suspended after that listing still reads
+        // RUNNING in it, so clearing the marker on that row would drop the one thing that can bring
+        // a silent sink back.
+        var pactl = new ScriptedPactl
+        {
+            Fail = call => call == $"suspend-sink {XfiSink} 0"
+                ? new PactlResult(1, string.Empty, "Connection failure")
+                : new PactlResult(0, string.Empty, string.Empty)
+        };
+        var service = Service(pactl);
+
+        await service.ResetSinkByIndexAsync(1);
+
+        // The transient failure clears, but the fixture still reports the sink as RUNNING, and the
+        // cooldown suppresses a fresh cycle — recovery is the only thing that can resume it.
+        pactl.Fail = null;
+        pactl.Calls.Clear();
+
+        await service.ResetSinkByIndexAsync(1);
+
+        Assert.Equal([$"suspend-sink {XfiSink} 0"], pactl.SuspendCallsFor(XfiSink));
+    }
+
+    [Fact]
     public async Task RecoveredSink_IsNotChasedForever()
     {
         var pactl = new ScriptedPactl
