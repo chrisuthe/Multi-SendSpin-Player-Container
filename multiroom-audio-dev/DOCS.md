@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-4881a77
+## Development Build: sha-2fad7ab
 
 **Current Dev Build Changes** (recent)
 
+- Standardize remap sink naming and disambiguate duplicate sound cards (#283)
 - chore: upgrade SendSpin.SDK 9.1.0 -> 9.2.0
 - style: satisfy dotnet format on merged MQTT changes
 - Merge dev into main for v5.2.2 release
