@@ -313,13 +313,17 @@ public partial class SinkResetService
 
             _logger.LogInformation("Cycling sink '{Sink}' (state {State}, {Reason})", sink.Name, sink.State, reason);
 
-            var suspended = false;
+            // Two separate questions: did the suspend definitely land (so this counts as a cycle),
+            // and could it possibly have landed (so the sink might need recovering)?
+            var suspendConfirmed = false;
+            var mayBeSuspended = false;
             try
             {
                 var suspend = await _runner(["suspend-sink", sink.Name, "1"], cancellationToken);
-                suspended = suspend.Success;
+                suspendConfirmed = suspend.Success;
+                mayBeSuspended = suspend.Success;
 
-                if (!suspended)
+                if (!suspend.Success)
                 {
                     _logger.LogWarning("Suspending sink '{Sink}' failed: {Error}", sink.Name, suspend.Error);
                 }
@@ -328,7 +332,10 @@ public partial class SinkResetService
             }
             catch (Exception ex)
             {
-                // Includes cancellation: shutdown must not skip the resume below.
+                // Includes cancellation: shutdown must not skip the resume below. pactl may already
+                // have reached PulseAudio before this threw, so assume the suspend might have landed —
+                // a spurious recovery marker costs one idempotent resume, a missing one costs a card.
+                mayBeSuspended = true;
                 _logger.LogWarning(ex, "Suspending sink '{Sink}' failed", sink.Name);
             }
 
@@ -340,16 +347,16 @@ public partial class SinkResetService
                 _awaitingResume.TryRemove(sink.Name, out _);
                 _logger.LogInformation("Sink '{Sink}' suspended and resumed", sink.Name);
             }
-            else if (suspended)
+            else if (mayBeSuspended)
             {
                 _awaitingResume[sink.Name] = 0;
                 _logger.LogError(
-                    "Sink '{Sink}' is left suspended and will be silent — the next reset pass retries it; " +
+                    "Sink '{Sink}' may be left suspended and silent — the next reset pass retries it; " +
                     "to recover it now, run: pactl suspend-sink {SinkName} 0",
                     sink.Name, sink.Name);
             }
 
-            return suspended && resumed;
+            return suspendConfirmed && resumed;
         }
         finally
         {

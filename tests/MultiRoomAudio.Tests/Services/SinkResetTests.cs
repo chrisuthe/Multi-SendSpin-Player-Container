@@ -363,6 +363,36 @@ public class SinkResetTests
     }
 
     [Fact]
+    public async Task ASuspendThatThrew_IsStillTreatedAsPossiblySuspended()
+    {
+        // pactl may have reached PulseAudio before the runner saw the failure — cancellation on
+        // shutdown is the obvious way in. Treating that as "not suspended" would skip the recovery
+        // marker and leave a silent sink no later pass can find, since listings skip SUSPENDED rows.
+        var pactl = new ScriptedPactl
+        {
+            OnCall = call => call == $"suspend-sink {XfiSink} 1"
+                ? throw new IOException("pipe closed")
+                : Task.CompletedTask,
+            Fail = call => call == $"suspend-sink {XfiSink} 0"
+                ? new PactlResult(1, string.Empty, "Connection failure")
+                : new PactlResult(0, string.Empty, string.Empty)
+        };
+        var service = Service(pactl);
+
+        await service.ResetSinkByIndexAsync(1);
+
+        // Both faults clear. The cooldown suppresses a fresh cycle, so only the retained marker can
+        // bring the sink back.
+        pactl.OnCall = null;
+        pactl.Fail = null;
+        pactl.Calls.Clear();
+
+        await service.ResetSinkByIndexAsync(1);
+
+        Assert.Equal([$"suspend-sink {XfiSink} 0"], pactl.SuspendCallsFor(XfiSink));
+    }
+
+    [Fact]
     public async Task AStrandedMarker_IsNotClearedByAStaleRunningRow()
     {
         // Each pass lists the sinks once, up front. A sink suspended after that listing still reads
