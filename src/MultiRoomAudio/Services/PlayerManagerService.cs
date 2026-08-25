@@ -3264,25 +3264,25 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// <returns>The device's ALSA-probed capabilities, or the backend's own probe when it has none.</returns>
     /// <remarks>
     /// The backend probe is a single fixed hi-res table under PulseAudio, so it must not be the
-    /// primary source — only the enriched device carries per-device hardware data.
+    /// primary source — only the enriched device carries per-device hardware data. A null device
+    /// resolves to the default sink, which has real capabilities of its own.
     /// </remarks>
     private DeviceCapabilities? ResolveDeviceCapabilities(string? deviceId)
     {
-        AudioDevice? enriched = null;
-        if (!string.IsNullOrWhiteSpace(deviceId))
+        try
         {
-            try
-            {
-                enriched = _serviceProvider.GetService<DeviceMatchingService>()?.GetEnrichedDevice(deviceId);
-            }
-            catch (Exception ex)
-            {
-                // Capability lookup must never block player creation
-                _logger.LogDebug(ex, "Could not resolve enriched capabilities for device '{Device}'", deviceId);
-            }
+            var matching = _serviceProvider.GetService<DeviceMatchingService>();
+            if (matching != null)
+                return matching.GetFormatCapabilities(deviceId);
+        }
+        catch (Exception ex)
+        {
+            // Capability lookup must never block player creation
+            _logger.LogDebug(ex, "Could not resolve enriched capabilities for device '{Device}'",
+                deviceId ?? "(default)");
         }
 
-        return AudioFormatCatalog.CapabilitiesFor(enriched, _backendFactory.GetDeviceCapabilities(deviceId));
+        return _backendFactory.GetDeviceCapabilities(deviceId);
     }
 
     /// <summary>
