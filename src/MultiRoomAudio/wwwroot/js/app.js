@@ -1504,7 +1504,7 @@ async function setPlayerMute(playerName, muted) {
 
 async function setDelay(name, delayMs) {
     // Clamp value to valid range
-    delayMs = Math.max(-5000, Math.min(5000, parseInt(delayMs) || 0));
+    delayMs = Math.max(0, Math.min(5000, parseInt(delayMs) || 0));
 
     // Update input field to show clamped value
     const input = document.getElementById('delayInput');
@@ -1544,7 +1544,7 @@ function adjustDelay(name, delta) {
     if (!input) return;
 
     const currentValue = parseInt(input.value) || 0;
-    const newValue = Math.max(-5000, Math.min(5000, currentValue + delta));
+    const newValue = Math.max(0, Math.min(5000, currentValue + delta));
     input.value = newValue;
     setDelay(name, newValue);
 }
@@ -1553,7 +1553,7 @@ async function showPlayerStats(name) {
     const player = players[name];
     if (!player) return;
 
-    // Delay offset applies in place (the server re-anchors timing on change), so no
+    // Output delay applies in place (the server re-anchors timing on change), so no
     // player restart is needed when the stats modal closes.
 
     const modal = document.getElementById('playerStatsModal');
@@ -1642,10 +1642,11 @@ async function showPlayerStats(name) {
             </div>
         </div>
         ` : ''}
-        <h6 class="text-muted text-uppercase small mt-3">Delay Offset</h6>
+        <h6 class="text-muted text-uppercase small mt-3">Output Delay</h6>
         <p class="text-muted small mb-2">
             <i class="fas fa-info-circle me-1"></i>
-            Adjust timing to sync with others. Changes apply immediately.
+            How much delay your amp or powered speakers add after this zone's output.
+            Playback is scheduled that much earlier so it lands in sync. Changes apply immediately.
         </p>
         <div class="delay-control d-flex align-items-center gap-2 flex-wrap">
             <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', -10)" title="Decrease by 10ms">
@@ -1653,7 +1654,7 @@ async function showPlayerStats(name) {
             </button>
             <div class="input-group input-group-sm delay-input-group">
                 <input type="number" class="form-control text-center" id="delayInput"
-                    value="${player.delayMs}" min="-5000" max="5000" step="10"
+                    value="${player.delayMs}" min="0" max="5000" step="10"
                     onchange="setDelay('${escapeJsString(name)}', this.value)"
                     onkeydown="if(event.key==='Enter'){setDelay('${escapeJsString(name)}', this.value); event.preventDefault();}">
                 <span class="input-group-text">ms</span>
@@ -1661,7 +1662,7 @@ async function showPlayerStats(name) {
             <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', 10)" title="Increase by 10ms">
                 <i class="fas fa-plus"></i>
             </button>
-            <small class="text-muted">Range: ±5000ms</small>
+            <small class="text-muted">Range: 0-5000ms</small>
             <span id="delaySavedIndicator" class="text-success small" style="opacity: 0; transition: opacity 0.3s;"><i class="fas fa-check"></i> Saved</span>
         </div>
     `;

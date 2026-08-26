@@ -43,7 +43,7 @@ public static class PlayersEndpoint
     /// <item>PUT /api/players/{name}/startup-volume - Set startup volume</item>
     /// <item>PUT /api/players/{name}/mute - Set mute state</item>
     /// <item>PUT /api/players/{name}/auto-resume - Enable/disable auto-resume on device reconnect</item>
-    /// <item>PUT /api/players/{name}/offset - Set delay offset (-10000 to 10000ms)</item>
+    /// <item>PUT /api/players/{name}/offset - Set output delay (0 to 5000ms)</item>
     /// <item>PUT /api/players/{name}/device - Switch audio device</item>
     /// <item>PUT /api/players/{name}/rename - Rename player</item>
     /// <item>POST /api/players/{name}/pause - Pause playback</item>
@@ -336,7 +336,7 @@ public static class PlayersEndpoint
         .WithName("SetAutoResume")
         .WithDescription("Enable or disable auto-resume when audio device is reconnected");
 
-        // PUT /api/players/{name}/offset - Set delay offset
+        // PUT /api/players/{name}/offset - Set output delay
         group.MapPut("/{name}/offset", (
             string name,
             OffsetRequest request,
@@ -348,16 +348,20 @@ public static class PlayersEndpoint
             logger.LogDebug("API: PUT /api/players/{PlayerName}/offset to {DelayMs}ms", name, request.DelayMs);
 
             // Apply to running player (affects clock sync timing immediately)
-            if (!manager.SetDelayOffset(name, request.DelayMs))
+            var applied = manager.SetDelayOffset(name, request.DelayMs);
+            if (applied is not { } delayMs)
                 return PlayerNotFoundResult(name, logger, "offset change");
 
-            // Also persist to config so it survives restarts
-            config.UpdatePlayerField(name, c => c.DelayMs = request.DelayMs);
+            // Persist what actually took effect, not the raw request: persisting the request would
+            // let an out-of-range value survive in config and load back on restart having never
+            // been the running value.
+            config.UpdatePlayerField(name, c => c.OutputDelayMs = delayMs);
 
-            return Results.Ok(new SuccessResponse(true, $"Offset set to {request.DelayMs}ms"));
+            return Results.Ok(new SuccessResponse(true, $"Output delay set to {delayMs}ms"));
         })
+        .AddEndpointFilter<ValidationFilter<OffsetRequest>>()
         .WithName("SetOffset")
-        .WithDescription("Set player delay offset in milliseconds");
+        .WithDescription("Set player output delay in milliseconds (0-5000, per the Sendspin spec)");
 
         // POST /api/players/{name}/pause - Pause playback
         group.MapPost("/{name}/pause", (

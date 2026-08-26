@@ -41,9 +41,10 @@ public class PlayerCreateRequest
     public int Volume { get; set; } = 75;
 
     /// <summary>
-    /// Audio delay offset in milliseconds. Can be negative or positive.
+    /// Output delay in milliseconds (spec range 0-5000): how much delay the amp or powered
+    /// speakers add after the audio port, which playback is scheduled earlier to absorb.
     /// </summary>
-    [Range(-5000, 5000, ErrorMessage = "DelayMs must be between -5000 and 5000 milliseconds.")]
+    [Range(0, 5000, ErrorMessage = "DelayMs must be between 0 and 5000 milliseconds.")]
     public int DelayMs { get; set; }
 
     /// <summary>
@@ -110,9 +111,9 @@ public record VolumeRequest(
 /// <summary>
 /// Request to update offset.
 /// </summary>
-/// <param name="DelayMs">Audio delay offset in milliseconds (-5000 to 5000).</param>
+/// <param name="DelayMs">Output delay in milliseconds (0 to 5000), per the Sendspin spec.</param>
 public record OffsetRequest(
-    [property: Range(-5000, 5000, ErrorMessage = "DelayMs must be between -5000 and 5000 milliseconds.")]
+    [property: Range(0, 5000, ErrorMessage = "DelayMs must be between 0 and 5000 milliseconds.")]
     int DelayMs);
 
 /// <summary>

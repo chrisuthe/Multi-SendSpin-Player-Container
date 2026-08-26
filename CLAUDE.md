@@ -326,7 +326,7 @@ squeezelite-docker/
 | PUT | `/api/players/{name}/volume` | Set volume |
 | PUT | `/api/players/{name}/startup-volume` | Set startup volume |
 | PUT | `/api/players/{name}/mute` | Mute/unmute player |
-| PUT | `/api/players/{name}/offset` | Set delay offset |
+| PUT | `/api/players/{name}/offset` | Set output delay (0-5000ms, per Sendspin spec) |
 | PUT | `/api/players/{name}/auto-resume` | Enable/disable auto-resume on device reconnect |
 | GET | `/api/players/formats?device={id}` | Get the audio formats a device can be advertised as supporting |
 

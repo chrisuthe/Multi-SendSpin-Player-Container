@@ -686,7 +686,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 ClientId = ClientIdGenerator.Generate(playerConfig.Name),
                 ServerUrl = playerConfig.Server,
                 Volume = playerConfig.Volume ?? 100,
-                DelayMs = playerConfig.DelayMs,
+                DelayMs = playerConfig.OutputDelayMs ?? 0,
                 AdvertisedFormat = playerConfig.AdvertisedFormat,
                 Persist = false // Already persisted, don't re-save
             };
@@ -918,7 +918,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     Device = request.Device ?? "",
                     Provider = "sendspin",
                     Autostart = true,
-                    DelayMs = request.DelayMs,
+                    OutputDelayMs = OutputDelay.Clamp(request.DelayMs),
                     Server = request.ServerUrl,
                     Volume = request.Volume,
                     AdvertisedFormat = request.AdvertisedFormat
@@ -1085,7 +1085,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="name">Player name.</param>
     /// <param name="context">Player context.</param>
-    /// <param name="delayMs">Delay offset in milliseconds.</param>
+    /// <param name="delayMs">Output delay in milliseconds.</param>
     private void InitializeAndConnectPlayer(string name, PlayerContext context, int delayMs)
     {
         // Apply startup volume locally - player is authoritative for its own volume
@@ -1094,12 +1094,11 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _logger.LogInformation("VOLUME [Create] Player '{Name}': startup volume {Volume}% applied locally",
             name, context.Config.Volume);
 
-        // Apply delay offset from user configuration.
-        // See UserDelayToStaticDelayMs for the sign rationale (SDK v8.0.0 sign flip).
-        context.ClockSync.StaticDelayMs = UserDelayToStaticDelayMs(delayMs);
+        // Apply output delay from user configuration (see OutputDelay for the spec convention).
+        context.ClockSync.StaticDelayMs = OutputDelay.ToStaticDelayMs(OutputDelay.Clamp(delayMs));
         if (delayMs != 0)
         {
-            _logger.LogInformation("Delay offset for '{Name}': {DelayMs}ms", name, delayMs);
+            _logger.LogInformation("Output delay for '{Name}': {DelayMs}ms", name, delayMs);
         }
 
         // Start HID button reader if enabled for this device
@@ -1279,7 +1278,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             Volume: volume,
             StartupVolume: volume,
             IsMuted: false,
-            DelayMs: config.DelayMs,
+            DelayMs: config.OutputDelayMs ?? 0,
             OutputLatencyMs: 0,
             CreatedAt: DateTime.MinValue,
             ConnectedAt: null,
@@ -1365,7 +1364,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     Volume: volume,
                     StartupVolume: volume, // For non-running players, startup volume = config volume
                     IsMuted: false,
-                    DelayMs: config.DelayMs,
+                    DelayMs: config.OutputDelayMs ?? 0,
                     OutputLatencyMs: 0,
                     CreatedAt: DateTime.MinValue,
                     ConnectedAt: null,
@@ -1627,33 +1626,26 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Sets the delay offset for a player.
-    /// This adjusts the playback timing to synchronize with other players.
-    /// Positive values delay playback (play later), negative values advance it (play earlier).
+    /// Sets the output delay for a player, compensating for delay downstream of the audio port.
     /// </summary>
     /// <param name="name">Player name.</param>
-    /// <param name="delayMs">Delay offset in milliseconds (-5000 to 5000).</param>
-    /// <returns>True if successful, false if player not found.</returns>
-    /// <summary>
-    /// Converts a user-facing delay offset (positive = play later) to the SDK's StaticDelayMs.
-    /// </summary>
+    /// <param name="delayMs">
+    /// Output delay in milliseconds. Clamped to the spec's 0-5000; see <see cref="OutputDelay"/>.
+    /// </param>
+    /// <returns>The delay actually applied, or null if the player was not found.</returns>
     /// <remarks>
-    /// SDK v8.0.0 flipped the static_delay sign: StaticDelayMs is now SUBTRACTED from the
-    /// converted client time (it was added pre-8.0). Negating here keeps our "Delay Offset"
-    /// knob meaning "positive = play later" without migrating persisted player config values.
+    /// Returns the applied value rather than a bool so callers persist exactly what took effect.
+    /// Persisting the caller's raw input instead would let an out-of-range value survive in config
+    /// and load back on restart, having never been the running value.
     /// </remarks>
-    internal static double UserDelayToStaticDelayMs(int delayMs) => -delayMs;
-
-    public bool SetDelayOffset(string name, int delayMs)
+    public int? SetDelayOffset(string name, int delayMs)
     {
         if (!_players.TryGetValue(name, out var context))
-            return false;
+            return null;
 
-        // Clamp to valid range
-        delayMs = Math.Clamp(delayMs, -5000, 5000);
+        delayMs = OutputDelay.Clamp(delayMs);
 
-        // Apply to the clock synchronizer (see UserDelayToStaticDelayMs for the sign rationale).
-        context.ClockSync.StaticDelayMs = UserDelayToStaticDelayMs(delayMs);
+        context.ClockSync.StaticDelayMs = OutputDelay.ToStaticDelayMs(delayMs);
         context.Config.DelayMs = delayMs;
 
         // Re-anchor timing so the new delay applies to the already-buffered audio in place
@@ -1664,13 +1656,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
         if (delayMs != 0)
         {
-            _logger.LogInformation("Set delay offset for '{Name}': {DelayMs}ms (timing re-anchored)", name, delayMs);
+            _logger.LogInformation("Set output delay for '{Name}': {DelayMs}ms (timing re-anchored)", name, delayMs);
         }
 
         // Broadcast status update so UI reflects the change
         _ = BroadcastStatusAsync();
 
-        return true;
+        return delayMs;
     }
 
     /// <summary>
@@ -2883,7 +2875,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 ClientId = ClientIdGenerator.Generate(config.Name),
                 ServerUrl = config.Server,
                 Volume = config.Volume ?? 100,
-                DelayMs = config.DelayMs,
+                DelayMs = config.OutputDelayMs ?? 0,
                 AdvertisedFormat = config.AdvertisedFormat,
                 Persist = false // Already persisted
             };
