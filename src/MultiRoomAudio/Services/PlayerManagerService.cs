@@ -130,18 +130,6 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     #region Constants
 
     /// <summary>
-    /// Buffer capacity announced to the Sendspin server (in bytes).
-    ///
-    /// Per protocol spec: "buffer_capacity: max size in bytes of compressed audio
-    /// messages in the buffer that are yet to be played"
-    ///
-    /// The server sends audio chunks as far ahead as this capacity allows.
-    /// At typical Opus bitrates (~128kbps), 32MB = many minutes of audio.
-    /// This large value ensures the server always has audio ready to send.
-    /// </summary>
-    private const int ServerAnnouncedBufferCapacityBytes = 32_000_000;
-
-    /// <summary>
     /// Local circular buffer capacity for decompressed PCM audio (in milliseconds).
     ///
     /// This is the TimedAudioBuffer size - how much decoded audio we can hold locally.
@@ -149,8 +137,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// uninterrupted playback during network hiccups and lightweight reconnects. At 48kHz
     /// stereo float32, 30s is approximately 11MB per player.
     ///
-    /// Note: This is DIFFERENT from ServerAnnouncedBufferCapacityBytes which controls
-    /// how far ahead the server sends compressed audio.
+    /// Note: This is DIFFERENT from the advertised buffer_capacity, which controls how far
+    /// ahead the server sends compressed audio and is derived by the SDK (see below).
     /// </summary>
     private readonly int _localBufferCapacityMs;
 
@@ -168,18 +156,17 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private const int PlaybackStartThresholdMs = 250;
 
     /// <summary>
-    /// Sync correction options tuned for PulseAudio's timing characteristics.
-    /// Uses a high threshold for Tier 3 (frame drop/insert) to prefer smooth rate adjustment.
+    /// Sync correction options for the SDK's corrector (<c>ITimedAudioBuffer.Read</c>).
     /// </summary>
+    /// <remarks>
+    /// Deadband, speed cap and the one-shot snap threshold are left at the SDK defaults, which
+    /// carry the spec's limits (+/-0.5% speed cap, 100us deadband, 5ms snap). Only the values we
+    /// deliberately differ on are set here. MaxSpeedCorrection and ResamplingThresholdMicroseconds
+    /// are deliberately unset: both are inert on this path - the buffer self-applies correction as
+    /// frame stepping rather than driving a resampler, and a value above the spec cap is clamped.
+    /// </remarks>
     internal static readonly SyncCorrectionOptions PulseAudioSyncOptions = new()
     {
-        // Use 4% max correction (matches CLI) for more responsive adjustment
-        MaxSpeedCorrection = 0.04,
-
-        // Set high threshold to prefer rate adjustment over frame drop/insert (Tier 3)
-        // SDK handles sync correction via TimedAudioBuffer's rate adjustment
-        ResamplingThresholdMicroseconds = 200_000,  // 200ms (vs default 15ms)
-
         // Re-anchor at 500ms (same as default)
         ReanchorThresholdMicroseconds = 500_000,
 
@@ -981,7 +968,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             ClientName = request.Name,
             Roles = new List<string> { "controller@v1", "player@v1", "metadata@v1" },
             AudioFormats = audioFormats,
-            BufferCapacity = ServerAnnouncedBufferCapacityBytes,
+
+            // BufferCapacity is left unset so the SDK derives it from what our decoded buffer can
+            // actually hold, for whichever advertised codec packs the most audio into a byte. The
+            // spec makes buffer_capacity a promise the server may fill toward, so over-advertising
+            // just licenses it to queue audio we would discard unplayed. Caveat on the 9.x line:
+            // the SDK's derivation assumes its own 30s default buffer and has no public hook for
+            // ours, so BUFFER_SECONDS below 30 over-advertises (degrades to buffer overruns).
             InitialVolume = request.Volume,
             InitialMuted = false, // Players start unmuted
 
