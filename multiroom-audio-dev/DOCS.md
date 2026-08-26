@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-8526016
+## Development Build: sha-f894604
 
 **Current Dev Build Changes** (recent)
 
+- chore: upgrade SendSpin.SDK 9.2.0 -> 9.3.0 (#289)
 - Advertise real DAC sample rates and bit depths to Music Assistant (#288)1
 - Suspend and resume hardware sinks so silent cards recover (#281) (#287)
 - Fix default.pa import losing sink descriptions with spaces (#286)
