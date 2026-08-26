@@ -13,6 +13,8 @@
 
 ### Changed
 - **After upgrading, existing custom sinks are renamed in Home Assistant and Music Assistant.** Sinks reload from `custom-sinks.yaml` on restart and now register their stored description verbatim, so underscores become spaces and `_and_` becomes `&`. Sink names, players and configuration are untouched - only the display name changes, and you may need to fix up entity names on the Home Assistant side
+- Audio sync correction now runs entirely inside the Sendspin SDK (upgraded to 9.3.0). The add-on used to run a second corrector of its own alongside the SDK's, so two loops chased the same timing error and the add-on's one pulled playback speed up to 20x harder than the Sendspin spec allows. Correction is now a single loop that stays inside the spec's +/-0.5% limit, escalating to a one-shot snap past ~5ms of error. Expect steadier multi-room alignment and fewer correction artifacts
+- Players now tell the server how much audio they can really hold. They used to advertise a flat 32MB - roughly 16 minutes of compressed audio, far past anything the add-on actually buffers - which licensed the server to queue audio the player would only discard unplayed, and could fill the buffer until the SDK began dropping samples. Capacity is now derived from the real decoded buffer. If you have lowered **Buffer Seconds** below 30 the advertised figure is still slightly generous, but far closer than before (#272)
 
 ## [5.2.2] - Volume Curve, MQTT Volume & Trigger Fixes
 
