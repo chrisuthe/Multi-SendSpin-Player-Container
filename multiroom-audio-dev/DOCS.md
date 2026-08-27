@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-f894604
+## Development Build: sha-9875a0e
 
 **Current Dev Build Changes** (recent)
 
+- fix: align player output delay with the spec's 0-5000 range (#290)
 - chore: upgrade SendSpin.SDK 9.2.0 -> 9.3.0 (#289)
 - Advertise real DAC sample rates and bit depths to Music Assistant (#288)1
 - Suspend and resume hardware sinks so silent cards recover (#281) (#287)
