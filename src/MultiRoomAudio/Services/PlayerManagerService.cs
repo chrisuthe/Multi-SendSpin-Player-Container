@@ -130,18 +130,6 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     #region Constants
 
     /// <summary>
-    /// Buffer capacity announced to the Sendspin server (in bytes).
-    ///
-    /// Per protocol spec: "buffer_capacity: max size in bytes of compressed audio
-    /// messages in the buffer that are yet to be played"
-    ///
-    /// The server sends audio chunks as far ahead as this capacity allows.
-    /// At typical Opus bitrates (~128kbps), 32MB = many minutes of audio.
-    /// This large value ensures the server always has audio ready to send.
-    /// </summary>
-    private const int ServerAnnouncedBufferCapacityBytes = 32_000_000;
-
-    /// <summary>
     /// Local circular buffer capacity for decompressed PCM audio (in milliseconds).
     ///
     /// This is the TimedAudioBuffer size - how much decoded audio we can hold locally.
@@ -149,8 +137,8 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// uninterrupted playback during network hiccups and lightweight reconnects. At 48kHz
     /// stereo float32, 30s is approximately 11MB per player.
     ///
-    /// Note: This is DIFFERENT from ServerAnnouncedBufferCapacityBytes which controls
-    /// how far ahead the server sends compressed audio.
+    /// Note: This is DIFFERENT from the advertised buffer_capacity, which controls how far
+    /// ahead the server sends compressed audio and is derived by the SDK (see below).
     /// </summary>
     private readonly int _localBufferCapacityMs;
 
@@ -168,18 +156,17 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private const int PlaybackStartThresholdMs = 250;
 
     /// <summary>
-    /// Sync correction options tuned for PulseAudio's timing characteristics.
-    /// Uses a high threshold for Tier 3 (frame drop/insert) to prefer smooth rate adjustment.
+    /// Sync correction options for the SDK's corrector (<c>ITimedAudioBuffer.Read</c>).
     /// </summary>
+    /// <remarks>
+    /// Deadband, speed cap and the one-shot snap threshold are left at the SDK defaults, which
+    /// carry the spec's limits (+/-0.5% speed cap, 100us deadband, 5ms snap). Only the values we
+    /// deliberately differ on are set here. MaxSpeedCorrection and ResamplingThresholdMicroseconds
+    /// are deliberately unset: both are inert on this path - the buffer self-applies correction as
+    /// frame stepping rather than driving a resampler, and a value above the spec cap is clamped.
+    /// </remarks>
     internal static readonly SyncCorrectionOptions PulseAudioSyncOptions = new()
     {
-        // Use 4% max correction (matches CLI) for more responsive adjustment
-        MaxSpeedCorrection = 0.04,
-
-        // Set high threshold to prefer rate adjustment over frame drop/insert (Tier 3)
-        // SDK handles sync correction via TimedAudioBuffer's rate adjustment
-        ResamplingThresholdMicroseconds = 200_000,  // 200ms (vs default 15ms)
-
         // Re-anchor at 500ms (same as default)
         ReanchorThresholdMicroseconds = 500_000,
 
@@ -699,7 +686,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 ClientId = ClientIdGenerator.Generate(playerConfig.Name),
                 ServerUrl = playerConfig.Server,
                 Volume = playerConfig.Volume ?? 100,
-                DelayMs = playerConfig.DelayMs,
+                DelayMs = playerConfig.OutputDelayMs ?? 0,
                 AdvertisedFormat = playerConfig.AdvertisedFormat,
                 Persist = false // Already persisted, don't re-save
             };
@@ -931,7 +918,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     Device = request.Device ?? "",
                     Provider = "sendspin",
                     Autostart = true,
-                    DelayMs = request.DelayMs,
+                    OutputDelayMs = OutputDelay.Clamp(request.DelayMs),
                     Server = request.ServerUrl,
                     Volume = request.Volume,
                     AdvertisedFormat = request.AdvertisedFormat
@@ -968,12 +955,11 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// <returns>Record containing all SDK components.</returns>
     private PlayerComponents CreateSdkComponents(PlayerCreateRequest request)
     {
-        // Probe device capabilities (used for reporting in Stats for Nerds)
-        var deviceCapabilities = _backendFactory.GetDeviceCapabilities(request.Device);
+        // Probe device capabilities: drives both format advertisement and Stats for Nerds reporting
+        var deviceCapabilities = ResolveDeviceCapabilities(request.Device);
 
-        // Apply format filtering (always defaults to flac-48000 for maximum compatibility)
-        var audioFormats = GetDefaultFormats();
-        audioFormats = FilterFormatsByPreference(audioFormats, request.AdvertisedFormat);
+        // Advertise everything the DAC can do, with the player's preference at index 0
+        var audioFormats = BuildAdvertisedFormats(request.Name, request.AdvertisedFormat, deviceCapabilities);
 
         // Create capabilities with player role
         var clientCapabilities = new ClientCapabilities
@@ -982,7 +968,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             ClientName = request.Name,
             Roles = new List<string> { "controller@v1", "player@v1", "metadata@v1" },
             AudioFormats = audioFormats,
-            BufferCapacity = ServerAnnouncedBufferCapacityBytes,
+
+            // BufferCapacity is left unset so the SDK derives it from what our decoded buffer can
+            // actually hold, for whichever advertised codec packs the most audio into a byte. The
+            // spec makes buffer_capacity a promise the server may fill toward, so over-advertising
+            // just licenses it to queue audio we would discard unplayed. Caveat on the 9.x line:
+            // the SDK's derivation assumes its own 30s default buffer and has no public hook for
+            // ours, so BUFFER_SECONDS below 30 over-advertises (degrades to buffer overruns).
             InitialVolume = request.Volume,
             InitialMuted = false, // Players start unmuted
 
@@ -1093,7 +1085,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="name">Player name.</param>
     /// <param name="context">Player context.</param>
-    /// <param name="delayMs">Delay offset in milliseconds.</param>
+    /// <param name="delayMs">Output delay in milliseconds.</param>
     private void InitializeAndConnectPlayer(string name, PlayerContext context, int delayMs)
     {
         // Apply startup volume locally - player is authoritative for its own volume
@@ -1102,12 +1094,11 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         _logger.LogInformation("VOLUME [Create] Player '{Name}': startup volume {Volume}% applied locally",
             name, context.Config.Volume);
 
-        // Apply delay offset from user configuration.
-        // See UserDelayToStaticDelayMs for the sign rationale (SDK v8.0.0 sign flip).
-        context.ClockSync.StaticDelayMs = UserDelayToStaticDelayMs(delayMs);
+        // Apply output delay from user configuration (see OutputDelay for the spec convention).
+        context.ClockSync.StaticDelayMs = OutputDelay.ToStaticDelayMs(OutputDelay.Clamp(delayMs));
         if (delayMs != 0)
         {
-            _logger.LogInformation("Delay offset for '{Name}': {DelayMs}ms", name, delayMs);
+            _logger.LogInformation("Output delay for '{Name}': {DelayMs}ms", name, delayMs);
         }
 
         // Start HID button reader if enabled for this device
@@ -1287,7 +1278,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
             Volume: volume,
             StartupVolume: volume,
             IsMuted: false,
-            DelayMs: config.DelayMs,
+            DelayMs: config.OutputDelayMs ?? 0,
             OutputLatencyMs: 0,
             CreatedAt: DateTime.MinValue,
             ConnectedAt: null,
@@ -1373,7 +1364,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                     Volume: volume,
                     StartupVolume: volume, // For non-running players, startup volume = config volume
                     IsMuted: false,
-                    DelayMs: config.DelayMs,
+                    DelayMs: config.OutputDelayMs ?? 0,
                     OutputLatencyMs: 0,
                     CreatedAt: DateTime.MinValue,
                     ConnectedAt: null,
@@ -1635,34 +1626,33 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Sets the delay offset for a player.
-    /// This adjusts the playback timing to synchronize with other players.
-    /// Positive values delay playback (play later), negative values advance it (play earlier).
+    /// Sets the output delay for a player, compensating for delay downstream of the audio port.
     /// </summary>
     /// <param name="name">Player name.</param>
-    /// <param name="delayMs">Delay offset in milliseconds (-5000 to 5000).</param>
-    /// <returns>True if successful, false if player not found.</returns>
-    /// <summary>
-    /// Converts a user-facing delay offset (positive = play later) to the SDK's StaticDelayMs.
-    /// </summary>
+    /// <param name="delayMs">
+    /// Output delay in milliseconds. Clamped to the spec's 0-5000; see <see cref="OutputDelay"/>.
+    /// </param>
+    /// <returns>The delay actually applied, or null if the player was not found.</returns>
     /// <remarks>
-    /// SDK v8.0.0 flipped the static_delay sign: StaticDelayMs is now SUBTRACTED from the
-    /// converted client time (it was added pre-8.0). Negating here keeps our "Delay Offset"
-    /// knob meaning "positive = play later" without migrating persisted player config values.
+    /// Persists the applied value itself rather than leaving that to callers. Making persistence
+    /// the caller's job is what let an offset set over MQTT apply to the running player and then
+    /// silently revert on the next restart: <see cref="MqttService"/> holds
+    /// <see cref="MqttConfigService"/> (broker settings), not <see cref="ConfigurationService"/>,
+    /// so it had no way to persist even in principle. Writing the clamped value here also keeps an
+    /// out-of-range request from surviving in config having never been the running value.
     /// </remarks>
-    internal static double UserDelayToStaticDelayMs(int delayMs) => -delayMs;
-
-    public bool SetDelayOffset(string name, int delayMs)
+    public int? SetDelayOffset(string name, int delayMs)
     {
         if (!_players.TryGetValue(name, out var context))
-            return false;
+            return null;
 
-        // Clamp to valid range
-        delayMs = Math.Clamp(delayMs, -5000, 5000);
+        delayMs = OutputDelay.Clamp(delayMs);
 
-        // Apply to the clock synchronizer (see UserDelayToStaticDelayMs for the sign rationale).
-        context.ClockSync.StaticDelayMs = UserDelayToStaticDelayMs(delayMs);
+        context.ClockSync.StaticDelayMs = OutputDelay.ToStaticDelayMs(delayMs);
         context.Config.DelayMs = delayMs;
+
+        // Persist so the change survives a restart, whichever path asked for it.
+        _config.UpdatePlayerField(name, c => c.OutputDelayMs = delayMs);
 
         // Re-anchor timing so the new delay applies to the already-buffered audio in place
         // (SDK 9.0.5+). This replaces a full player restart: with a server that transmits far
@@ -1672,13 +1662,13 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
         if (delayMs != 0)
         {
-            _logger.LogInformation("Set delay offset for '{Name}': {DelayMs}ms (timing re-anchored)", name, delayMs);
+            _logger.LogInformation("Set output delay for '{Name}': {DelayMs}ms (timing re-anchored)", name, delayMs);
         }
 
         // Broadcast status update so UI reflects the change
         _ = BroadcastStatusAsync();
 
-        return true;
+        return delayMs;
     }
 
     /// <summary>
@@ -2891,7 +2881,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 ClientId = ClientIdGenerator.Generate(config.Name),
                 ServerUrl = config.Server,
                 Volume = config.Volume ?? 100,
-                DelayMs = config.DelayMs,
+                DelayMs = config.OutputDelayMs ?? 0,
                 AdvertisedFormat = config.AdvertisedFormat,
                 Persist = false // Already persisted
             };
@@ -3258,91 +3248,64 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         return ClientIdGenerator.Generate(name);
     }
 
-    private static List<AudioFormat> GetDefaultFormats()
+    /// <summary>
+    /// Resolves the capabilities used for a player's advertised formats and stats reporting.
+    /// </summary>
+    /// <param name="deviceId">Sink name of the player's device, or null for the default device.</param>
+    /// <returns>The device's ALSA-probed capabilities, or the backend's own probe when it has none.</returns>
+    /// <remarks>
+    /// The backend probe is a single fixed hi-res table under PulseAudio, so it must not be the
+    /// primary source — only the enriched device carries per-device hardware data. A null device
+    /// resolves to the default sink, which has real capabilities of its own.
+    /// </remarks>
+    private DeviceCapabilities? ResolveDeviceCapabilities(string? deviceId)
     {
-        // Advertise hi-res formats to SendSpin/Music Assistant server
-        // Server will send highest quality available that we support
-        return new List<AudioFormat>
+        try
         {
-            // Hi-res FLAC (preferred for quality)
-            new AudioFormat { Codec = "flac", SampleRate = 192000, Channels = 2 },
-            new AudioFormat { Codec = "flac", SampleRate = 96000, Channels = 2 },
-            new AudioFormat { Codec = "flac", SampleRate = 48000, Channels = 2 },
-            new AudioFormat { Codec = "flac", SampleRate = 44100, Channels = 2 },
-            // Hi-res PCM
-            new AudioFormat { Codec = "pcm", SampleRate = 192000, Channels = 2, BitDepth = 32 },
-            new AudioFormat { Codec = "pcm", SampleRate = 96000, Channels = 2, BitDepth = 32 },
-            new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 32 },
-            new AudioFormat { Codec = "pcm", SampleRate = 192000, Channels = 2, BitDepth = 24 },
-            new AudioFormat { Codec = "pcm", SampleRate = 96000, Channels = 2, BitDepth = 24 },
-            new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 24 },
-            new AudioFormat { Codec = "pcm", SampleRate = 48000, Channels = 2, BitDepth = 16 },
-            new AudioFormat { Codec = "pcm", SampleRate = 44100, Channels = 2, BitDepth = 16 },
-            // Opus for efficiency when streaming
-            new AudioFormat { Codec = "opus", SampleRate = 48000, Channels = 2, Bitrate = 256 },
-        };
+            var matching = _serviceProvider.GetService<DeviceMatchingService>();
+            if (matching != null)
+                return matching.GetFormatCapabilities(deviceId);
+        }
+        catch (Exception ex)
+        {
+            // Capability lookup must never block player creation
+            _logger.LogDebug(ex, "Could not resolve enriched capabilities for device '{Device}'",
+                deviceId ?? "(default)");
+        }
+
+        return _backendFactory.GetDeviceCapabilities(deviceId);
     }
 
     /// <summary>
-    /// Filters advertised audio formats based on user preference.
-    /// Defaults to flac-48000 for maximum MA compatibility when no format specified.
+    /// Builds the format list a player advertises, derived from its DAC and ordered by the player's preference.
     /// </summary>
-    /// <param name="allFormats">List of all supported formats.</param>
-    /// <param name="advertisedFormat">Format preference string (e.g., "flac-192000", "pcm-96000-24"). If null/empty, defaults to "flac-48000".</param>
-    /// <returns>Filtered list containing only the preferred format, or all formats if preference is "all".</returns>
-    private List<AudioFormat> FilterFormatsByPreference(List<AudioFormat> allFormats, string? advertisedFormat)
+    /// <param name="playerName">Player name, for logging.</param>
+    /// <param name="advertisedFormat">Persisted preference string, or null for the device default.</param>
+    /// <param name="capabilities">Probed device capabilities, or null when unavailable.</param>
+    /// <returns>The full advertisable list with the preferred entry first.</returns>
+    private List<AudioFormat> BuildAdvertisedFormats(
+        string playerName,
+        string? advertisedFormat,
+        DeviceCapabilities? capabilities)
     {
-        // Default to flac-48000 for maximum compatibility with all MA builds
-        if (string.IsNullOrWhiteSpace(advertisedFormat))
+        var allFormats = AudioFormatCatalog.BuildFormats(capabilities);
+
+        var preferred = AudioFormatCatalog.ResolvePreferred(allFormats, advertisedFormat, capabilities);
+        if (preferred == null)
         {
-            advertisedFormat = "flac-48000";
+            preferred = AudioFormatCatalog.ResolveDefault(allFormats, capabilities);
+            _logger.LogWarning(
+                "Player '{Name}': device cannot do advertised format '{Format}', falling back to {Fallback}",
+                playerName, advertisedFormat, AudioFormatCatalog.ToFormatId(preferred));
         }
 
-        // If explicitly set to "all", return all formats
-        if (advertisedFormat.Equals("all", StringComparison.OrdinalIgnoreCase))
-        {
-            return allFormats;
-        }
+        var ordered = AudioFormatCatalog.WithPreferredFirst(allFormats, preferred);
 
-        // Parse format string (e.g., "flac-192000" or "pcm-96000-24")
-        var parts = advertisedFormat.Split('-');
-        if (parts.Length < 2)
-        {
-            _logger.LogWarning("Invalid advertised format '{Format}', using all formats", advertisedFormat);
-            return allFormats;
-        }
+        _logger.LogInformation(
+            "Player '{Name}': advertising {Count} formats, preferred {Preferred}",
+            playerName, ordered.Count, AudioFormatCatalog.ToFormatId(preferred));
 
-        var codec = parts[0].ToLowerInvariant();
-        if (!int.TryParse(parts[1], out var sampleRate))
-        {
-            _logger.LogWarning("Invalid sample rate in format '{Format}', using all formats", advertisedFormat);
-            return allFormats;
-        }
-
-        int? bitDepth = null;
-        if (parts.Length >= 3 && int.TryParse(parts[2], out var parsedBitDepth))
-        {
-            bitDepth = parsedBitDepth;
-        }
-
-        // Find matching format
-        var matchingFormat = allFormats.FirstOrDefault(f =>
-            f.Codec.Equals(codec, StringComparison.OrdinalIgnoreCase) &&
-            f.SampleRate == sampleRate &&
-            (bitDepth == null || f.BitDepth == bitDepth));
-
-        if (matchingFormat != null)
-        {
-            _logger.LogInformation(
-                "Advertising single format: {Codec} {SampleRate}Hz{BitDepth}",
-                matchingFormat.Codec,
-                matchingFormat.SampleRate,
-                matchingFormat.BitDepth.HasValue ? $" {matchingFormat.BitDepth}-bit" : "");
-            return new List<AudioFormat> { matchingFormat };
-        }
-
-        _logger.LogWarning("Format '{Format}' not found, using all formats", advertisedFormat);
-        return allFormats;
+        return ordered;
     }
 
     /// <summary>

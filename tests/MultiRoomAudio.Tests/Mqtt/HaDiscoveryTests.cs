@@ -42,7 +42,9 @@ public class HaDiscoveryTests
         var offset = components.EnumerateObject().Single(e => e.Value.GetProperty("p").GetString() == "number");
 
         Assert.Equal("multiroom-audio/player/abc123/offset/set", offset.Value.GetProperty("command_topic").GetString());
-        Assert.Equal(-5000, offset.Value.GetProperty("min").GetInt32());
+
+        // The spec's output_delay_ms range: Home Assistant must not offer a value we cannot send.
+        Assert.Equal(0, offset.Value.GetProperty("min").GetInt32());
         Assert.Equal(5000, offset.Value.GetProperty("max").GetInt32());
     }
 

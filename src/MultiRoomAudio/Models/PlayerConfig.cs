@@ -41,9 +41,10 @@ public class PlayerCreateRequest
     public int Volume { get; set; } = 75;
 
     /// <summary>
-    /// Audio delay offset in milliseconds. Can be negative or positive.
+    /// Output delay in milliseconds (spec range 0-5000): how much delay the amp or powered
+    /// speakers add after the audio port, which playback is scheduled earlier to absorb.
     /// </summary>
-    [Range(-5000, 5000, ErrorMessage = "DelayMs must be between -5000 and 5000 milliseconds.")]
+    [Range(0, 5000, ErrorMessage = "DelayMs must be between 0 and 5000 milliseconds.")]
     public int DelayMs { get; set; }
 
     /// <summary>
@@ -69,9 +70,11 @@ public class PlayerCreateRequest
     public bool Persist { get; set; } = true;
 
     /// <summary>
-    /// Specific audio format to advertise. If null or empty, defaults to "flac-48000" for maximum MA compatibility.
-    /// Format string: "codec-samplerate-bitdepth" (e.g., "flac-192000", "pcm-96000-24").
-    /// UI selection only available when ENABLE_ADVANCED_FORMATS is enabled.
+    /// Format to advertise first in <c>supported_formats</c>. Null means the device default
+    /// (FLAC 48kHz at the device's best depth, capped at 24-bit).
+    /// Format string: <c>"codec-samplerate"</c> or <c>"codec-samplerate-bitdepth"</c>
+    /// (e.g. <c>"flac-48000"</c>, <c>"pcm-96000-24"</c>), or <c>"auto"</c> for the device's native best.
+    /// See <see cref="Audio.AudioFormatCatalog"/>.
     /// </summary>
     [StringLength(50, ErrorMessage = "AdvertisedFormat cannot exceed 50 characters.")]
     public string? AdvertisedFormat { get; set; }
@@ -108,9 +111,9 @@ public record VolumeRequest(
 /// <summary>
 /// Request to update offset.
 /// </summary>
-/// <param name="DelayMs">Audio delay offset in milliseconds (-5000 to 5000).</param>
+/// <param name="DelayMs">Output delay in milliseconds (0 to 5000), per the Sendspin spec.</param>
 public record OffsetRequest(
-    [property: Range(-5000, 5000, ErrorMessage = "DelayMs must be between -5000 and 5000 milliseconds.")]
+    [property: Range(0, 5000, ErrorMessage = "DelayMs must be between 0 and 5000 milliseconds.")]
     int DelayMs);
 
 /// <summary>
@@ -160,9 +163,11 @@ public class PlayerUpdateRequest
     public int? BufferSizeMs { get; set; }
 
     /// <summary>
-    /// Specific audio format to advertise. If null or empty, defaults to "flac-48000" for maximum MA compatibility.
-    /// Format string: "codec-samplerate-bitdepth" (e.g., "flac-192000", "pcm-96000-24").
-    /// UI selection only available when ENABLE_ADVANCED_FORMATS is enabled.
+    /// Format to advertise first in <c>supported_formats</c>. Null means the device default
+    /// (FLAC 48kHz at the device's best depth, capped at 24-bit).
+    /// Format string: <c>"codec-samplerate"</c> or <c>"codec-samplerate-bitdepth"</c>
+    /// (e.g. <c>"flac-48000"</c>, <c>"pcm-96000-24"</c>), or <c>"auto"</c> for the device's native best.
+    /// See <see cref="Audio.AudioFormatCatalog"/>.
     /// </summary>
     [StringLength(50, ErrorMessage = "AdvertisedFormat cannot exceed 50 characters.")]
     public string? AdvertisedFormat { get; set; }

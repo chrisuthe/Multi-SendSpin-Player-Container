@@ -298,6 +298,28 @@ public class DeviceMatchingService
     }
 
     /// <summary>
+    /// Resolves the capabilities used to build a device's advertised audio formats.
+    /// </summary>
+    /// <param name="deviceId">Sink name, or null/empty for the default device.</param>
+    /// <returns>ALSA-probed capabilities where available, the backend probe otherwise, or null.</returns>
+    /// <remarks>
+    /// The backend probe is one fixed hi-res table for every sink under PulseAudio, so it is
+    /// only ever a fallback. A null device means the default sink rather than "no hardware",
+    /// so its id is resolved first — otherwise those players advertise rates the default DAC
+    /// may not support.
+    /// </remarks>
+    public DeviceCapabilities? GetFormatCapabilities(string? deviceId)
+    {
+        var resolvedId = string.IsNullOrWhiteSpace(deviceId)
+            ? _backend.GetDefaultDevice()?.Id
+            : deviceId;
+
+        var enriched = string.IsNullOrWhiteSpace(resolvedId) ? null : GetEnrichedDevice(resolvedId);
+
+        return AudioFormatCatalog.CapabilitiesFor(enriched, _backend.GetDeviceCapabilities(resolvedId));
+    }
+
+    /// <summary>
     /// Get a single device by ID, enriched with alias and hidden status.
     /// Returns null if the device is not found.
     /// </summary>

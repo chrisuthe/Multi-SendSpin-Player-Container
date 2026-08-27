@@ -21,7 +21,6 @@ services:
       #
       # - MOCK_HARDWARE=true        # Simulate audio devices and relay boards without hardware
       # - LOG_LEVEL=debug           # Verbose logging
-      # - ENABLE_ADVANCED_FORMATS=true  # Show format selection UI
       #
       # PulseAudio sample rate/format (applied at container startup):
       # - PA_SAMPLE_RATE=192000     # Default: 48000

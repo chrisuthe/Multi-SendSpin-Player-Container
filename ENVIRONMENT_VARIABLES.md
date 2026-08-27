@@ -80,34 +80,19 @@ AUDIO_BACKEND=pulse
 
 ### ENABLE_ADVANCED_FORMATS
 
-Enable per-player audio format selection UI (dev-only).
+Deprecated. Has no effect.
 
 - **Type:** Boolean
 - **Default:** `false`
 - **Valid Values:** `true`, `false`, `1`, `0`, `yes`, `no`
-- **Description:** Controls whether the advanced format selection UI is displayed. **Important:** All players default to advertising "flac-48000" for maximum Music Assistant compatibility regardless of this setting.
+- **Description:** This flag used to gate the per-player Advertised Format dropdown and
+  `GET /api/players/formats`. Both are now always available, and the offered formats are
+  derived from the selected device's real capabilities. Setting it changes nothing; it is
+  kept only so existing compose files and dev scripts do not break.
 
-**Behavior:**
-
-| Setting           | Default Format | UI Behavior                 | Use Case                                                                      |
-|-------------------|----------------|-----------------------------|-------------------------------------------------------------------------------|
-| `false` (default) | flac-48000     | No format dropdown shown    | Production - maximum MA compatibility                                         |
-| `true`            | flac-48000     | Format dropdown shown in UI | Development/testing - allows selecting specific formats or "All Formats"      |
-
-When enabled, the UI provides options to:
-
-- Keep the default "flac-48000" (recommended)
-- Select specific formats (e.g., "PCM 192kHz 32-bit", "FLAC 96kHz")
-- Choose "All Formats" to advertise all supported formats
-
-**Examples:**
-```bash
-# Production (default) - flac-48000, no UI dropdown
-ENABLE_ADVANCED_FORMATS=false
-
-# Development - flac-48000 default, but UI allows format selection
-ENABLE_ADVANCED_FORMATS=true
-```
+Per-player format selection now lives in the player's settings dialog. See the
+"Audio Format Selection" section of `CLAUDE.md` for how the advertised list is built and
+what the default anchor is.
 
 ### CONFIG_PATH
 
@@ -206,6 +191,26 @@ USE_AUDIO_CLOCK=false
 
 # Opt in to the DAC clock (only for genuinely divergent DAC hardware)
 USE_AUDIO_CLOCK=true
+```
+
+### RESET_SINKS
+
+Suspend and resume hardware sinks so cards that opened on the broken ALSA mmap+timer path start moving audio again.
+
+- **Type:** Boolean
+- **Default:** `true`
+- **Valid Values:** `false`, `0`, `no` (case-insensitive) to disable; anything else, including unset, enables
+- **Description:** Some sound cards - notably the Creative X-Fi Titanium - open in a transfer mode where audio silently fails to reach the DAC: the sink accepts samples and reports `RUNNING` while nothing plays. `pactl suspend-sink <sink> 1` followed by `pactl suspend-sink <sink> 0` forces PulseAudio to re-open the device and re-negotiate, which restores sound. When enabled (default), every open hardware sink is cycled once in the `sinkreset` startup phase, which runs after custom sinks are attached and before players start. Only sinks whose driver is `module-alsa-card.c` are touched - remap and combine sinks are left alone - and sinks already `SUSPENDED` are skipped. The root cause is a kernel regression (391e69143d0a, fixed upstream by e9418da50d9e), so this can be turned off once the fix reaches your kernel.
+
+**Startup is the only trigger.** Sinks stay open once PulseAudio has opened them (HAOS loads no `module-suspend-on-idle`), so one cycle per open is enough for the case this addresses. If something re-opens a device on the bad path afterwards - a supervisor PulseAudio restart, or a sound card profile change - restart the add-on to cycle it again.
+
+**Examples:**
+```bash
+# Default - cycle hardware sinks (recommended)
+RESET_SINKS=true
+
+# Back the workaround out
+RESET_SINKS=false
 ```
 
 ## HAOS-Specific Variables

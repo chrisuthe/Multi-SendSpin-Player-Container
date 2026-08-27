@@ -4,7 +4,6 @@
 let players = {};
 let devices = [];
 let formats = [];
-let advancedFormatsEnabled = false;
 let connection = null;
 let currentBuildVersion = null; // Stored build version for comparison
 let isUserInteracting = false; // Track if user is dragging a slider
@@ -585,10 +584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Load data that doesn't depend on startup completion
-    await Promise.all([
-        checkAdvancedFormats(),
-        refreshBuildInfo()
-    ]);
+    await refreshBuildInfo();
 
     // Only load player/device data if startup is already complete
     if (startupComplete) {
@@ -930,44 +926,61 @@ async function refreshStatus(force = false, manual = false) {
     }
 }
 
-async function checkAdvancedFormats() {
-    try {
-        const response = await fetch('./api/players/formats');
-        advancedFormatsEnabled = response.ok;
+// Map a persisted format preference onto one of this device's option ids, mirroring how the
+// server resolves it. Legacy values ("all", and two-part "codec-rate" with no bit depth) are
+// still valid on the wire but never appear verbatim in the options list.
+function resolveFormatId(saved, options, defaultFormatId) {
+    if (!saved || saved === 'all') return defaultFormatId;
+    if (options.some(o => o.id === saved)) return saved;
 
-        if (advancedFormatsEnabled) {
-            document.getElementById('advertisedFormatGroup').style.display = 'block';
-        }
-    } catch (error) {
-        advancedFormatsEnabled = false;
-    }
+    // "flac-48000" -> the best depth this device offers at that codec/rate (options are best-first)
+    const withDepth = options.find(o => o.id.startsWith(`${saved}-`));
+    return withDepth ? withDepth.id : saved;
 }
 
-async function refreshFormats() {
-    if (!advancedFormatsEnabled) return;
+// Populate the advertised-format dropdown from what the selected device can actually do.
+// `desiredValue` keeps a player's saved format selected even when it predates this list.
+// Returns the option id that ended up selected, or null if the fetch failed.
+async function refreshFormats(deviceId = null, desiredValue = null) {
+    const formatSelect = document.getElementById('advertisedFormat');
+    if (!formatSelect) return null;
+
+    // null means "keep what's selected"; '' means "reset to the device's default"
+    const keepValue = desiredValue !== null ? desiredValue : formatSelect.value;
 
     try {
-        const response = await fetch('./api/players/formats');
+        const query = deviceId ? `?device=${encodeURIComponent(deviceId)}` : '';
+        const response = await fetch(`./api/players/formats${query}`);
         if (!response.ok) throw new Error('Failed to fetch formats');
 
         const data = await response.json();
         formats = data.formats || [];
+        const defaultFormatId = data.defaultFormatId || null;
 
-        const formatSelect = document.getElementById('advertisedFormat');
-        if (formatSelect) {
-            const currentValue = formatSelect.value;
-            formatSelect.innerHTML = '';
-            formats.forEach(format => {
-                const option = document.createElement('option');
-                option.value = format.id;
-                option.textContent = format.label;
-                option.title = format.description;
-                formatSelect.appendChild(option);
-            });
-            if (currentValue) formatSelect.value = currentValue;
+        formatSelect.replaceChildren();
+        formats.forEach(format => {
+            const option = document.createElement('option');
+            option.value = format.id;
+            option.textContent = format.label;
+            option.title = format.description;
+            formatSelect.appendChild(option);
+        });
+
+        const resolved = resolveFormatId(keepValue, formats, defaultFormatId);
+
+        // A saved format this device genuinely cannot do must stay visible, not silently change
+        if (resolved && !formats.some(f => f.id === resolved)) {
+            const option = document.createElement('option');
+            option.value = resolved;
+            option.textContent = `${resolved} (not supported by this device)`;
+            formatSelect.insertBefore(option, formatSelect.firstChild);
         }
+
+        formatSelect.value = resolved || defaultFormatId || '';
+        return formatSelect.value;
     } catch (error) {
         console.error('Error refreshing formats:', error);
+        return null;
     }
 }
 
@@ -1025,6 +1038,13 @@ async function refreshDevices(currentDeviceId = null) {
             return true;
         });
 
+        // Identically-described cards are only tellable apart by their card number
+        const hardwareLabel = makeCardDisambiguator(
+            visibleDevices.filter(d => !d.sinkType),
+            d => d.name,
+            d => d.cardIndex
+        );
+
         // Update device selects
         const selects = document.querySelectorAll('#audioDevice, #editAudioDevice');
         selects.forEach(select => {
@@ -1039,9 +1059,9 @@ async function refreshDevices(currentDeviceId = null) {
                     // Custom sink: show "Sink: name (description)" if description exists
                     displayName = device.alias ? `Sink: ${device.name} (${device.alias})` : `Sink: ${device.name}`;
                 } else {
-                    // Hardware device: use device.name directly (already correct from PulseAudio)
-                    // (cardDescriptions map uses PulseAudio index but device.cardIndex is ALSA card number)
-                    const cardName = device.name;
+                    // Hardware device: device.name is already correct from PulseAudio, but
+                    // duplicate cards share it, so add the card number when it repeats.
+                    const cardName = hardwareLabel(device);
                     displayName = device.alias ? `Device: ${cardName} (${device.alias})` : `Device: ${cardName}`;
                 }
                 if (device.isDefault) displayName += ' (default)';
@@ -1078,9 +1098,7 @@ async function openAddPlayerModal() {
 
     // Refresh devices and formats
     await refreshDevices();
-    if (advancedFormatsEnabled) {
-        await refreshFormats();
-    }
+    await refreshFormats(document.getElementById('audioDevice').value, '');
 
     const modal = new bootstrap.Modal(document.getElementById('playerModal'));
     modal.show();
@@ -1127,21 +1145,13 @@ async function openEditPlayerModal(playerName) {
             }
         }
 
-        // Set advertised format dropdown (if advanced formats enabled)
-        if (advancedFormatsEnabled) {
-            // Refresh formats first to populate options
-            await refreshFormats();
-
-            // Store original format for change detection (default to flac-48000 for compatibility)
-            const originalFormat = player.advertisedFormat || 'flac-48000';
-            document.getElementById('playerForm').dataset.originalFormat = originalFormat;
-
-            // Set dropdown value AFTER options are populated
-            const formatSelect = document.getElementById('advertisedFormat');
-            if (formatSelect) {
-                formatSelect.value = originalFormat;
-            }
-        }
+        // Populate the advertised format dropdown from this player's device.
+        // An unset format means "device default" - show it as such rather than guessing an id.
+        // Track the id that was actually selected, so re-saving an untouched legacy value
+        // ("flac-48000", "all") does not read as a change and needlessly restart the player.
+        const savedFormat = player.advertisedFormat || '';
+        const selectedFormat = await refreshFormats(player.device, savedFormat);
+        document.getElementById('playerForm').dataset.originalFormat = selectedFormat ?? savedFormat;
 
         // Set modal to Edit mode
         document.getElementById('playerModalIcon').className = 'fas fa-edit me-2';
@@ -1198,17 +1208,12 @@ async function savePlayer() {
                 // so it doesn't affect current playback
             };
 
-            // Include advertised format if advanced formats enabled
-            if (advancedFormatsEnabled) {
-                const form = document.getElementById('playerForm');
-                const originalFormat = form.dataset.originalFormat || 'flac-48000';
-                const currentFormat = document.getElementById('advertisedFormat').value || 'flac-48000';
-
-                // Only include if changed from original
-                if (currentFormat !== originalFormat) {
-                    // Send the specific format
-                    updatePayload.advertisedFormat = currentFormat;
-                }
+            // Only send the format when the user actually changed it - it forces a restart
+            const form = document.getElementById('playerForm');
+            const originalFormat = form.dataset.originalFormat || '';
+            const currentFormat = document.getElementById('advertisedFormat').value || '';
+            if (currentFormat !== originalFormat) {
+                updatePayload.advertisedFormat = currentFormat;
             }
 
             const response = await fetch(`./api/players/${encodeURIComponent(editingName)}`, {
@@ -1285,12 +1290,9 @@ async function savePlayer() {
                 persist: true
             };
 
-            // Include advertised format if advanced formats enabled
-            if (advancedFormatsEnabled) {
-                const advertisedFormat = document.getElementById('advertisedFormat').value;
-                if (advertisedFormat) {
-                    payload.advertisedFormat = advertisedFormat;
-                }
+            const advertisedFormat = document.getElementById('advertisedFormat').value;
+            if (advertisedFormat) {
+                payload.advertisedFormat = advertisedFormat;
             }
 
             const response = await fetch('./api/players', {
@@ -1502,7 +1504,7 @@ async function setPlayerMute(playerName, muted) {
 
 async function setDelay(name, delayMs) {
     // Clamp value to valid range
-    delayMs = Math.max(-5000, Math.min(5000, parseInt(delayMs) || 0));
+    delayMs = Math.max(0, Math.min(5000, parseInt(delayMs) || 0));
 
     // Update input field to show clamped value
     const input = document.getElementById('delayInput');
@@ -1542,7 +1544,7 @@ function adjustDelay(name, delta) {
     if (!input) return;
 
     const currentValue = parseInt(input.value) || 0;
-    const newValue = Math.max(-5000, Math.min(5000, currentValue + delta));
+    const newValue = Math.max(0, Math.min(5000, currentValue + delta));
     input.value = newValue;
     setDelay(name, newValue);
 }
@@ -1551,7 +1553,7 @@ async function showPlayerStats(name) {
     const player = players[name];
     if (!player) return;
 
-    // Delay offset applies in place (the server re-anchors timing on change), so no
+    // Output delay applies in place (the server re-anchors timing on change), so no
     // player restart is needed when the stats modal closes.
 
     const modal = document.getElementById('playerStatsModal');
@@ -1583,11 +1585,13 @@ async function showPlayerStats(name) {
     const serverAddress = player.connectedAddress || '—';
     const discoveryMethod = player.serverUrl ? 'Manual' : 'Auto-discovered';
 
-    // Advertised format display
-    const advertised = player.advertisedFormat || 'flac-48000';
-    const isAllFormats = advertised === 'all';
-    const advertisedDisplay = isAllFormats ? 'All Formats' : advertised;
-    const advertisedSubtitle = isAllFormats ? '<br><small class="text-muted">flac • pcm • opus, up to 192kHz</small>' : '';
+    // Advertised format display. Unset (and the legacy "all") both mean the device-derived default.
+    const advertised = player.advertisedFormat;
+    const usesDeviceDefault = !advertised || advertised === 'all';
+    const advertisedDisplay = usesDeviceDefault ? 'Device default' : advertised;
+    const advertisedSubtitle = usesDeviceDefault
+        ? '<br><small class="text-muted">FLAC at the device\'s best depth (max 24-bit), 48kHz or its nearest supported rate</small>'
+        : '';
 
     // Output format - use device already looked up above
     const outputFormat = device
@@ -1638,10 +1642,11 @@ async function showPlayerStats(name) {
             </div>
         </div>
         ` : ''}
-        <h6 class="text-muted text-uppercase small mt-3">Delay Offset</h6>
+        <h6 class="text-muted text-uppercase small mt-3">Output Delay</h6>
         <p class="text-muted small mb-2">
             <i class="fas fa-info-circle me-1"></i>
-            Adjust timing to sync with others. Changes apply immediately.
+            How much delay your amp or powered speakers add after this zone's output.
+            Playback is scheduled that much earlier so it lands in sync. Changes apply immediately.
         </p>
         <div class="delay-control d-flex align-items-center gap-2 flex-wrap">
             <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', -10)" title="Decrease by 10ms">
@@ -1649,7 +1654,7 @@ async function showPlayerStats(name) {
             </button>
             <div class="input-group input-group-sm delay-input-group">
                 <input type="number" class="form-control text-center" id="delayInput"
-                    value="${player.delayMs}" min="-5000" max="5000" step="10"
+                    value="${player.delayMs}" min="0" max="5000" step="10"
                     onchange="setDelay('${escapeJsString(name)}', this.value)"
                     onkeydown="if(event.key==='Enter'){setDelay('${escapeJsString(name)}', this.value); event.preventDefault();}">
                 <span class="input-group-text">ms</span>
@@ -1657,7 +1662,7 @@ async function showPlayerStats(name) {
             <button class="btn btn-outline-secondary btn-sm" onclick="adjustDelay('${escapeJsString(name)}', 10)" title="Increase by 10ms">
                 <i class="fas fa-plus"></i>
             </button>
-            <small class="text-muted">Range: ±5000ms</small>
+            <small class="text-muted">Range: 0-5000ms</small>
             <span id="delaySavedIndicator" class="text-success small" style="opacity: 0; transition: opacity 0.3s;"><i class="fas fa-check"></i> Saved</span>
         </div>
     `;
@@ -2750,6 +2755,54 @@ function getSinkStateBadgeClass(state) {
 let editingCombineSink = null;
 let editingRemapSink = null;
 
+// Autofill stops for a field once the user types in it, until the modal is reopened
+let remapNameEdited = false;
+let remapDescEdited = false;
+
+// Labels the master-device dropdown's entries; rebuilt whenever the dropdown is populated
+// so generated names carry the same "(card N)" suffix the user sees.
+let remapMasterLabel = (device) => device.alias || device.name;
+
+// Called from the name/description inputs' oninput handlers
+function markRemapFieldEdited(field) {
+    if (field === 'name') remapNameEdited = true;
+    else if (field === 'desc') remapDescEdited = true;
+}
+
+// Currently selected master channels, in output order (one entry in mono mode)
+function getSelectedRemapChannels() {
+    if (document.getElementById('outputModeMono')?.checked) {
+        return [document.getElementById('monoChannel')?.value];
+    }
+    return [
+        document.getElementById('leftChannel')?.value,
+        document.getElementById('rightChannel')?.value
+    ];
+}
+
+// Regenerate the default name/description from the current master device and channels,
+// leaving alone whichever fields the user has already typed in.
+function autofillRemapSinkNaming() {
+    if (editingRemapSink) return;
+    if (remapNameEdited && remapDescEdited) return;
+
+    const masterSelect = document.getElementById('remapMasterDevice');
+    const master = devices.find(d => d.id === masterSelect?.value);
+    if (!master) return;
+
+    // Sink names share one PulseAudio namespace with hardware sinks
+    const taken = [...Object.keys(customSinks), ...devices.map(d => d.id)];
+    const defaults = buildRemapSinkDefaults(
+        remapMasterLabel(master),
+        getSelectedRemapChannels(),
+        taken
+    );
+    if (!defaults.name) return;
+
+    if (!remapNameEdited) document.getElementById('remapSinkName').value = defaults.name;
+    if (!remapDescEdited) document.getElementById('remapSinkDesc').value = defaults.description;
+}
+
 // Cached modal instances to avoid creating duplicates
 let combineSinkModalInstance = null;
 let remapSinkModalInstance = null;
@@ -2829,6 +2882,10 @@ function openRemapSinkModal(editData = null) {
     // Track if editing
     editingRemapSink = editData;
 
+    // A fresh create starts with both fields eligible for autofill again
+    remapNameEdited = false;
+    remapDescEdited = false;
+
     // Update modal title based on mode
     const modalTitle = document.querySelector('#remapSinkModal .modal-title');
     if (modalTitle) {
@@ -2858,10 +2915,15 @@ function openRemapSinkModal(editData = null) {
         if (d.hidden && d.id !== currentMaster) return false;
         return true;
     });
+    remapMasterLabel = makeCardDisambiguator(
+        eligibleDevices,
+        d => d.alias || d.name,
+        d => d.cardIndex
+    );
     masterSelect.innerHTML = '<option value="">Select a device...</option>' +
         eligibleDevices.map(d => {
             const hiddenNote = d.hidden ? ' (hidden)' : '';
-            return `<option value="${escapeHtml(d.id)}">${escapeHtml(d.alias || d.name)} (${d.maxChannels}ch)${hiddenNote}</option>`;
+            return `<option value="${escapeHtml(d.id)}">${escapeHtml(remapMasterLabel(d))} (${d.maxChannels}ch)${hiddenNote}</option>`;
         }).join('');
 
     // Set master device if editing
@@ -2962,7 +3024,8 @@ function updateChannelPicker() {
             <div class="channel-pair mb-2 d-flex align-items-center">
                 <span class="output-label">Output</span>
                 <i class="fas fa-arrow-left mx-2 text-muted"></i>
-                <select class="form-select form-select-sm channel-select" id="monoChannel">
+                <select class="form-select form-select-sm channel-select" id="monoChannel"
+                        onchange="autofillRemapSinkNaming()">
                     ${optionsHtml}
                 </select>
                 <button class="btn btn-outline-primary btn-sm ms-2"
@@ -2980,7 +3043,8 @@ function updateChannelPicker() {
             <div class="channel-pair mb-2 d-flex align-items-center">
                 <span class="output-label">Left Output</span>
                 <i class="fas fa-arrow-left mx-2 text-muted"></i>
-                <select class="form-select form-select-sm channel-select" id="leftChannel">
+                <select class="form-select form-select-sm channel-select" id="leftChannel"
+                        onchange="autofillRemapSinkNaming()">
                     ${optionsHtml}
                 </select>
                 <button class="btn btn-outline-primary btn-sm ms-2"
@@ -2993,7 +3057,8 @@ function updateChannelPicker() {
             <div class="channel-pair mb-2 d-flex align-items-center">
                 <span class="output-label">Right Output</span>
                 <i class="fas fa-arrow-left mx-2 text-muted"></i>
-                <select class="form-select form-select-sm channel-select" id="rightChannel">
+                <select class="form-select form-select-sm channel-select" id="rightChannel"
+                        onchange="autofillRemapSinkNaming()">
                     ${optionsHtml}
                 </select>
                 <button class="btn btn-outline-primary btn-sm ms-2"
@@ -3007,6 +3072,8 @@ function updateChannelPicker() {
         document.getElementById('leftChannel').value = 'front-left';
         document.getElementById('rightChannel').value = 'front-right';
     }
+
+    autofillRemapSinkNaming();
 }
 
 // Create or update combine sink
@@ -3606,6 +3673,25 @@ function renderSoundCards(savedScrollTop = 0) {
     // Only auto-expand if exactly 1 device AND no saved state
     const shouldAutoExpand = soundCards.length === 1 && !expandedDeviceState;
 
+    // Match a card to its device by name pattern:
+    // For ALSA cards: alsa_card.pci-0000_00_1f.3 -> alsa_output.pci-0000_00_1f.3.analog-stereo
+    // For Bluetooth: bluez_card.00_1A_7D_DA_71_13 -> bluez_sink.00_1A_7D_DA_71_13.a2dp_sink
+    const findCardDevice = (card) => {
+        const cardBase = card.name.replace('alsa_card.', '').replace('bluez_card.', '');
+        return soundCardDevices.find(d => d.id && d.id.includes(cardBase));
+    };
+
+    // Two identical cards share a description, so fall back to the card number. device.cardIndex
+    // is the ALSA card number and card.index the PulseAudio one; numbering them from both at once
+    // can hand two cards the same "(card N)", so use ALSA only when every card has one. An
+    // off-profile card matches a placeholder device that carries no cardIndex.
+    const useAlsaCardNumbers = soundCards.every(c => findCardDevice(c)?.cardIndex != null);
+    const cardLabel = makeCardDisambiguator(
+        soundCards,
+        c => c.description || c.name,
+        c => useAlsaCardNumbers ? findCardDevice(c).cardIndex : c.index
+    );
+
     const accordionHtml = soundCards.map((card, index) => {
         const cardKey = card.index.toString();
         const isExpanded = expandedDeviceState === cardKey || (shouldAutoExpand && index === 0);
@@ -3637,14 +3723,10 @@ function renderSoundCards(savedScrollTop = 0) {
         const busIcon = getBusTypeIcon(busType);
         const busLabel = getBusTypeLabel(busType);
 
-        // Find the device associated with this card by matching name patterns
-        // For ALSA cards: alsa_card.pci-0000_00_1f.3 -> alsa_output.pci-0000_00_1f.3.analog-stereo
-        // For Bluetooth: bluez_card.00_1A_7D_DA_71_13 -> bluez_sink.00_1A_7D_DA_71_13.a2dp_sink
-        const cardBase = card.name.replace('alsa_card.', '').replace('bluez_card.', '');
-        const device = soundCardDevices.find(d => d.id && d.id.includes(cardBase));
+        const device = findCardDevice(card);
         const deviceAlias = device?.alias || '';
         const deviceId = device?.id || '';
-        const deviceName = card.description || card.name;
+        const deviceName = cardLabel(card);
         const maxVolumeDisplay = card.maxVolume !== null && card.maxVolume !== undefined ? card.maxVolume : 100;
         const isHidden = device?.hidden || false;
 

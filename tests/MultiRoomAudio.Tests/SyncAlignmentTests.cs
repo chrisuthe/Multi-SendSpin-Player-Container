@@ -17,11 +17,12 @@ namespace MultiRoomAudio.Tests;
 /// simulated session and read at a simulated playback clock.
 /// </para>
 /// <para>
-/// Note: the buffer's internal <c>Read</c> path self-anchors its startup baseline, so an output
-/// prefill does not leak into its sync error — that failure mode lives on the external
-/// <c>ReadRaw</c> + sample-source path (our <c>BufferedAudioSampleSource</c>) and is why
-/// <c>USE_AUDIO_CLOCK</c> defaults off. These tests therefore cover what the buffer level can prove:
-/// our sync options hold a drift-free schedule without hunting, and correct a genuine drift.
+/// These tests exercise the same <c>Read</c> path the app uses. The buffer owns the whole correction
+/// loop: it measures the error and closes it itself with frame drop/insert inside the spec's
+/// +/-0.5% speed cap, escalating to a one-shot snap above ~5ms. <c>TargetPlaybackRate</c> therefore
+/// stays 1.0 throughout - correction is expressed as frame stepping, not as a rate for a resampler
+/// we do not have - so these tests assert on the outcome (final sync error and the correction
+/// actually applied) rather than on a recommended rate.
 /// </para>
 /// </remarks>
 public class SyncAlignmentTests
@@ -37,7 +38,15 @@ public class SyncAlignmentTests
 
     public SyncAlignmentTests(ITestOutputHelper output) => _output = output;
 
-    private readonly record struct SessionResult(double FinalSyncErrorMs, long NetCorrectionSamples, double TargetPlaybackRate);
+    private readonly record struct SessionResult(
+        double FinalSyncErrorMs,
+        long NetCorrectionSamples,
+        long TotalSamplesOutput,
+        double TargetPlaybackRate)
+    {
+        /// <summary>Correction applied, as a fraction of all samples output.</summary>
+        public double CorrectionFraction => Math.Abs(NetCorrectionSamples) / (double)TotalSamplesOutput;
+    }
 
     /// <param name="clockDriftFactor">
     /// Playback-clock rate relative to the server schedule. 1.0 = perfect; 1.01 = clock runs 1% fast.
@@ -79,49 +88,63 @@ public class SyncAlignmentTests
         var stats = buffer.GetStats();
         var net = stats.SamplesInsertedForSync - stats.SamplesDroppedForSync;
         var finalErrMs = buffer.SyncErrorMicroseconds / 1000.0;
+        var totalOutput = (long)totalReads * ChunkSamples;
+
+        var result = new SessionResult(finalErrMs, net, totalOutput, buffer.TargetPlaybackRate);
 
         _output.WriteLine(
             $"drift={clockDriftFactor:F3} -> inserted={stats.SamplesInsertedForSync} " +
-            $"dropped={stats.SamplesDroppedForSync} net={net} rate={buffer.TargetPlaybackRate:F4} " +
-            $"finalErr={finalErrMs:F1}ms");
+            $"dropped={stats.SamplesDroppedForSync} net={net} " +
+            $"correction={result.CorrectionFraction:P3} of {totalOutput} samples " +
+            $"rate={buffer.TargetPlaybackRate:F4} finalErr={finalErrMs:F1}ms");
 
-        return new SessionResult(finalErrMs, net, buffer.TargetPlaybackRate);
+        return result;
     }
 
     // Margin covering the harness's one-callback (10ms) granularity floor.
     private const double InSyncToleranceMs = 15.0;
 
     /// <summary>
-    /// Control: a perfectly drift-free session holds the server schedule (sync error ≈ 0) and the
-    /// corrector does not hunt — zero net drop/insert correction. Guards against a sync-options
-    /// regression that would make a steady stream over-correct (audible artifacts, drift off sync).
+    /// Control: a perfectly drift-free session holds the server schedule and the corrector does not
+    /// hunt - any correction it applies stays a negligible fraction of the stream. Guards against a
+    /// sync-options regression that would make a steady stream over-correct (audible artifacts).
     /// </summary>
     [Fact]
-    public void DriftFree_HoldsSchedule_WithNoSpuriousCorrection()
+    public void DriftFree_HoldsSchedule_WithoutHunting()
     {
         var result = RunSession(clockDriftFactor: 1.0, seconds: 20);
 
         Assert.True(
             Math.Abs(result.FinalSyncErrorMs) < InSyncToleranceMs,
             $"drift-free playback should hold the schedule, but settled {result.FinalSyncErrorMs:F1}ms off");
-        Assert.Equal(0, result.NetCorrectionSamples);
-        Assert.Equal(1.0, result.TargetPlaybackRate); // no correction recommended
+
+        // A drift-free stream needs at most a one-off startup alignment. Sustained correction on a
+        // steady stream is hunting; the spec's own cap is 0.5% of samples, so anything at or above
+        // that is the corrector working continuously rather than settling.
+        Assert.True(
+            result.CorrectionFraction < 0.005,
+            $"drift-free playback should not hunt, but corrected {result.CorrectionFraction:P3} of the stream");
     }
 
     /// <summary>
-    /// A genuine playback-clock drift is detected and the buffer recommends a rate correction
-    /// (<c>TargetPlaybackRate</c> moves off 1.0) while tracking a non-zero sync error. Guards that our
-    /// sync options actually track real drift. (Closing the correction loop — resampling to the
-    /// recommended rate — is the sample-source's job, exercised by the app, not this buffer harness.)
+    /// A genuine playback-clock drift is corrected, not merely detected: the buffer drops samples to
+    /// track the fast clock and brings the session back onto the server schedule. Guards that our
+    /// sync options actually close the loop on real drift.
     /// </summary>
     [Fact]
-    public void ClockDrift_IsDetected_AndRateCorrectionRecommended()
+    public void ClockDrift_IsCorrected_BackOntoSchedule()
     {
         var result = RunSession(clockDriftFactor: 1.01, seconds: 20); // 1% fast playback clock
 
-        Assert.NotEqual(1.0, result.TargetPlaybackRate);
         Assert.True(
-            Math.Abs(result.FinalSyncErrorMs) > InSyncToleranceMs,
-            $"a 1% clock drift should register a clear sync error, got {result.FinalSyncErrorMs:F1}ms");
+            Math.Abs(result.FinalSyncErrorMs) < InSyncToleranceMs,
+            $"a 1% clock drift should be corrected back onto schedule, got {result.FinalSyncErrorMs:F1}ms");
+
+        // A 1% fast playback clock consumes audio faster than the schedule, so the buffer must DROP
+        // to keep up - net correction is negative and tracks the drift magnitude.
+        Assert.True(
+            result.NetCorrectionSamples < 0,
+            $"a fast playback clock should drop samples, but net correction was {result.NetCorrectionSamples}");
+        Assert.InRange(result.CorrectionFraction, 0.005, 0.02); // ~1% drift, generous either side
     }
 }

@@ -426,7 +426,7 @@ public sealed class ModbusRelayBoard : IRelayBoard
     /// <summary>
     /// Build a Modbus ASCII command string.
     /// </summary>
-    private static string BuildModbusCommand(byte address, byte function, params byte[] data)
+    internal static string BuildModbusCommand(byte address, byte function, params byte[] data)
     {
         // Calculate LRC checksum
         int sum = address + function;

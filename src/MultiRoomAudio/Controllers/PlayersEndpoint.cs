@@ -1,3 +1,4 @@
+using MultiRoomAudio.Audio;
 using MultiRoomAudio.Models;
 using MultiRoomAudio.Services;
 using MultiRoomAudio.Utilities;
@@ -42,7 +43,7 @@ public static class PlayersEndpoint
     /// <item>PUT /api/players/{name}/startup-volume - Set startup volume</item>
     /// <item>PUT /api/players/{name}/mute - Set mute state</item>
     /// <item>PUT /api/players/{name}/auto-resume - Enable/disable auto-resume on device reconnect</item>
-    /// <item>PUT /api/players/{name}/offset - Set delay offset (-10000 to 10000ms)</item>
+    /// <item>PUT /api/players/{name}/offset - Set output delay (0 to 5000ms)</item>
     /// <item>PUT /api/players/{name}/device - Switch audio device</item>
     /// <item>PUT /api/players/{name}/rename - Rename player</item>
     /// <item>POST /api/players/{name}/pause - Pause playback</item>
@@ -56,40 +57,25 @@ public static class PlayersEndpoint
             .WithTags("Players")
             .WithOpenApi();
 
-        var environment = app.Services.GetRequiredService<EnvironmentService>();
-
-        // GET /api/players/formats - Get available audio format options (conditional)
-        // Only registered if ENABLE_ADVANCED_FORMATS is enabled
-        if (environment.EnableAdvancedFormats)
+        // GET /api/players/formats - Format options the selected device can actually do
+        group.MapGet("/formats", (
+            string? device,
+            DeviceMatchingService deviceMatching,
+            ILoggerFactory loggerFactory) =>
         {
-            group.MapGet("/formats", (ILoggerFactory loggerFactory) =>
-            {
-                var logger = loggerFactory.CreateLogger("PlayersEndpoint");
-                logger.LogDebug("API: GET /api/players/formats");
+            var logger = loggerFactory.CreateLogger("PlayersEndpoint");
+            logger.LogDebug("API: GET /api/players/formats?device={Device}", device ?? "(default)");
 
-                var formats = new List<AudioFormatOption>
-                {
-                    new("flac-48000", "FLAC 48kHz", "CD quality lossless 48kHz (default, works with all MA builds)"),
-                    new("all", "All Formats", "Advertise all supported formats"),
-                    new("flac-192000", "FLAC 192kHz", "Hi-res lossless 192kHz"),
-                    new("flac-96000", "FLAC 96kHz", "Hi-res lossless 96kHz"),
-                    new("flac-44100", "FLAC 44.1kHz", "CD quality lossless 44.1kHz"),
-                    new("pcm-192000-32", "PCM 192kHz 32-bit", "Hi-res uncompressed 192kHz 32-bit"),
-                    new("pcm-96000-32", "PCM 96kHz 32-bit", "Hi-res uncompressed 96kHz 32-bit"),
-                    new("pcm-48000-32", "PCM 48kHz 32-bit", "CD quality uncompressed 48kHz 32-bit"),
-                    new("pcm-192000-24", "PCM 192kHz 24-bit", "Hi-res uncompressed 192kHz 24-bit"),
-                    new("pcm-96000-24", "PCM 96kHz 24-bit", "Hi-res uncompressed 96kHz 24-bit"),
-                    new("pcm-48000-24", "PCM 48kHz 24-bit", "CD quality uncompressed 48kHz 24-bit"),
-                    new("pcm-48000-16", "PCM 48kHz 16-bit", "Standard uncompressed 48kHz 16-bit"),
-                    new("pcm-44100-16", "PCM 44.1kHz 16-bit", "CD quality uncompressed 44.1kHz 16-bit"),
-                    new("opus-48000", "Opus 48kHz", "Efficient compressed 48kHz (256kbps)")
-                };
+            // Same resolution the player itself uses, so the options offered here are the ones it
+            // will advertise. Omitting the device means the default sink, not "no device".
+            var capabilities = deviceMatching.GetFormatCapabilities(device);
 
-                return Results.Ok(new AudioFormatsResponse(formats));
-            })
-            .WithName("GetAudioFormats")
-            .WithDescription("Get list of available audio formats for player configuration (dev-only feature)");
-        }
+            return Results.Ok(new AudioFormatsResponse(
+                AudioFormatCatalog.BuildOptions(capabilities),
+                AudioFormatCatalog.GetDefaultFormatId(capabilities)));
+        })
+        .WithName("GetAudioFormats")
+        .WithDescription("Get the audio formats a device can be advertised as supporting");
 
         // GET /api/players - List all players
         group.MapGet("/", (PlayerManagerService manager, ILoggerFactory loggerFactory) =>
@@ -350,28 +336,26 @@ public static class PlayersEndpoint
         .WithName("SetAutoResume")
         .WithDescription("Enable or disable auto-resume when audio device is reconnected");
 
-        // PUT /api/players/{name}/offset - Set delay offset
+        // PUT /api/players/{name}/offset - Set output delay
         group.MapPut("/{name}/offset", (
             string name,
             OffsetRequest request,
             PlayerManagerService manager,
-            ConfigurationService config,
             ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: PUT /api/players/{PlayerName}/offset to {DelayMs}ms", name, request.DelayMs);
 
-            // Apply to running player (affects clock sync timing immediately)
-            if (!manager.SetDelayOffset(name, request.DelayMs))
+            // Applies to the running player and persists the applied value; see SetDelayOffset.
+            var applied = manager.SetDelayOffset(name, request.DelayMs);
+            if (applied is not { } delayMs)
                 return PlayerNotFoundResult(name, logger, "offset change");
 
-            // Also persist to config so it survives restarts
-            config.UpdatePlayerField(name, c => c.DelayMs = request.DelayMs);
-
-            return Results.Ok(new SuccessResponse(true, $"Offset set to {request.DelayMs}ms"));
+            return Results.Ok(new SuccessResponse(true, $"Output delay set to {delayMs}ms"));
         })
+        .AddEndpointFilter<ValidationFilter<OffsetRequest>>()
         .WithName("SetOffset")
-        .WithDescription("Set player delay offset in milliseconds");
+        .WithDescription("Set player output delay in milliseconds (0-5000, per the Sendspin spec)");
 
         // POST /api/players/{name}/pause - Pause playback
         group.MapPost("/{name}/pause", (
@@ -490,10 +474,13 @@ public static class PlayersEndpoint
                             currentName, savedConfig.Volume);
                     }
 
-                    // Persist device change
+                    // Persist device change. supported_formats is derived from the device, and
+                    // SwitchDeviceAsync only swaps the pipeline - the player has to restart to
+                    // re-announce, or MA keeps offering the previous device's formats.
                     if (request.Device != null && request.Device != savedConfig.Device)
                     {
                         savedConfig.Device = request.Device;
+                        needsRestart = true;
                         logger.LogInformation("API: Player {PlayerName} device persisted to '{Device}'",
                             currentName, savedConfig.Device == "" ? "(none)" : savedConfig.Device);
                     }
@@ -504,15 +491,14 @@ public static class PlayersEndpoint
                         needsRestart = true;
                     }
 
-                    // Handle advertised format change (only when advanced formats enabled)
-                    if (environment.EnableAdvancedFormats &&
-                        request.AdvertisedFormat != null &&
+                    // Handle advertised format change
+                    if (request.AdvertisedFormat != null &&
                         request.AdvertisedFormat != savedConfig.AdvertisedFormat)
                     {
                         savedConfig.AdvertisedFormat = request.AdvertisedFormat == "" ? null : request.AdvertisedFormat;
                         needsRestart = true;
                         logger.LogInformation("API: Player {PlayerName} advertised format changed to '{Format}'",
-                            currentName, savedConfig.AdvertisedFormat ?? "all");
+                            currentName, savedConfig.AdvertisedFormat ?? "(device default)");
                     }
 
                     // Handle buffer size change
