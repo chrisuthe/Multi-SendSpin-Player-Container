@@ -1634,9 +1634,12 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     /// </param>
     /// <returns>The delay actually applied, or null if the player was not found.</returns>
     /// <remarks>
-    /// Returns the applied value rather than a bool so callers persist exactly what took effect.
-    /// Persisting the caller's raw input instead would let an out-of-range value survive in config
-    /// and load back on restart, having never been the running value.
+    /// Persists the applied value itself rather than leaving that to callers. Making persistence
+    /// the caller's job is what let an offset set over MQTT apply to the running player and then
+    /// silently revert on the next restart: <see cref="MqttService"/> holds
+    /// <see cref="MqttConfigService"/> (broker settings), not <see cref="ConfigurationService"/>,
+    /// so it had no way to persist even in principle. Writing the clamped value here also keeps an
+    /// out-of-range request from surviving in config having never been the running value.
     /// </remarks>
     public int? SetDelayOffset(string name, int delayMs)
     {
@@ -1647,6 +1650,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
 
         context.ClockSync.StaticDelayMs = OutputDelay.ToStaticDelayMs(delayMs);
         context.Config.DelayMs = delayMs;
+
+        // Persist so the change survives a restart, whichever path asked for it.
+        _config.UpdatePlayerField(name, c => c.OutputDelayMs = delayMs);
 
         // Re-anchor timing so the new delay applies to the already-buffered audio in place
         // (SDK 9.0.5+). This replaces a full player restart: with a server that transmits far

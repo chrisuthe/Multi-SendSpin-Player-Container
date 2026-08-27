@@ -341,21 +341,15 @@ public static class PlayersEndpoint
             string name,
             OffsetRequest request,
             PlayerManagerService manager,
-            ConfigurationService config,
             ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("PlayersEndpoint");
             logger.LogDebug("API: PUT /api/players/{PlayerName}/offset to {DelayMs}ms", name, request.DelayMs);
 
-            // Apply to running player (affects clock sync timing immediately)
+            // Applies to the running player and persists the applied value; see SetDelayOffset.
             var applied = manager.SetDelayOffset(name, request.DelayMs);
             if (applied is not { } delayMs)
                 return PlayerNotFoundResult(name, logger, "offset change");
-
-            // Persist what actually took effect, not the raw request: persisting the request would
-            // let an out-of-range value survive in config and load back on restart having never
-            // been the running value.
-            config.UpdatePlayerField(name, c => c.OutputDelayMs = delayMs);
 
             return Results.Ok(new SuccessResponse(true, $"Output delay set to {delayMs}ms"));
         })
