@@ -125,7 +125,19 @@ public class PlayerConfiguration
     /// </summary>
     public bool AutoResume { get; set; } = false;
 
+    /// <summary>
+    /// Legacy delay under the pre-spec "positive = play later" convention. Read on load to derive
+    /// <see cref="OutputDelayMs"/> and not written again; see <see cref="Utilities.OutputDelay"/>.
+    /// </summary>
     public int DelayMs { get; set; } = 0;
+
+    /// <summary>
+    /// The player's <c>output_delay_ms</c> (spec range 0-5000), or null on config written before
+    /// the migration. Null is the migration marker, so writing this field is what makes a player's
+    /// delay stable across restarts.
+    /// </summary>
+    public int? OutputDelayMs { get; set; }
+
     public string? Server { get; set; }
     public int? Volume { get; set; }
 
@@ -292,6 +304,8 @@ public class ConfigurationService
             {
                 config.Name = name;
             }
+
+            MigrateOutputDelays(_players, _logger);
 
             _logger.LogInformation("Loaded {PlayerCount} players from configuration", _players.Count);
 
@@ -536,6 +550,34 @@ public class ConfigurationService
     // =========================================================================
     // Device Configuration Management
     // =========================================================================
+
+    /// <summary>
+    /// Derives each player's <c>output_delay_ms</c> from config written before the spec alignment.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent: <see cref="PlayerConfiguration.OutputDelayMs"/> having a value is the marker that
+    /// a player is already migrated, so re-running never re-derives it. Deliberately does not force
+    /// a save - the derivation is deterministic from the legacy field, so a player that is never
+    /// written again simply migrates the same way on every load, and the first real delay change
+    /// persists the new field naturally.
+    /// </remarks>
+    internal static void MigrateOutputDelays(Dictionary<string, PlayerConfiguration> players, ILogger logger)
+    {
+        foreach (var (name, config) in players)
+        {
+            var resolved = Utilities.OutputDelay.ResolvePersisted(config.OutputDelayMs, config.DelayMs);
+            var migrating = config.OutputDelayMs == null && config.DelayMs != 0;
+
+            config.OutputDelayMs = resolved;
+            config.DelayMs = 0;
+
+            if (migrating)
+            {
+                logger.LogInformation(
+                    "Migrated player '{Name}' to the spec's output delay: {Resolved}ms", name, resolved);
+            }
+        }
+    }
 
     /// <summary>
     /// Migrates old-format device keys (serial-based) to new-format keys (bus path-based).

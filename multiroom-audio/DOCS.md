@@ -111,7 +111,7 @@ If devices are not appearing:
 
 - **Start/Stop**: Toggle player state
 - **Volume**: Adjust via slider
-- **Delay Offset**: Adjust timing for multi-room sync (milliseconds)
+- **Output Delay**: How much delay your amp or powered speakers add after the zone's output (0-5000ms). Playback is scheduled that much earlier so it lands in sync.
 - **Delete**: Remove player
 
 ### Integration with Music Assistant

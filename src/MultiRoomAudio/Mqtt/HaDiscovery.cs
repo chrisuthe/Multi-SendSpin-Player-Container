@@ -133,12 +133,12 @@ public class HaDiscovery
             // Ready Sensor
             w.WritePropertyName($"{deviceId}_offset");
             w.WriteStartObject();
-            w.WriteString("name", $"{p.Name} Delay Offset");
+            w.WriteString("name", $"{p.Name} Output Delay");
             w.WriteString("unique_id", $"{deviceId}_offset");
             w.WriteString("p", "number");
             w.WriteString("command_topic", _topics.PlayerCommandTopic(p.ClientId, "offset"));
             w.WriteString("value_template", "{{ value_json.delay_ms }}");
-            w.WriteNumber("min", -5000);
+            w.WriteNumber("min", 0);
             w.WriteNumber("max", 5000);
             w.WriteString("unit_of_measurement", "ms");
             w.WriteString("mode", "box");
