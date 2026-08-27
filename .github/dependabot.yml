@@ -1,7 +1,16 @@
 version: 2
+
+# Feature work merges into dev and reaches main only at a release, so version
+# updates target dev to keep the two branches from drifting apart. Bumps that
+# landed straight on main previously conflicted with dev at release time.
+#
+# Note: this file is only read from the default branch (main), and Dependabot
+# SECURITY updates always target the default branch regardless of the setting
+# below - so security PRs will still open against main.
 updates:
   - package-ecosystem: "nuget"
     directory: "/src/MultiRoomAudio"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -16,12 +25,14 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
 
   - package-ecosystem: "docker"
     directory: "/docker"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
