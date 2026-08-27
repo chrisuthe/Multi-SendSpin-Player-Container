@@ -2,5 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/MultiRoomAudio/MultiRoomAudio.csproj" />
   </Folder>
-  <Folder Name="/tests/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/MultiRoomAudio.Tests/MultiRoomAudio.Tests.csproj" />
+  </Folder>
 </Solution>

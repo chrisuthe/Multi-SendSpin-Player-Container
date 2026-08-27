@@ -687,14 +687,15 @@ public sealed class FtdiRelayBoard : IRelayBoard
     /// Get the bit mask for a relay channel, accounting for Denkovi board pin mapping.
     /// </summary>
     /// <param name="channel">Channel number (1-based).</param>
+    /// <param name="channelCount">Number of channels on the board (4 or 8).</param>
     /// <returns>Bit mask for the specified channel.</returns>
     /// <remarks>
     /// Denkovi DAE-CB/Ro8-USB (8-channel): Sequential mapping, relay N uses bit N-1.
     /// Denkovi DAE-CB/Ro4-USB (4-channel): Odd pin mapping, relay N uses bit (2*N - 1).
     /// </remarks>
-    private ushort GetBitMaskForChannel(int channel)
+    internal static ushort GetBitMaskForChannel(int channel, int channelCount)
     {
-        if (_channelCount == 4 && channel >= 1 && channel <= 4)
+        if (channelCount == 4 && channel >= 1 && channel <= 4)
         {
             // 4-channel Denkovi board uses odd pins: D1, D3, D5, D7
             return (ushort)(1 << Denkovi4ChPinMap[channel - 1]);
@@ -725,7 +726,7 @@ public sealed class FtdiRelayBoard : IRelayBoard
             }
 
             // Get the correct bit mask for this channel (handles 4-ch vs 8-ch pin mapping)
-            ushort bit = GetBitMaskForChannel(channel);
+            ushort bit = GetBitMaskForChannel(channel, _channelCount);
 
             ushort newState;
             if (on)
@@ -762,7 +763,7 @@ public sealed class FtdiRelayBoard : IRelayBoard
                 return RelayState.Unknown;
 
             // Use the correct bit mask for this channel (handles 4-ch vs 8-ch pin mapping)
-            ushort bit = GetBitMaskForChannel(channel);
+            ushort bit = GetBitMaskForChannel(channel, _channelCount);
             return (_currentState & bit) != 0 ? RelayState.On : RelayState.Off;
         }
     }
