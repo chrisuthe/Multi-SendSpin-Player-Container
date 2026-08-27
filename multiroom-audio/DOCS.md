@@ -1,29 +1,28 @@
 # Multi-Room Audio Controller
 
 <!-- VERSION_INFO_START -->
-## Latest Release: 5.2.2
+## Latest Release: 5.3.0
 
 
-
-Rolls up everything since 5.2.0 (the 5.2.1 combine-sink fix was never tagged).
 
 ### Highlights
-- **Perceptual volume** — Player volume now follows a cubic taper instead of linear amplitude, so the slider matches how loudness is actually heard. Any given percentage is quieter than before, so raise your players once after upgrading (#263)
-- **Quieter MQTT** — Unchanged retained topics are no longer republished on every state change, cutting the message storm Home Assistant sees (#256)
-- **Multi-sink relay triggers** — A single relay trigger can drive more than one zone (#250)
+- **Hi-res formats reach Music Assistant** — Players advertise the rates and bit depths their DAC can really do, so the per-player format dropdown offers the full list instead of one locked option, and 24-bit audio stops being truncated to 16-bit (#280)
+- **Output delay follows the Sendspin spec** — The delay control is now the spec's Output Delay (0-5000ms). Check any zone you had a delay set on after upgrading (#290)
+- **Silent sound cards recover on their own** — Cards that accept audio while playing nothing are suspended and resumed once at startup, which clears the fault (#281)
 
 ### Added
-- Cubic `VolumeCurve` applied to player gain across all volume paths — UI/API, startup, HID buttons, and server-initiated changes (#263)
-- Retained-payload cache that suppresses byte-identical MQTT republishes, cleared on every reconnect so a restarted broker is re-primed in full (#256)
-- Multiple custom sinks per relay trigger, with a chip-based picker in the main UI and onboarding wizard; legacy single-sink config migrates automatically (#250)
-- Player State advertised as an enum with the full state set so Home Assistant offers the values in automation triggers (#249)
+- Players now advertise everything their DAC can actually do. The list is built from the sound card's probed capabilities - flac entries first, then pcm, then opus, best quality first - instead of the single entry that used to go out. Music Assistant builds its per-player format dropdown from whatever a player advertises, so a one-element list left you with a one-option dropdown and no way to ask for anything else from either side. The **Advertised Format** selector is no longer hidden behind `ENABLE_ADVANCED_FORMATS`, and its options come from the selected device plus "Auto (device native)" (#280)
+- Remap sinks name themselves. Picking a master device and channel mapping prefills both the sink name and the description - `Creative_X_Fi_Analog_Surround_7_1_fl_fr` / "Creative X-Fi Analog Surround 7.1 Front Left Front Right" - instead of leaving PulseAudio to invent "Remapped <card>". Both fields keep regenerating until you type in them, in the main UI and the onboarding wizard alike (#282)
+- Identical sound cards are now tellable apart. Where two cards or devices share a description, the Sound Cards list, the player device dropdowns, the remap master picker and the wizard's device lists append the ALSA card number - "Creative X-Fi Analog Surround 7.1 (card 1)" vs "... (card 4)". Devices with unique names are unchanged (#282)
 
 ### Fixed
-- Combine sinks built from custom remap sinks now reload correctly after an add-on restart. Startup loading is ordered by actual sink dependencies (topological sort) instead of a fixed combine-then-remap order (#247)
-- Stopped sink migration from treating references to other custom sinks as missing hardware, removing a misleading "slave sink not found" warning on startup (#247)
-- A cleared off-delay box no longer fails a trigger save — the delay falls back to its last saved value instead of serializing as `null` and taking the sink assignment down with it in a 400 (#250)
-- UI trigger saves no longer clear a channel's zone name (#271)
-- Benign one-time startup sample discard is no longer reported as a buffer overflow; the ERROR is gated on the SDK's overrun count actually advancing (#233)
+- Hi-res playback is no longer silently truncated to 16-bit. Advertised flac entries left their bit depth unset and the SDK reads a missing depth as 16, so `bit_depth: 16` went out even for a 96kHz/24-bit stream. Every flac and pcm entry now carries an explicit depth taken from the DAC, and players default to 24-bit wherever the card supports it. The advertised rate stays at 48kHz because buffer memory scales with it, so the fix costs LAN bandwidth but no RAM and nobody has to opt in (#280)
+- An output delay set from Home Assistant now survives a restart. Changing a zone's delay over MQTT applied to the running player but was never written to `players.yaml`, so it silently reverted to the old value the next time the add-on started - on an entity Home Assistant presents as configuration. Delays are now saved by whichever path sets them, so the web UI and Home Assistant behave the same
+- Players no longer send an out-of-spec delay to the server. The **Delay Offset** box ran the opposite way to the Sendspin spec - a positive offset meant "play later" and was negated on the way out, so it left as a negative `output_delay_ms`, which the spec does not allow (the range is 0-5000). The knob is now the spec's own **Output Delay**: how much delay your amp or powered speakers add after the zone's output, with playback scheduled that much earlier to absorb it. Out-of-range values are now rejected outright rather than being quietly clamped after the API reported success
+- A rejected delay no longer outlives the player. Setting an offset saved the raw number you sent while the running player used a clamped one, so an out-of-range value could sit in `players.yaml` and load back on the next restart having never been the value in use
+- Sound cards that come up silent now recover on their own. Some cards - notably the Creative X-Fi Titanium - accept audio and report themselves as playing while nothing reaches the speakers, until the sink is suspended and resumed by hand. Each sound card's sink is now suspended and resumed once when the add-on starts, which clears it. If a card ever goes silent again, restarting the add-on cycles it. The underlying fault is a kernel bug, not an add-on one; if the workaround causes trouble, turn off the new **Reset Audio Sinks on Startup** option (#281)
+- The onboarding wizard sees pre-existing custom sinks again. It read `/api/sinks` as a bare array when the endpoint returns `{ sinks, count }`, so the list silently came back empty. Step 4 now offers sinks created before the wizard ran as player targets, and stops offering the hardware devices those sinks already consume as master or slave
+- Custom sink descriptions keep their spaces. They used to reach Home Assistant with underscores ("Front_Left_Front_Right") because PulseAudio's proplist parser rejected the unquoted value; quoting it twice gets it through intact. A description of only quote characters also no longer fails sink creation outright (#282)
 
 [View full changelog](https://github.com/chrisuthe/Multi-SendSpin-Player-Container/blob/main/multiroom-audio/CHANGELOG.md)
 <!-- VERSION_INFO_END -->
