@@ -302,6 +302,21 @@ public sealed class LcusRelayBoard : IRelayBoard
         }
     }
 
+    /// <summary>
+    /// Build an LCUS relay command frame: [0xA0][Channel][Operation][Checksum].
+    /// </summary>
+    /// <param name="channel">Channel number (1-based).</param>
+    /// <param name="on">True to turn the relay on, false to turn it off.</param>
+    /// <returns>The four-byte command frame.</returns>
+    internal static byte[] BuildCommand(int channel, bool on)
+    {
+        byte channelByte = (byte)channel;
+        byte operationByte = on ? (byte)0x01 : (byte)0x00;
+        byte checksum = (byte)((CommandPrefix + channelByte + operationByte) & 0xFF);
+
+        return new byte[] { CommandPrefix, channelByte, operationByte, checksum };
+    }
+
     /// <inheritdoc />
     public bool SetRelay(int channel, bool on)
     {
@@ -321,12 +336,7 @@ public sealed class LcusRelayBoard : IRelayBoard
 
             try
             {
-                // Build LCUS command: [0xA0][Channel][Operation][Checksum]
-                byte channelByte = (byte)channel;
-                byte operationByte = on ? (byte)0x01 : (byte)0x00;
-                byte checksum = (byte)((CommandPrefix + channelByte + operationByte) & 0xFF);
-
-                var command = new byte[] { CommandPrefix, channelByte, operationByte, checksum };
+                var command = BuildCommand(channel, on);
 
                 _serialPort.Write(command, 0, command.Length);
                 Thread.Sleep(CommandDelayMs);
