@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-7599a6c
+## Development Build: sha-0dea67d
 
 **Current Dev Build Changes** (recent)
 
+- Test suite audit: remove dead E2E tests, run CI on dev, cover relay protocols (#292)
 - fix: persist an output delay set over MQTT (#291)
 - fix: align player output delay with the spec's 0-5000 range (#290)
 - chore: upgrade SendSpin.SDK 9.2.0 -> 9.3.0 (#289)
@@ -13,7 +14,6 @@
 - Fix default.pa import losing sink descriptions with spaces (#286)
 - Standardize remap sink naming and disambiguate duplicate sound cards (#283)
 - chore: upgrade SendSpin.SDK 9.1.0 -> 9.2.0
-- style: satisfy dotnet format on merged MQTT changes
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
