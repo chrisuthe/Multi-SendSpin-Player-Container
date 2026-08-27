@@ -1,10 +1,11 @@
 # Multi-Room Audio (Dev)
 
 <!-- VERSION_INFO_START -->
-## Development Build: sha-9875a0e
+## Development Build: sha-7599a6c
 
 **Current Dev Build Changes** (recent)
 
+- fix: persist an output delay set over MQTT (#291)
 - fix: align player output delay with the spec's 0-5000 range (#290)
 - chore: upgrade SendSpin.SDK 9.2.0 -> 9.3.0 (#289)
 - Advertise real DAC sample rates and bit depths to Music Assistant (#288)1
@@ -13,7 +14,6 @@
 - Standardize remap sink naming and disambiguate duplicate sound cards (#283)
 - chore: upgrade SendSpin.SDK 9.1.0 -> 9.2.0
 - style: satisfy dotnet format on merged MQTT changes
-- Merge dev into main for v5.2.2 release
 
 > WARNING: This is a development build. For stable releases, use the stable add-on.
 <!-- VERSION_INFO_END -->
