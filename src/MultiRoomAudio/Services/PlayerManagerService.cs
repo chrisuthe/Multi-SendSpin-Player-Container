@@ -1089,8 +1089,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
     private void InitializeAndConnectPlayer(string name, PlayerContext context, int delayMs)
     {
         // Apply startup volume locally - player is authoritative for its own volume
-        // Hardware volume is set to 80% on container startup to avoid clipping
-        context.Player.Volume = VolumeCurve.ToGain(context.Config.Volume);
+        // Hardware volume is set to 80% on container startup to avoid clipping.
+        // The pipeline owns the gain: it stores the level and re-applies it on every stream start.
+        context.Pipeline.SetVolume(context.Config.Volume);
         _logger.LogInformation("VOLUME [Create] Player '{Name}': startup volume {Volume}% applied locally",
             name, context.Config.Volume);
 
@@ -1434,8 +1435,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         // 1. Update local config (always)
         context.Config.Volume = volume;
 
-        // 2. Apply volume locally - player is authoritative for its own volume
-        context.Player.Volume = VolumeCurve.ToGain(volume);
+        // 2. Apply volume locally - player is authoritative for its own volume.
+        // Go through the pipeline so its stored level (re-applied on every stream start) stays in sync.
+        context.Pipeline.SetVolume(volume);
 
         // 3. Inform MA of our volume (command + state echo)
         if (IsPlayerInActiveState(context.State))
@@ -1543,8 +1545,9 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
         // 1. Update local config
         context.Config.Volume = volume;
 
-        // 2. Apply volume locally - player is authoritative for its own volume
-        context.Player.Volume = VolumeCurve.ToGain(volume);
+        // 2. Apply volume locally - player is authoritative for its own volume.
+        // Go through the pipeline so its stored level (re-applied on every stream start) stays in sync.
+        context.Pipeline.SetVolume(volume);
 
         // 3. Inform MA of our volume
         if (IsPlayerInActiveState(context.State))
@@ -2995,6 +2998,10 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                         "VOLUME [GracePeriod] Player '{Name}': ignoring MA volume {NewVol}% (within grace period, keeping startup volume {OldVol}%, {Remaining:F1}s remaining)",
                         name, serverVolume, context.Config.Volume, gracePeriodRemaining.TotalSeconds);
 
+                    // The SDK has already applied MA's level to the pipeline before raising this
+                    // event, so undo it or the output would disagree with the volume we keep.
+                    context.Pipeline.SetVolume(context.Config.Volume);
+
                     // Push our startup volume back to MA aggressively
                     FireAndForget(async () =>
                     {
@@ -3026,7 +3033,7 @@ public class PlayerManagerService : IAsyncDisposable, IDisposable
                 context.Config.Volume = serverVolume;
 
                 // Apply volume locally - player is authoritative for its own volume
-                context.Player.Volume = VolumeCurve.ToGain(serverVolume);
+                context.Pipeline.SetVolume(serverVolume);
 
                 // Note: SDK 5.4.0 auto-acknowledges by sending client/state,
                 // so we don't need to call SendPlayerStateAsync manually
