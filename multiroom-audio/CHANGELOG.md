@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Volume no longer jumps up after a pause, stop or track skip, and Music Assistant's slider no longer needs to be nudged to correct it (#305). The container and the SDK each set the player's gain with a different curve (cubic vs. `(v/100)^1.5`), and the SDK re-applied its own on every stream start. The audio pipeline is now the single owner of the volume: every path (UI/API, HID buttons, startup, server changes) hands it the 0-100 value, and it is re-applied unchanged on each stream start
+
+### Changed
+- Volume follows the Sendspin spec's perceptual curve `(v/100)^1.5`, applied by the SDK, instead of the container's own cubic taper from #263 (removed). At the same slider position output is louder than in 5.2.2-5.3.0 (+9 dB at 50%), which is the level that was already heard after every pause or skip
+
 ## [5.3.0] - Output Delay Spec, Hi-Res Formats & Silent Card Recovery
 
 ### Highlights
